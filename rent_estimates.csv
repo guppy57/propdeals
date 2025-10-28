@@ -4,8 +4,8 @@ address_1,unit_num,beds,baths,rent_estimate
 1514 Harrison Ave,3,2,1,995
 1175 21st St,1,2,1,975
 1175 21st St,2,4,2,2173
-1429 Martin Luther King Jr Pkwy,1,3,1,1370
-1429 Martin Luther King Jr Pkwy,2,2,1,1100
+1429 MLK Jr Pkwy,1,3,1,1370
+1429 MLK Jr Pkwy,2,2,1,1100
 1206 39th St,1,2,2,1150
 1206 39th St,2,2,1,1100
 401 Franklin Ave,1,2,2,1147
@@ -22,6 +22,6 @@ address_1,unit_num,beds,baths,rent_estimate
 1148 36th St,2,1,1,825
 1148 36th St,3,2,1,925
 1148 36th St,4,2,1,925
-123 Fuller Ave,1,3,2,500
-123 Fuller Ave,2,3,2,500
-123 Fuller Ave,3,3,2,500
+3900 11th St,1,2,2,1125
+3900 11th St,2,2,2,1125
+3900 11th St,3,2,2,1125

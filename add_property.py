@@ -138,7 +138,7 @@ def display_rent_comps(rent_comps):
   
   console.print(table)
 
-def add_rent_comps(property_details, rent_comps, unit_living_in):
+def add_rent_comps_to_sheet(property_details, rent_comps, unit_living_in):
   prop = wb[property_details["address1"]]
   prop["B43"] = unit_living_in
 
@@ -154,6 +154,14 @@ def add_rent_comps(property_details, rent_comps, unit_living_in):
     prop[f"B{row}"] = f"{comp["beds"]}-beds {comp["baths"]}-baths" 
     prop[f"C{row}"] = int(comp["rent"])
 
+def add_rent_comps_to_csv(property_details, rent_comps):
+  with open('./rent_estimates.csv', 'a', newline='') as csvfile:
+    writer = csv.writer(csvfile)
+    for comp in rent_comps:
+      writer.writerow([property_details["address1"], int(comp["unit_num"]) + 1, comp["beds"], comp["beds"], comp["rent"]])
+
+# --------------------------------------------------------
+
 console.print(Panel("Let's add a new property to analyze"), style="bold red")
 proceed = False
 
@@ -163,8 +171,6 @@ while not proceed:
   proceed = questionary.confirm("Does everything look correct?").ask()
   if not proceed:
     console.print("Add the property details again", style="bold blue")
-
-property_details = get_test_data()
 
 add_property_sheet(property_details)
 add_property_to_csv(property_details)
@@ -187,7 +193,8 @@ for i in rent_comps:
   available_units.append(f"Unit {i["unit_num"] + 1}")
 
 unit_living_in = questionary.select("Unit living in", choices=available_units).ask()
-add_rent_comps(property_details, rent_comps, unit_living_in)
+add_rent_comps_to_sheet(property_details, rent_comps, unit_living_in)
+add_rent_comps_to_csv(property_details, rent_comps)
 
 wb.save(EXCEL_FILE_PATH)
 wb.close()

@@ -1,5 +1,7 @@
 appreciation_rate: 0.02
 property_tax_rate: 0.01565
+home_insurance_rate: 0.02
 vacancy_rate: 0.0833
 repair_savings_rate: 0.05
 closing_costs_rate: 0.04
+unit_living_in: "cheapest"
