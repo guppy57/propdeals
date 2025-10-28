@@ -5,7 +5,8 @@ from openpyxl import load_workbook
 import questionary
 import csv
 
-EXCEL_FILE_PATH = "/Users/armaangupta/Documents/Repositories/propdeals/Real Estate Investing.xlsx"
+EXCEL_FILE_PATH = "./Real Estate Investing.xlsx"
+PROPERTIES_CSV_PATH = "./properties.csv"
 
 console = Console()
 wb = load_workbook(EXCEL_FILE_PATH)
@@ -21,7 +22,6 @@ def collect_property_details():
     beds = questionary.text("Bedrooms").ask()
     baths = questionary.text("Bathrooms").ask()
     square_ft = questionary.text("Square footage").ask()
-    lot_size = questionary.text("Lot size", default="0").ask()
     built_in = questionary.text("Year built").ask()
 
     address1 = full_address.split(",")[0]
@@ -45,7 +45,6 @@ def collect_property_details():
       "beds": int(beds),
       "baths": int(baths),
       "square_ft": int(square_ft),
-      "lot_size": int(lot_size),
       "built_in": int(built_in),
       "units": units
     }
@@ -59,7 +58,6 @@ def get_test_data():
         "beds": int("3"),
         "baths": int("2"),
         "square_ft": int("2450"),
-        "lot_size": int("0"),
         "built_in": int("1909"),
         "units": 3,
     }
@@ -83,8 +81,22 @@ def add_property_sheet(property_details):
     prop["B4"] = property_details["square_ft"]
     prop["B5"] = property_details["beds"]
     prop["B6"] = property_details["baths"]
-    prop["B7"] = property_details["lot_size"]
     prop["B8"] = property_details["built_in"]
+
+def add_property_to_csv(property_details):
+  with open(PROPERTIES_CSV_PATH, 'a', newline='') as csvfile:
+    writer = csv.writer(csvfile)
+    writer.writerow([
+      property_details["address1"],
+      property_details["full_address"],
+      property_details["zillow_link"],
+      property_details["purchase_price"],
+      property_details["beds"],
+      property_details["baths"],
+      property_details["square_ft"],
+      property_details["built_in"],
+      property_details["units"]
+    ])
 
 def edit_master_sheet(property_details):
     master = wb["Master"]
@@ -97,7 +109,7 @@ def collect_rent_comps(unit_count):
   units_compared = 0
 
   while units_compared < unit_count:
-    beds = questionary.text("Bedrooms").ask()
+    beds = questionary.text("Bedrooms (0 for Studio)").ask()
     baths = questionary.text("Bathrooms").ask()
     num_units = questionary.text("Number of units like this", default="1").ask()
     rent = questionary.text("Rent").ask()
@@ -155,6 +167,7 @@ while not proceed:
 property_details = get_test_data()
 
 add_property_sheet(property_details)
+add_property_to_csv(property_details)
 edit_master_sheet(property_details)
 
 proceed2 = False
