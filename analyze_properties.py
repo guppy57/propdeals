@@ -85,7 +85,8 @@ df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
 df["monthly_fixed_costs"] = df["monthly_mortgage"] + df["monthly_mip"] + df["monthly_taxes"] + df["monthly_insurance"]
 df["monthly_vacancy_costs"] = df["monthly_fixed_costs"] * vacancy_rate
 df["monthly_repair_costs"] = df["monthly_fixed_costs"] * repair_savings_rate
-df["total_monthly_cost"] = df["monthly_fixed_costs"] + df["monthly_repair_costs"] + df["monthly_vacancy_costs"]
+df["operating_expenses"] = df["monthly_vacancy_costs"] + df["monthly_repair_costs"] + df["monthly_taxes"] + df["monthly_insurance"]
+df["total_monthly_cost"] = df["monthly_mortgage"] + df["monthly_mip"] + df["operating_expenses"]
 df["cash_needed"] = df["closing_costs"] + df["down_payment"]
 
 # third, calculate cash flow variables for analysis
@@ -114,13 +115,15 @@ df["cap_rate_y1"] = df["annual_cash_flow_y1"] / df["purchase_price"]
 df["cap_rate_y2"] = df["annual_cash_flow_y2"] / df["purchase_price"]
 df["CoC_y1"] = df["annual_cash_flow_y1"] / df["cash_needed"]
 df["CoC_y2"] = df["annual_cash_flow_y2"] / df["cash_needed"]
-
-# Gross Rent Multiplier (lower = better)
-df["GRM_y1"] = df["purchase_price"] / df["annual_rent_y1"]
+df["GRM_y1"] = df["purchase_price"] / df["annual_rent_y1"] # Gross Rent Multiplier (lower = better)
 df["GRM_y2"] = df["purchase_price"] / df["annual_rent_y2"]
+df["MGR_PP"] = df["total_rent"] / df["purchase_price"] # Monthly Gross Rent : Purchase Price, goal is for it to be greater than 0.01
+df["OpEx_Rent"] = df["operating_expenses"] / df["total_rent"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
+df["DSCR"] = df["total_rent"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
 
-def display_all_properties():
+def display_all_properties(properties_df):
     """Display all properties in a formatted Rich table"""
+    dataframe = df if properties_df is None else properties_df
     table = Table(title="Property Analysis - FHA Loan Scenario", show_header=True, header_style="bold magenta")
     
     # Add columns with proper alignment
@@ -136,7 +139,7 @@ def display_all_properties():
     table.add_column("GRM Y1", justify="right", style="orange3")
     
     # Add rows for each property
-    for _, row in df.iterrows():
+    for _, row in dataframe.iterrows():
         # Determine cash flow colors
         cf_y1_style = "red" if row['monthly_cash_flow_y1'] < 0 else "green"
         cf_y2_style = "red" if row['monthly_cash_flow_y2'] < 0 else "green"
@@ -155,6 +158,10 @@ def display_all_properties():
         )
     
     console.print(table)
+
+# displays all properties that match our dealflow analysis strict criteria
+def display_all_qualifying_properties():
+  display_all_properties(properties_df=df)
 
 using_application = True
 
@@ -273,7 +280,8 @@ while using_application:
   if option == "Quit":
     using_application = False
   elif option == "All properties (FHA)":
-    display_all_properties()
+    display_all_properties(properties_df=None)
+    display_all_qualifying_properties()
   elif option == "All properties (conventional)":
     # TODO at some point
     pass
