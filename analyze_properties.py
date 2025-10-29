@@ -415,16 +415,14 @@ def analyze_property(property_id):
 
 
 while using_application:
-  option = questionary.select("What would you like to analyze?", choices=['All properties (FHA)', 'One property', "Quit"]).ask()
+  option = questionary.select("What would you like to analyze?", choices=['All properties', 'Phase 1 Qualifiers', 'One property', "Quit"]).ask()
 
   if option == "Quit":
     using_application = False
-  elif option == "All properties (FHA)":
+  elif option == "All properties":
     display_all_properties(properties_df=None, title="Property Analysis - FHA Loan Scenario")
+  elif option == "Phase 1 Qualifiers":
     display_all_qualifying_properties()
-  elif option == "All properties (conventional)":
-    # TODO at some point
-    pass
   elif option == "One property":
     property_ids = []
     with open('properties.csv', 'r') as csvfile:
