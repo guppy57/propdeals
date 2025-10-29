@@ -2,6 +2,11 @@ import pandas as pd
 import questionary
 import yaml
 import csv
+from rich.console import Console 
+from rich.table import Table
+from rich.panel import Panel
+
+console = Console() 
 
 with open('assumptions.yaml', 'r') as file:
   assumptions = yaml.safe_load(file)
@@ -33,7 +38,7 @@ df = pd.read_csv('properties.csv')
 df = df.drop(["zillow_link", "full_address"], axis=1)
 
 def calculate_mortgage(principal, annual_rate, years):
-  monthly_rate = annual_rate / 12 / 100
+  monthly_rate = annual_rate / 12
   num_payments = years * 12
 
   monthly_payment = (
@@ -79,10 +84,10 @@ df = df.merge(rent_summary, on="address1", how="left")
 df["annual_rent_y1"] = df["net_rent_y1"] * 12
 df["annual_rent_y2"] = df["total_rent"] * 12
 
-df["annual_cash_flow_y1"] = df["net_rent_y1"] - df["total_monthly_cost"]
-df["annual_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost"]
-df["monthly_cash_flow_y1"] = df["annual_cash_flow_y1"] / 12
-df["monthly_cash_flow_y2"] = df["annual_cash_flow_y2"] / 12
+df["monthly_cash_flow_y1"] = df["net_rent_y1"] - df["total_monthly_cost"]
+df["monthly_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost"]
+df["annual_cash_flow_y1"] = df["monthly_cash_flow_y1"] * 12
+df["annual_cash_flow_y2"] = df["monthly_cash_flow_y2"] * 12
 
 # fourth, calculate investment metrics
 df["cap_rate_y1"] = df["annual_cash_flow_y1"] / df["purchase_price"]
@@ -96,6 +101,10 @@ df["GRM_y2"] = df["purchase_price"] / df["annual_rent_y2"]
 
 using_application = True
 
+def analyze_property(property_id):
+  row = df[df['address1'] == property_id].iloc[0]
+  print(row)
+
 while using_application:
   option = questionary.select("What would you like to analyze?", choices=['All properties (FHA)', 'One property', "Quit"]).ask()
 
@@ -104,6 +113,8 @@ while using_application:
   elif option == "All properties (FHA)":
     # print(df.to_string(index=False))
     print(df.head())
+    print(df[['purchase_price', 'cash_needed', 'monthly_cash_flow_y1']].describe())
+    # console.print(Panel())
     pass
   elif option == "All properties (conventional)":
     # TODO at some point
@@ -115,3 +126,4 @@ while using_application:
       for row in properties_reader:
         property_ids.append(row["address1"])
     property_id = questionary.select("Select property", choices=property_ids).ask()
+    analyze_property(property_id)
