@@ -99,6 +99,9 @@ def deal_score_property(row):
     
     return score
 
+def neighborhood_score_property(row):
+  pass
+
 # get all per_property calculations completed 
 # first, property-only calculations
 df["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
