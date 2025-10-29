@@ -69,6 +69,36 @@ def calculate_mortgage(principal, annual_rate, years):
 
   return monthly_payment
 
+def deal_score_property(row):
+    score = 0
+    
+    # 1. Cash Flow Performance (0-4 points)
+    score += (3 if row["monthly_cash_flow_y2"] > 500 else 
+              2 if row["monthly_cash_flow_y2"] > 300 else 
+              1 if row["monthly_cash_flow_y2"] > 100 else 0)
+    score += (1 if row["monthly_cash_flow_y1"] > 0 else 0)  # House-hacking bonus
+    
+    # 2. Return Metrics (0-4 points)  
+    score += (3 if row["CoC_y2"] > 0.15 else 
+              2 if row["CoC_y2"] > 0.12 else 
+              1 if row["CoC_y2"] > 0.08 else 0)
+    score += (1 if row["cap_rate_y2"] > 0.06 else 0)
+    
+    # 3. Key Investment Rules (0-6 points)
+    score += (2 if row["MGR_PP"] >= 0.01 else 1 if row["MGR_PP"] >= 0.008 else 0)  # 1% rule
+    score += (2 if 0.4 <= row["OpEx_Rent"] <= 0.6 else 1 if 0.3 <= row["OpEx_Rent"] <= 0.7 else 0)  # 50% rule  
+    score += (2 if row["DSCR"] >= 1.25 else 1 if row["DSCR"] >= 1.1 else 0)
+    
+    # 4. Affordability & Risk (0-3 points)
+    score += (2 if row["cash_needed"] < 20000 else 1 if row["cash_needed"] < 30000 else 0)
+    score += (1 if row["GRM_y2"] < 12 else 0)  # Lower GRM is better
+    
+    # 5. Property Quality (0-3 points)
+    score += (2 if row["cost_per_sqrft"] < 100 else 1 if row["cost_per_sqrft"] < 150 else 0)
+    score += (1 if row["home_age"] < 20 else 0)
+    
+    return score
+
 # get all per_property calculations completed 
 # first, property-only calculations
 df["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
@@ -78,15 +108,11 @@ df["home_age"] = 2025 - df["built_in"]
 df["closing_costs"] = df["purchase_price"] * closing_costs_rate
 df["down_payment"] = df["purchase_price"] * down_payment_rate
 df["loan_amount"] = df["purchase_price"] - df["down_payment"] + (df["purchase_price"] * mip_upfront_rate)
+
 df["monthly_mortgage"] = df["loan_amount"].apply(lambda x: calculate_mortgage(x, interest_rate, loan_length_years))
 df["monthly_mip"] = (df["loan_amount"] * mip_annual_rate) / 12
 df["monthly_taxes"] = (df["purchase_price"] * property_tax_rate) / 12
 df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
-df["monthly_fixed_costs"] = df["monthly_mortgage"] + df["monthly_mip"] + df["monthly_taxes"] + df["monthly_insurance"]
-df["monthly_vacancy_costs"] = df["monthly_fixed_costs"] * vacancy_rate
-df["monthly_repair_costs"] = df["monthly_fixed_costs"] * repair_savings_rate
-df["operating_expenses"] = df["monthly_vacancy_costs"] + df["monthly_repair_costs"] + df["monthly_taxes"] + df["monthly_insurance"]
-df["total_monthly_cost"] = df["monthly_mortgage"] + df["monthly_mip"] + df["operating_expenses"]
 df["cash_needed"] = df["closing_costs"] + df["down_payment"]
 
 # third, calculate cash flow variables for analysis
@@ -105,14 +131,24 @@ df = df.merge(rent_summary, on="address1", how="left")
 df["annual_rent_y1"] = df["net_rent_y1"] * 12
 df["annual_rent_y2"] = df["total_rent"] * 12
 
+df["monthly_vacancy_costs"] = df["total_rent"] * vacancy_rate
+df["monthly_repair_costs"] = df["total_rent"] * repair_savings_rate
+df["operating_expenses"] = df["monthly_vacancy_costs"] + df["monthly_repair_costs"] + df["monthly_taxes"] + df["monthly_insurance"]
+df["total_monthly_cost"] = df["monthly_mortgage"] + df["monthly_mip"] + df["operating_expenses"]
+
+# Net Operating Income (NOI) - this is what you use for cap rate
+df["monthly_NOI"] = df["total_rent"] - df["operating_expenses"]
+df["annual_NOI_y1"] = (df["net_rent_y1"] - df["operating_expenses"]) * 12
+df["annual_NOI_y2"] = df["monthly_NOI"] * 12
+
 df["monthly_cash_flow_y1"] = df["net_rent_y1"] - df["total_monthly_cost"]
 df["monthly_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost"]
 df["annual_cash_flow_y1"] = df["monthly_cash_flow_y1"] * 12
 df["annual_cash_flow_y2"] = df["monthly_cash_flow_y2"] * 12
 
 # fourth, calculate investment metrics
-df["cap_rate_y1"] = df["annual_cash_flow_y1"] / df["purchase_price"]
-df["cap_rate_y2"] = df["annual_cash_flow_y2"] / df["purchase_price"]
+df["cap_rate_y1"] = df["annual_NOI_y1"] / df["purchase_price"]
+df["cap_rate_y2"] = df["annual_NOI_y2"] / df["purchase_price"]
 df["CoC_y1"] = df["annual_cash_flow_y1"] / df["cash_needed"]
 df["CoC_y2"] = df["annual_cash_flow_y2"] / df["cash_needed"]
 df["GRM_y1"] = df["purchase_price"] / df["annual_rent_y1"] # Gross Rent Multiplier (lower = better)
@@ -121,28 +157,49 @@ df["MGR_PP"] = df["total_rent"] / df["purchase_price"] # Monthly Gross Rent : Pu
 df["OpEx_Rent"] = df["operating_expenses"] / df["total_rent"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
 df["DSCR"] = df["total_rent"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
 
-def display_all_properties(properties_df):
+# fifth, calculate property scores
+df["deal_score"] = df.apply(deal_score_property, axis=1)
+
+def display_all_properties(properties_df, title):
     """Display all properties in a formatted Rich table"""
     dataframe = df if properties_df is None else properties_df
-    table = Table(title="Property Analysis - FHA Loan Scenario", show_header=True, header_style="bold magenta")
+    table = Table(title=title, show_header=True, header_style="bold magenta")
     
     # Add columns with proper alignment
     table.add_column("Address", style="cyan", no_wrap=True)
-    table.add_column("Purchase Price", justify="right", style="green")
+    table.add_column("Price", justify="right", style="green")
     table.add_column("Cash Needed", justify="right", style="yellow")
-    table.add_column("Costs/Month", justify="right", style="yellow")
-    table.add_column("Monthly CF Y1", justify="right", style="red" if df['monthly_cash_flow_y1'].iloc[0] < 0 else "green")
-    table.add_column("Monthly CF Y2", justify="right", style="red" if df['monthly_cash_flow_y2'].iloc[0] < 0 else "green")
-    table.add_column("Cap Rate Y1", justify="right", style="blue")
-    table.add_column("Cap Rate Y2", justify="right", style="blue")
-    table.add_column("CoC Y1", justify="right", style="purple")
+    table.add_column("Costs/mo", justify="right", style="yellow")
+    table.add_column("CF/mo Y1", justify="right", style="red" if df['monthly_cash_flow_y1'].iloc[0] < 0 else "green")
+    table.add_column("CF/mo Y2", justify="right", style="red" if df['monthly_cash_flow_y2'].iloc[0] < 0 else "green")
+    table.add_column("NOI Y2", justify="right", style="yellow")
+    table.add_column("CapR Y1", justify="right", style="blue")
+    table.add_column("CapR Y2", justify="right", style="blue")
+    table.add_column("CoC Y2", justify="right", style="purple")
     table.add_column("GRM Y1", justify="right", style="orange3")
+    table.add_column("1% Rule", justify="right", style="cyan")
+    table.add_column("50% Rule", justify="right", style="magenta")
+    table.add_column("DSCR", justify="right", style="blue")
+    table.add_column("Deal", justify="right", style="bold white")
     
     # Add rows for each property
     for _, row in dataframe.iterrows():
         # Determine cash flow colors
         cf_y1_style = "red" if row['monthly_cash_flow_y1'] < 0 else "green"
         cf_y2_style = "red" if row['monthly_cash_flow_y2'] < 0 else "green"
+
+        # net operating income color
+        noi_style = "red" if row["monthly_NOI"] < 0 else "green"
+        
+        # Determine metric colors based on goals
+        mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
+        opex_rent_style = "green" if 0.45 <= row['OpEx_Rent'] <= 0.55 else ("yellow" if 0.35 <= row['OpEx_Rent'] <= 0.65 else "red")
+        dscr_style = "green" if row['DSCR'] >= 1.25 else "red"
+        
+        # Deal score color coding (20-point scale)
+        deal_score_style = ("green" if row['deal_score'] >= 15 else 
+                            "yellow" if row['deal_score'] >= 12 else 
+                            "red")
         
         table.add_row(
             str(row['address1']),
@@ -151,17 +208,36 @@ def display_all_properties(properties_df):
             format_currency(row['total_monthly_cost']),
             f"[{cf_y1_style}]{format_currency(row['monthly_cash_flow_y1'])}[/{cf_y1_style}]",
             f"[{cf_y2_style}]{format_currency(row['monthly_cash_flow_y2'])}[/{cf_y2_style}]",
+            f"[{noi_style}]{format_currency(row['monthly_NOI'])}[/{noi_style}]",
             format_percentage(row['cap_rate_y1']),
             format_percentage(row['cap_rate_y2']),
-            format_percentage(row['CoC_y1']),
-            format_number(row['GRM_y1'])
+            format_percentage(row['CoC_y2']),
+            format_number(row['GRM_y1']),
+            f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
+            f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
+            f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
+            f"[{deal_score_style}]{int(row['deal_score'])}/20[/{deal_score_style}]"
         )
     
     console.print(table)
 
 # displays all properties that match our dealflow analysis strict criteria
 def display_all_qualifying_properties():
-  display_all_properties(properties_df=df)
+    """
+    This method filters all properties based on our criteria for what is a financially viable property
+    Current criteria:
+      - 1% rule (monthly gross rent must be 1% or more of purchase price)
+      - 50% rule (operating expenses must be 50% or lower than gross rent)
+      - Cash needed must be below $25,000
+      - Debt Service Coverage Ratio should be above 1.25
+    """
+    filtered_df = df.copy()
+    filtered_df = filtered_df.query(
+        "MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400"
+    )
+    display_all_properties(
+        properties_df=filtered_df, title="Phase 1 Criteria Qualifying Properties"
+    )
 
 using_application = True
 
@@ -225,7 +301,12 @@ def analyze_property(property_id):
                       f"Total Monthly Rent (All Units): {format_currency(row['total_rent'])}\n"
                       f"Your Unit Rent (Not Collected): {format_currency(row['min_rent'])}\n"
                       f"[bold]Net Monthly Income (Year 1): {format_currency(row['net_rent_y1'])}[/bold]\n"
-                      f"[bold]Full Rental Income (Year 2): {format_currency(row['total_rent'])}[/bold]", 
+                      f"[bold]Full Rental Income (Year 2): {format_currency(row['total_rent'])}[/bold]\n\n"
+                      f"[bold yellow]Operating Expenses:[/bold yellow]\n"
+                      f"Monthly Operating Expenses: {format_currency(row['operating_expenses'])} ({format_currency(row['operating_expenses'] * 12)} annually)\n\n"
+                      f"[bold green]Net Operating Income (NOI):[/bold green]\n"
+                      f"NOI Year 1 (Live-in): {format_currency(row['net_rent_y1'] - row['operating_expenses'])} ({format_currency(row['annual_NOI_y1'])} annually)\n"
+                      f"NOI Year 2 (All Rent): {format_currency(row['monthly_NOI'])} ({format_currency(row['annual_NOI_y2'])} annually)", 
                       title="Income Breakdown"))
     
     # Financial metrics table
@@ -248,7 +329,61 @@ def analyze_property(property_id):
                   format_currency(row['annual_rent_y1']),
                   format_currency(row['annual_rent_y2']))
     
+    # Add new metrics with color coding
+    mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
+    opex_rent_style = "green" if 0.45 <= row['OpEx_Rent'] <= 0.55 else ("yellow" if 0.35 <= row['OpEx_Rent'] <= 0.65 else "red")
+    dscr_style = "green" if row['DSCR'] >= 1.25 else "red"
+    
+    table.add_row("1% Rule (MGR/PP)",
+                  f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
+                  f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]")
+    table.add_row("50% Rule (OpEx/Rent)",
+                  f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
+                  f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]")
+    table.add_row("DSCR (Rent/Mortgage)",
+                  f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
+                  f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]")
+    
     console.print(table)
+    
+    # Investment Criteria Scoring Table
+    criteria_table = Table(title="Investment Criteria Breakdown", show_header=True, header_style="bold magenta")
+    criteria_table.add_column("Criteria", style="yellow", width=25)
+    criteria_table.add_column("Score", justify="right", style="white", width=8)
+    criteria_table.add_column("Max", justify="right", style="dim white", width=5)
+    criteria_table.add_column("Details", style="dim cyan")
+    
+    # Calculate individual component scores for display
+    cf_y2_score = (3 if row["monthly_cash_flow_y2"] > 500 else 2 if row["monthly_cash_flow_y2"] > 300 else 1 if row["monthly_cash_flow_y2"] > 100 else 0)
+    cf_y1_bonus = (1 if row["monthly_cash_flow_y1"] > 0 else 0)
+    coc_score = (3 if row["CoC_y2"] > 0.15 else 2 if row["CoC_y2"] > 0.12 else 1 if row["CoC_y2"] > 0.08 else 0)
+    cap_score = (1 if row["cap_rate_y2"] > 0.06 else 0)
+    mgr_score = (2 if row["MGR_PP"] >= 0.01 else 1 if row["MGR_PP"] >= 0.008 else 0)
+    opex_score = (2 if 0.4 <= row["OpEx_Rent"] <= 0.6 else 1 if 0.3 <= row["OpEx_Rent"] <= 0.7 else 0)
+    dscr_score = (2 if row["DSCR"] >= 1.25 else 1 if row["DSCR"] >= 1.1 else 0)
+    cash_score = (2 if row["cash_needed"] < 20000 else 1 if row["cash_needed"] < 30000 else 0)
+    grm_score = (1 if row["GRM_y2"] < 12 else 0)
+    sqft_score = (2 if row["cost_per_sqrft"] < 100 else 1 if row["cost_per_sqrft"] < 150 else 0)
+    age_score = (1 if row["home_age"] < 20 else 0)
+    
+    # Deal score color
+    deal_score_style = ("green" if row['deal_score'] >= 15 else "yellow" if row['deal_score'] >= 12 else "red")
+    
+    criteria_table.add_row("Cash Flow Y2", f"[white]{cf_y2_score}[/white]", "3", f"${row['monthly_cash_flow_y2']:.0f}/month")
+    criteria_table.add_row("Cash Flow Y1 Bonus", f"[white]{cf_y1_bonus}[/white]", "1", f"${row['monthly_cash_flow_y1']:.0f}/month")
+    criteria_table.add_row("Cash-on-Cash Return", f"[white]{coc_score}[/white]", "3", f"{row['CoC_y2']:.1%}")
+    criteria_table.add_row("Cap Rate", f"[white]{cap_score}[/white]", "1", f"{row['cap_rate_y2']:.1%}")
+    criteria_table.add_row("1% Rule", f"[white]{mgr_score}[/white]", "2", f"{row['MGR_PP']:.2%}")
+    criteria_table.add_row("50% Rule", f"[white]{opex_score}[/white]", "2", f"{row['OpEx_Rent']:.1%}")
+    criteria_table.add_row("DSCR", f"[white]{dscr_score}[/white]", "2", f"{row['DSCR']:.2f}")
+    criteria_table.add_row("Cash Needed", f"[white]{cash_score}[/white]", "2", f"${row['cash_needed']:,.0f}")
+    criteria_table.add_row("GRM", f"[white]{grm_score}[/white]", "1", f"{row['GRM_y2']:.1f}")
+    criteria_table.add_row("Cost per Sqft", f"[white]{sqft_score}[/white]", "2", f"${row['cost_per_sqrft']:.0f}")
+    criteria_table.add_row("Property Age", f"[white]{age_score}[/white]", "1", f"{row['home_age']:.0f} years")
+    criteria_table.add_row("[bold]TOTAL SCORE[/bold]", f"[bold {deal_score_style}]{int(row['deal_score'])}[/bold {deal_score_style}]", "[bold]20[/bold]", 
+                          f"[bold {deal_score_style}]{'Excellent' if row['deal_score'] >= 15 else 'Good' if row['deal_score'] >= 12 else 'Poor'}[/bold {deal_score_style}]")
+    
+    console.print(criteria_table)
     
     # Cost breakdown
     cost_table = Table(title="Cost Breakdown", show_header=True, header_style="bold red")
@@ -274,13 +409,15 @@ def analyze_property(property_id):
                       f"Loan Amount: {format_currency(row['loan_amount'])}", 
                       title="Investment Requirements"))
 
+
+
 while using_application:
   option = questionary.select("What would you like to analyze?", choices=['All properties (FHA)', 'One property', "Quit"]).ask()
 
   if option == "Quit":
     using_application = False
   elif option == "All properties (FHA)":
-    display_all_properties(properties_df=None)
+    display_all_properties(properties_df=None, title="Property Analysis - FHA Loan Scenario")
     display_all_qualifying_properties()
   elif option == "All properties (conventional)":
     # TODO at some point
@@ -293,3 +430,4 @@ while using_application:
         property_ids.append(row["address1"])
     property_id = questionary.select("Select property", choices=property_ids).ask()
     analyze_property(property_id)
+
