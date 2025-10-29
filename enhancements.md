@@ -1,3 +1,45 @@
+Stage 1 Criteria:
+- Hard filters
+  - Negative monthly cashflow in Y1
+  - 1% rule (monthly gross rent >= 1% of the purchase price)
+  - 50% rule (opex roughly equals 50% of gross rent) (tax, insurance, maintaince, vacancy, CapEx)
+  - Debt Service Coverage Ratio > 1.25 (rent / mortgage payment)
+- Medium filters
+  - Downpayment (some amount?)
+
+## Stage 2: Physical Viewing Criteria
+
+**Foundation/Structure (Deal breakers - walk away):**
+- Major foundation cracks, bowing walls
+- Roof needs complete replacement (>$15K)
+- Electrical panel under 100 amps or knob-and-tube wiring
+- Active water damage, mold, structural sagging
+- Sewer line issues (ask about this explicitly)
+
+**Mechanical (Negotiate or budget):**
+- HVAC systems >15 years old (budget $5-8K replacement)
+- Water heater >10 years (budget $1-2K)
+- Windows single-pane or rotting (cosmetic unless severe)
+- Plumbing: galvanized pipes or polybutylene (budget $5-10K)
+
+**Cosmetic (Live with or DIY):**
+- Ugly carpet, outdated paint, old kitchen cabinets
+- Bathroom tiles, fixtures
+- Landscaping
+- Minor drywall repairs
+
+**Good bones checklist:**
+```
+✓ Solid foundation (minor cracks OK)
+✓ Roof 10+ years life left
+✓ Functioning furnace/AC (even if old)
+✓ Separate utilities per unit (critical for renting)
+✓ Decent layout (no major walls to move)
+✓ No obvious code violations
+✓ Parking available (2 spots per unit ideal)
+
+---
+
 # Property Analysis Tool Enhancements
 
 ## Current State

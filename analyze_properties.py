@@ -8,6 +8,26 @@ from rich.panel import Panel
 
 console = Console() 
 
+def format_currency(value):
+    """Format currency values with $ sign, commas, and 2 decimal places"""
+    if pd.isna(value) or value is None:
+        return "N/A"
+    if value < 0:
+        return f"(${abs(value):,.2f})"
+    return f"${value:,.2f}"
+
+def format_percentage(value):
+    """Format percentage values with % sign and 2 decimal places"""
+    if pd.isna(value) or value is None:
+        return "N/A"
+    return f"{value * 100:.2f}%"
+
+def format_number(value):
+    """Format regular numbers to 2 decimal places"""
+    if pd.isna(value) or value is None:
+        return "N/A"
+    return f"{value:.2f}"
+
 with open('assumptions.yaml', 'r') as file:
   assumptions = yaml.safe_load(file)
   appreciation_rate = assumptions["appreciation_rate"]
@@ -92,18 +112,160 @@ df["annual_cash_flow_y2"] = df["monthly_cash_flow_y2"] * 12
 # fourth, calculate investment metrics
 df["cap_rate_y1"] = df["annual_cash_flow_y1"] / df["purchase_price"]
 df["cap_rate_y2"] = df["annual_cash_flow_y2"] / df["purchase_price"]
-df["CoC_y1"] = df["cash_needed"] / df["annual_cash_flow_y1"]
-df["CoC_y2"] = df["cash_needed"] / df["annual_cash_flow_y2"]
+df["CoC_y1"] = df["annual_cash_flow_y1"] / df["cash_needed"]
+df["CoC_y2"] = df["annual_cash_flow_y2"] / df["cash_needed"]
 
 # Gross Rent Multiplier (lower = better)
 df["GRM_y1"] = df["purchase_price"] / df["annual_rent_y1"]
 df["GRM_y2"] = df["purchase_price"] / df["annual_rent_y2"]
 
+def display_all_properties():
+    """Display all properties in a formatted Rich table"""
+    table = Table(title="Property Analysis - FHA Loan Scenario", show_header=True, header_style="bold magenta")
+    
+    # Add columns with proper alignment
+    table.add_column("Address", style="cyan", no_wrap=True)
+    table.add_column("Purchase Price", justify="right", style="green")
+    table.add_column("Cash Needed", justify="right", style="yellow")
+    table.add_column("Costs/Month", justify="right", style="yellow")
+    table.add_column("Monthly CF Y1", justify="right", style="red" if df['monthly_cash_flow_y1'].iloc[0] < 0 else "green")
+    table.add_column("Monthly CF Y2", justify="right", style="red" if df['monthly_cash_flow_y2'].iloc[0] < 0 else "green")
+    table.add_column("Cap Rate Y1", justify="right", style="blue")
+    table.add_column("Cap Rate Y2", justify="right", style="blue")
+    table.add_column("CoC Y1", justify="right", style="purple")
+    table.add_column("GRM Y1", justify="right", style="orange3")
+    
+    # Add rows for each property
+    for _, row in df.iterrows():
+        # Determine cash flow colors
+        cf_y1_style = "red" if row['monthly_cash_flow_y1'] < 0 else "green"
+        cf_y2_style = "red" if row['monthly_cash_flow_y2'] < 0 else "green"
+        
+        table.add_row(
+            str(row['address1']),
+            format_currency(row['purchase_price']),
+            format_currency(row['cash_needed']),
+            format_currency(row['total_monthly_cost']),
+            f"[{cf_y1_style}]{format_currency(row['monthly_cash_flow_y1'])}[/{cf_y1_style}]",
+            f"[{cf_y2_style}]{format_currency(row['monthly_cash_flow_y2'])}[/{cf_y2_style}]",
+            format_percentage(row['cap_rate_y1']),
+            format_percentage(row['cap_rate_y2']),
+            format_percentage(row['CoC_y1']),
+            format_number(row['GRM_y1'])
+        )
+    
+    console.print(table)
+
 using_application = True
 
 def analyze_property(property_id):
-  row = df[df['address1'] == property_id].iloc[0]
-  print(row)
+    """Display detailed analysis for a single property"""
+    row = df[df['address1'] == property_id].iloc[0]
+    
+    # Create property details table
+    table = Table(title=f"Property Details: {property_id}", show_header=True, header_style="bold cyan")
+    table.add_column("Metric", style="yellow", no_wrap=True)
+    table.add_column("Year 1 (Live-in)", justify="right", style="green")
+    table.add_column("Year 2 (All Rent)", justify="right", style="blue")
+    
+    # Property basics
+    console.print(Panel(f"[bold cyan]Property Overview[/bold cyan]\n"
+                      f"Address: {row['address1']}\n"
+                      f"Purchase Price: {format_currency(row['purchase_price'])}\n"
+                      f"Bedrooms: {int(row['beds'])} | Bathrooms: {int(row['baths'])} | Sq Ft: {format_number(row['square_ft'])}\n"
+                      f"Built: {int(row['built_in'])} (Age: {int(row['home_age'])} years)\n"
+                      f"Units: {int(row['units'])}\n"
+                      f"Cost per Sq Ft: {format_currency(row['cost_per_sqrft'])}", 
+                      title="Basic Info"))
+    
+    # Rent estimates table
+    property_rents = rents[rents['address_1'] == property_id]
+    min_rent_value = property_rents['rent_estimate'].min()
+    
+    rent_table = Table(title="Unit Rent Estimates", show_header=True, header_style="bold green")
+    rent_table.add_column("Unit", style="cyan", justify="center")
+    rent_table.add_column("Configuration", style="yellow")
+    rent_table.add_column("Monthly Rent", justify="right", style="green")
+    rent_table.add_column("Status", style="magenta")
+    
+    total_monthly_rent = 0
+    for _, rent_row in property_rents.iterrows():
+        is_your_unit = rent_row['rent_estimate'] == min_rent_value
+        unit_config = f"{int(rent_row['beds'])}-bed {int(rent_row['baths'])}-bath"
+        status = "[bold red]Your Unit[/bold red]" if is_your_unit else "Rental"
+        rent_style = "bold red" if is_your_unit else "green"
+        
+        rent_table.add_row(
+            str(int(rent_row['unit_num'])),
+            unit_config,
+            f"[{rent_style}]{format_currency(rent_row['rent_estimate'])}[/{rent_style}]",
+            status
+        )
+        total_monthly_rent += rent_row['rent_estimate']
+    
+    # Add summary row
+    rent_table.add_row(
+        "[bold]Total[/bold]",
+        "",
+        f"[bold blue]{format_currency(total_monthly_rent)}[/bold blue]",
+        ""
+    )
+    
+    console.print(rent_table)
+    
+    # Rental income summary
+    console.print(Panel(f"[bold blue]Rental Income Summary[/bold blue]\n"
+                      f"Total Monthly Rent (All Units): {format_currency(row['total_rent'])}\n"
+                      f"Your Unit Rent (Not Collected): {format_currency(row['min_rent'])}\n"
+                      f"[bold]Net Monthly Income (Year 1): {format_currency(row['net_rent_y1'])}[/bold]\n"
+                      f"[bold]Full Rental Income (Year 2): {format_currency(row['total_rent'])}[/bold]", 
+                      title="Income Breakdown"))
+    
+    # Financial metrics table
+    table.add_row("Monthly Cash Flow", 
+                  f"[{'red' if row['monthly_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['monthly_cash_flow_y1'])}[/]",
+                  f"[{'red' if row['monthly_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['monthly_cash_flow_y2'])}[/]")
+    table.add_row("Annual Cash Flow",
+                  f"[{'red' if row['annual_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['annual_cash_flow_y1'])}[/]",
+                  f"[{'red' if row['annual_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['annual_cash_flow_y2'])}[/]")
+    table.add_row("Cap Rate", 
+                  format_percentage(row['cap_rate_y1']),
+                  format_percentage(row['cap_rate_y2']))
+    table.add_row("Cash on Cash Return",
+                  format_percentage(row['CoC_y1']),
+                  format_percentage(row['CoC_y2']))
+    table.add_row("Gross Rent Multiplier",
+                  format_number(row['GRM_y1']),
+                  format_number(row['GRM_y2']))
+    table.add_row("Annual Rent",
+                  format_currency(row['annual_rent_y1']),
+                  format_currency(row['annual_rent_y2']))
+    
+    console.print(table)
+    
+    # Cost breakdown
+    cost_table = Table(title="Cost Breakdown", show_header=True, header_style="bold red")
+    cost_table.add_column("Cost Type", style="yellow")
+    cost_table.add_column("Monthly Amount", justify="right", style="red")
+    cost_table.add_column("Annual Amount", justify="right", style="red")
+    
+    cost_table.add_row("Mortgage Payment", format_currency(row['monthly_mortgage']), format_currency(row['monthly_mortgage'] * 12))
+    cost_table.add_row("MIP (Insurance)", format_currency(row['monthly_mip']), format_currency(row['monthly_mip'] * 12))
+    cost_table.add_row("Property Taxes", format_currency(row['monthly_taxes']), format_currency(row['monthly_taxes'] * 12))
+    cost_table.add_row("Home Insurance", format_currency(row['monthly_insurance']), format_currency(row['monthly_insurance'] * 12))
+    cost_table.add_row("Vacancy Reserve", format_currency(row['monthly_vacancy_costs']), format_currency(row['monthly_vacancy_costs'] * 12))
+    cost_table.add_row("Repair Reserve", format_currency(row['monthly_repair_costs']), format_currency(row['monthly_repair_costs'] * 12))
+    cost_table.add_row("[bold]Total Monthly Cost[/bold]", f"[bold red]{format_currency(row['total_monthly_cost'])}[/bold red]", f"[bold red]{format_currency(row['total_monthly_cost'] * 12)}[/bold red]")
+    
+    console.print(cost_table)
+    
+    # Investment summary
+    console.print(Panel(f"[bold green]Investment Summary[/bold green]\n"
+                      f"Down Payment: {format_currency(row['down_payment'])}\n"
+                      f"Closing Costs: {format_currency(row['closing_costs'])}\n"
+                      f"[bold]Total Cash Needed: {format_currency(row['cash_needed'])}[/bold]\n"
+                      f"Loan Amount: {format_currency(row['loan_amount'])}", 
+                      title="Investment Requirements"))
 
 while using_application:
   option = questionary.select("What would you like to analyze?", choices=['All properties (FHA)', 'One property', "Quit"]).ask()
@@ -111,11 +273,7 @@ while using_application:
   if option == "Quit":
     using_application = False
   elif option == "All properties (FHA)":
-    # print(df.to_string(index=False))
-    print(df.head())
-    print(df[['purchase_price', 'cash_needed', 'monthly_cash_flow_y1']].describe())
-    # console.print(Panel())
-    pass
+    display_all_properties()
   elif option == "All properties (conventional)":
     # TODO at some point
     pass
