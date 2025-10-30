@@ -25,6 +25,7 @@ def get_rentcast_data(property_details, rent_comps):
   pass
 
 def get_geocode(address):
+  print(f"Getting geocode for: {address}")
   response = requests.get(
       "https://maps.googleapis.com/maps/api/geocode/json",
       params={
@@ -109,9 +110,7 @@ def get_solar_potential_data(address):
         )
     return result
 
-def get_walkscore_data(property_details):
-    lng, lat = get_geocode(property_details["full_address"])
-
+def get_walkscore_data(lng, lat, address):
     response = requests.get(
         "https://api.walkscore.com/score",
         params={
@@ -119,7 +118,7 @@ def get_walkscore_data(property_details):
             "transit": 1,
             "bike": 1,
             "wsapikey": os.getenv("WALKSCORE_KEY"),
-            "address": property_details["full_address"],
+            "address": address,
             "lat": lat,
             "lon": lng,
         },
@@ -228,6 +227,11 @@ def add_property_sheet(property_details):
     prop["B8"] = property_details["built_in"]
 
 def add_property_to_csv(property_details):
+  lon, lat = get_geocode(property_details["full_address"])
+  walk, transit, bike = get_walkscore_data(lon, lat, property_details["full_address"])
+  solar_data = get_solar_potential_data(property_details["full_address"])
+  electricity_costs = solar_data["cost_electricity_without_solar"]
+
   with open(PROPERTIES_CSV_PATH, 'a', newline='') as csvfile:
     writer = csv.writer(csvfile)
     writer.writerow([
@@ -239,7 +243,13 @@ def add_property_to_csv(property_details):
       property_details["baths"],
       property_details["square_ft"],
       property_details["built_in"],
-      property_details["units"]
+      property_details["units"],
+      walk,
+      transit,
+      bike,
+      lat,
+      lon,
+      electricity_costs,
     ])
 
 def edit_master_sheet(property_details):
@@ -320,9 +330,9 @@ def run_program():
     if not proceed:
       console.print("Add the property details again", style="bold blue")
 
-  add_property_sheet(property_details)
+  # add_property_sheet(property_details)
   add_property_to_csv(property_details)
-  edit_master_sheet(property_details)
+  # edit_master_sheet(property_details)
 
   proceed2 = False
 
@@ -335,19 +345,19 @@ def run_program():
     if not proceed2:
       console.print("Add the rent comparables again", style="bold blue")
 
-  available_units = []
+  # available_units = []
 
-  for i in rent_comps:
-    available_units.append(f"Unit {i["unit_num"] + 1}")
+  # for i in rent_comps:
+  #   available_units.append(f"Unit {i["unit_num"] + 1}")
 
-  unit_living_in = questionary.select("Unit living in", choices=available_units).ask()
-  add_rent_comps_to_sheet(property_details, rent_comps, unit_living_in)
+  # unit_living_in = questionary.select("Unit living in", choices=available_units).ask()
+  # add_rent_comps_to_sheet(property_details, rent_comps, unit_living_in)
   add_rent_comps_to_csv(property_details, rent_comps)
 
   wb.save(EXCEL_FILE_PATH)
   wb.close()
 
-  console.print(Panel("Workbook is saved and closed!"), style="bold green")
+  # console.print(Panel("Workbook is saved and closed!"), style="bold green")
 
 if __name__ == "__main__":
   run_program()

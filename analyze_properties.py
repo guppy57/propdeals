@@ -99,8 +99,14 @@ def deal_score_property(row):
     
     return score
 
-def neighborhood_score_property(row):
-  pass
+def mobility_score(row):
+  score = (row["walk_score"] * 0.6) + (row["transit_score"] * 0.30) + (row["bike_score"] * 0.10)
+  return score
+
+# replace all WalkScore scoring values that are NA with 0
+cols = ["walk_score", "transit_score", "bike_score"]
+df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
+df[cols] = df[cols].fillna(0)
 
 # get all per_property calculations completed 
 # first, property-only calculations
@@ -162,6 +168,7 @@ df["DSCR"] = df["total_rent"] / df["monthly_mortgage"] # Debt Service Coverage R
 
 # fifth, calculate property scores
 df["deal_score"] = df.apply(deal_score_property, axis=1)
+df["mobility_score"] = df.apply(mobility_score, axis=1)
 
 def display_all_properties(properties_df, title):
     """Display all properties in a formatted Rich table"""
@@ -183,7 +190,8 @@ def display_all_properties(properties_df, title):
     table.add_column("1% Rule", justify="right", style="cyan")
     table.add_column("50% Rule", justify="right", style="magenta")
     table.add_column("DSCR", justify="right", style="blue")
-    table.add_column("Deal", justify="right", style="bold white")
+    table.add_column("DS", justify="right", style="bold white") # deal score
+    table.add_column("MS", justify="right", style="bold white") # mobility score
     
     # Add rows for each property
     for _, row in dataframe.iterrows():
@@ -203,6 +211,10 @@ def display_all_properties(properties_df, title):
         deal_score_style = ("green" if row['deal_score'] >= 15 else 
                             "yellow" if row['deal_score'] >= 12 else 
                             "red")
+
+        mobility_score_style = ("green" if row['mobility_score'] >= 75 else 
+                            "yellow" if row['mobility_score'] >= 50 else 
+                            "red")
         
         table.add_row(
             str(row['address1']),
@@ -219,7 +231,8 @@ def display_all_properties(properties_df, title):
             f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
             f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
             f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
-            f"[{deal_score_style}]{int(row['deal_score'])}/20[/{deal_score_style}]"
+            f"[{deal_score_style}]{int(row['deal_score'])}/20[/{deal_score_style}]",
+            f"[{mobility_score_style}]{int(row['mobility_score'])}/20[/{mobility_score_style}]"
         )
     
     console.print(table)

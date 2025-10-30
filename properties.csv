@@ -1,11 +1,11 @@
-address1,full_address,zillow_link,purchase_price,beds,baths,square_ft,built_in,units,walk_score,transit_score,bike_score
-518 35th St,"518 35th St, Des Moines, IA 50312",https://www.zillow.com/homedetails/518-35th-St-Des-Moines-IA-50312/251547772_zpid/,264900,5,4,2463,1909,4
-1175 21st St,"1175 21st St, Des Moines, IA 50311",https://www.zillow.com/homedetails/1175-21st-St-Des-Moines-IA-50311/772225_zpid/,212500,6,3,1568,1909,2
-1514 Harrison Ave,"1514 Harrison Ave, Des Moines, IA 50314",https://www.zillow.com/homedetails/1514-Harrison-Ave-Des-Moines-IA-50314/251547601_zpid/,220000,6,3,2491,1900,3
-1148 36th St,"1148 36th St, Des Moines, IA 50311",https://www.zillow.com/homedetails/1148-36th-St-Des-Moines-IA-50311/251547694_zpid/,355000,6,4,2509,1907,4
-1429 MLK Jr Pkwy,"1429 Martin Luther King Jr Pkwy, Des Moines, IA 50314",https://www.zillow.com/homedetails/1429-Martin-Luther-King-Jr-Pkwy-Des-Moines-IA-50314/791000_zpid/,169000,5,2,2544,1905,2
-401 Franklin Ave,"401 Franklin Ave, Des Moines, IA 50314",https://www.zillow.com/homedetails/401-Franklin-Ave-Des-Moines-IA-50314/788740_zpid/,199900,5,4,2381,1901,2
-1064 27th St,"1064 27th St, Des Moines, IA 50311	",https://www.zillow.com/homedetails/1064-27th-St-Des-Moines-IA-50311/772187_zpid/,259900,5,2,1856,1900,2
-1206 39th St,"1206 39th St, Des Moines, IA 50311",https://www.zillow.com/homedetails/1206-39th-St-Des-Moines-IA-50311/251547794_zpid/,210000,4,3,1964,1918,2
-1608 Mondamin Ave,"1608 Mondamin Ave, Des Moines, IA 50314",https://www.zillow.com/homedetails/1608-Mondamin-Ave-Des-Moines-IA-50314/791313_zpid/,240000,4,2,1056,1936,2
-3900 11th St,"3900 11th St, Des Moines, IA 50313",https://www.zillow.com/homedetails/3900-11th-St-Des-Moines-IA-50313/251547556_zpid/,225000,6,3,2851,1909,3
+address1,full_address,zillow_link,purchase_price,beds,baths,square_ft,built_in,units,walk_score,transit_score,bike_score,lat,lon,annual_electricity_cost_est
+518 35th St,"518 35th St, Des Moines, IA 50312",https://www.zillow.com/homedetails/518-35th-St-Des-Moines-IA-50312/251547772_zpid/,264900,5,4,2463,1909,4,79,32,69,41.5850567,-93.66445039999999,8460
+1175 21st St,"1175 21st St, Des Moines, IA 50311",https://www.zillow.com/homedetails/1175-21st-St-Des-Moines-IA-50311/772225_zpid/,212500,6,3,1568,1909,2,81,42,52,41.6001376,-93.64470349999999,8473
+1514 Harrison Ave,"1514 Harrison Ave, Des Moines, IA 50314",https://www.zillow.com/homedetails/1514-Harrison-Ave-Des-Moines-IA-50314/251547601_zpid/,220000,6,3,2491,1900,3,53,44,51,41.6048058,-93.6381177,8438
+1148 36th St,"1148 36th St, Des Moines, IA 50311",https://www.zillow.com/homedetails/1148-36th-St-Des-Moines-IA-50311/251547694_zpid/,355000,6,4,2509,1907,4,63,37,54,41.6000587,-93.6658295,6958
+1429 MLK Jr Pkwy,"1429 Martin Luther King Jr Pkwy, Des Moines, IA 50314",https://www.zillow.com/homedetails/1429-Martin-Luther-King-Jr-Pkwy-Des-Moines-IA-50314/791000_zpid/,169000,5,2,2544,1905,2,72,41,50,41.6052034,-93.6435724,9911
+401 Franklin Ave,"401 Franklin Ave, Des Moines, IA 50314",https://www.zillow.com/homedetails/401-Franklin-Ave-Des-Moines-IA-50314/788740_zpid/,199900,5,4,2381,1901,2,61,33,56,41.6115508,-93.62377889999999,9971
+1064 27th St,"1064 27th St, Des Moines, IA 50311	",https://www.zillow.com/homedetails/1064-27th-St-Des-Moines-IA-50311/772187_zpid/,259900,5,2,1856,1900,2,68,39,49,41.5970531,-93.65369439999999,8421
+1206 39th St,"1206 39th St, Des Moines, IA 50311",https://www.zillow.com/homedetails/1206-39th-St-Des-Moines-IA-50311/251547794_zpid/,210000,4,3,1964,1918,2,69,37,45,41.6008009,-93.6701634,6958
+1608 Mondamin Ave,"1608 Mondamin Ave, Des Moines, IA 50314",https://www.zillow.com/homedetails/1608-Mondamin-Ave-Des-Moines-IA-50314/791313_zpid/,240000,4,2,1056,1936,2,45,42,44,41.6084099,-93.6396437,8394
+3900 11th St,"3900 11th St, Des Moines, IA 50313",https://www.zillow.com/homedetails/3900-11th-St-Des-Moines-IA-50313/251547556_zpid/,225000,6,3,2851,1909,3,45,32,44,41.6314378,-93.63234589999999,9923
