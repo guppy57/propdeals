@@ -2,14 +2,158 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from openpyxl import load_workbook
+from dotenv import load_dotenv
+import os
 import questionary
 import csv
+import requests
+
+load_dotenv()
 
 EXCEL_FILE_PATH = "./Real Estate Investing.xlsx"
 PROPERTIES_CSV_PATH = "./properties.csv"
 
+RENTCAST_HEADERS = {
+  "accept": "application/json",
+  "X-Api-Key": os.getenv("RENTCAST_KEY")
+}
+
 console = Console()
 wb = load_workbook(EXCEL_FILE_PATH)
+
+def get_rentcast_data(property_details, rent_comps):
+  pass
+
+def get_geocode(address):
+  response = requests.get(
+      "https://maps.googleapis.com/maps/api/geocode/json",
+      params={
+          "key": os.getenv("GOOGLE_KEY"),
+          "address": address,
+      },
+  )
+
+  data = response.json()
+  location = data["results"][0]["geometry"]["location"]
+  return location["lng"], location["lat"]
+
+def get_solar_potential_data(address):
+    lng, lat = get_geocode(address)
+    response = requests.get(
+        "https://solar.googleapis.com/v1/buildingInsights:findClosest",
+        params={
+            "location.latitude": lat,
+            "location.longitude": lng,
+            "requiredQuality": "HIGH",
+            "key": os.getenv("GOOGLE_KEY"),
+        },
+    )
+    data = response.json()
+
+    # Get first viable financial analysis (panelConfigIndex != -1)
+    financial = next(
+        (
+            fa
+            for fa in data.get("solarPotential", {}).get("financialAnalyses", [])
+            if fa.get("panelConfigIndex", -1) != -1
+        ),
+        None,
+    )
+
+    solar_potential = data.get("solarPotential", {})
+    building_stats = solar_potential.get("buildingStats", {})
+    whole_roof = solar_potential.get("wholeRoofStats", {})
+
+    result = {
+        # Capacity metrics
+        "max_array_panels_count": solar_potential.get("maxArrayPanelsCount"),
+        "max_array_area_m2": solar_potential.get("maxArrayAreaMeters2"),
+        "max_sunshine_hours_per_year": solar_potential.get("maxSunshineHoursPerYear"),
+        "building_area_m2": building_stats.get("areaMeters2"),
+        "whole_roof_area_m2": whole_roof.get("areaMeters2"),
+        "panel_capacity_watts": solar_potential.get("panelCapacityWatts"),
+        # Financial metrics (if viable config exists)
+        "cost_electricity_without_solar": None,
+        "payback_years": None,
+        "lifetime_savings": None,
+        "present_value_savings_year20": None,
+        "upfront_cost": None,
+        "solar_percentage": None,
+        "initial_ac_kwh_per_year": None,
+        "net_metering_allowed": None,
+    }
+
+    if financial and "financialDetails" in financial:
+        details = financial["financialDetails"]
+        cash = financial.get("cashPurchaseSavings", {})
+
+        result.update(
+            {
+                "cost_electricity_without_solar": int(
+                    details.get("costOfElectricityWithoutSolar", {}).get("units", 0)
+                ),
+                "payback_years": cash.get("paybackYears"),
+                "lifetime_savings": int(
+                    cash.get("savings", {}).get("savingsLifetime", {}).get("units", 0)
+                ),
+                "present_value_savings_year20": int(
+                    cash.get("savings", {})
+                    .get("presentValueOfSavingsYear20", {})
+                    .get("units", 0)
+                ),
+                "upfront_cost": int(cash.get("upfrontCost", {}).get("units", 0)),
+                "solar_percentage": details.get("solarPercentage"),
+                "initial_ac_kwh_per_year": details.get("initialAcKwhPerYear"),
+                "net_metering_allowed": details.get("netMeteringAllowed"),
+            }
+        )
+    return result
+
+def get_walkscore_data(property_details):
+    lng, lat = get_geocode(property_details["full_address"])
+
+    response = requests.get(
+        "https://api.walkscore.com/score",
+        params={
+            "format": "json",
+            "transit": 1,
+            "bike": 1,
+            "wsapikey": os.getenv("WALKSCORE_KEY"),
+            "address": property_details["full_address"],
+            "lat": lat,
+            "lon": lng,
+        },
+    )
+    data = response.json()
+
+    try:
+      transit = data['transit']['score'] 
+    except KeyError:
+      transit = "NA"
+    
+    try:
+      bike = data['bike']['score']
+    except KeyError:
+      bike = "NA"
+
+    return data["walkscore"], transit, bike 
+
+def get_value_estimate(property_details):
+  response = requests.get(
+    "https://api.rentcast.io/v1/avm/value",
+    headers=RENTCAST_HEADERS,
+    params={
+      "address": property_details["full_address"],
+      "propertyType": "Multi-Family",
+      "squareFootage": property_details["square_ft"],
+      "bedrooms": property_details["beds"],
+      "bathrooms": property_details["baths"],
+      "compCount": 15
+    }
+  )
+
+  data = response.json()
+  return data
 
 def collect_property_details():
     full_address = questionary.text("Full address").ask()
@@ -51,10 +195,10 @@ def collect_property_details():
 
 def get_test_data():
     return {
-        "full_address": "123 Fuller Ave, Des Moines, IA 50010",
+        "full_address": "224 Ash Ave, Ames, IA 50014",
         "zillow_link": "https://zillow.com/something-here",
         "purchase_price": int("269000"),
-        "address1": "123 Fuller Ave",
+        "address1": "224 Ash Ave",
         "beds": int("3"),
         "baths": int("2"),
         "square_ft": int("2450"),
@@ -160,43 +304,50 @@ def add_rent_comps_to_csv(property_details, rent_comps):
     for comp in rent_comps:
       writer.writerow([property_details["address1"], int(comp["unit_num"]) + 1, comp["beds"], comp["beds"], comp["rent"]])
 
+def backfill_neighborhood_data():
+  pass
+
 # --------------------------------------------------------
 
-console.print(Panel("Let's add a new property to analyze"), style="bold red")
-proceed = False
+def run_program():
+  console.print(Panel("Let's add a new property to analyze"), style="bold red")
+  proceed = False
 
-while not proceed:
-  property_details = collect_property_details()
-  display_property_details(property_details=property_details)
-  proceed = questionary.confirm("Does everything look correct?").ask()
-  if not proceed:
-    console.print("Add the property details again", style="bold blue")
+  while not proceed:
+    property_details = collect_property_details()
+    display_property_details(property_details=property_details)
+    proceed = questionary.confirm("Does everything look correct?").ask()
+    if not proceed:
+      console.print("Add the property details again", style="bold blue")
 
-add_property_sheet(property_details)
-add_property_to_csv(property_details)
-edit_master_sheet(property_details)
+  add_property_sheet(property_details)
+  add_property_to_csv(property_details)
+  edit_master_sheet(property_details)
 
-proceed2 = False
+  proceed2 = False
 
-while not proceed2:
-  unit_count = property_details["units"]
-  console.print(Panel(f"Let's now add our rent comparables for this property.\nWe will add details for the {unit_count} units.", title="Rent Comparables"), style="bold red")
-  rent_comps = collect_rent_comps(unit_count)
-  display_rent_comps(rent_comps)
-  proceed2 = questionary.confirm("Does everything look correct?").ask()
-  if not proceed2:
-    console.print("Add the rent comparables again", style="bold blue")
+  while not proceed2:
+    unit_count = property_details["units"]
+    console.print(Panel(f"Let's now add our rent comparables for this property.\nWe will add details for the {unit_count} units.", title="Rent Comparables"), style="bold red")
+    rent_comps = collect_rent_comps(unit_count)
+    display_rent_comps(rent_comps)
+    proceed2 = questionary.confirm("Does everything look correct?").ask()
+    if not proceed2:
+      console.print("Add the rent comparables again", style="bold blue")
 
-available_units = []
+  available_units = []
 
-for i in rent_comps:
-  available_units.append(f"Unit {i["unit_num"] + 1}")
+  for i in rent_comps:
+    available_units.append(f"Unit {i["unit_num"] + 1}")
 
-unit_living_in = questionary.select("Unit living in", choices=available_units).ask()
-add_rent_comps_to_sheet(property_details, rent_comps, unit_living_in)
-add_rent_comps_to_csv(property_details, rent_comps)
+  unit_living_in = questionary.select("Unit living in", choices=available_units).ask()
+  add_rent_comps_to_sheet(property_details, rent_comps, unit_living_in)
+  add_rent_comps_to_csv(property_details, rent_comps)
 
-wb.save(EXCEL_FILE_PATH)
-wb.close()
+  wb.save(EXCEL_FILE_PATH)
+  wb.close()
 
-console.print(Panel("Workbook is saved and closed!"), style="bold green")
+  console.print(Panel("Workbook is saved and closed!"), style="bold green")
+
+if __name__ == "__main__":
+  run_program()

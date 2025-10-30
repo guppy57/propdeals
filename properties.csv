@@ -1,4 +1,4 @@
-address1,full_address,zillow_link,purchase_price,beds,baths,square_ft,built_in,units
+address1,full_address,zillow_link,purchase_price,beds,baths,square_ft,built_in,units,walk_score,transit_score,bike_score
 518 35th St,"518 35th St, Des Moines, IA 50312",https://www.zillow.com/homedetails/518-35th-St-Des-Moines-IA-50312/251547772_zpid/,264900,5,4,2463,1909,4
 1175 21st St,"1175 21st St, Des Moines, IA 50311",https://www.zillow.com/homedetails/1175-21st-St-Des-Moines-IA-50311/772225_zpid/,212500,6,3,1568,1909,2
 1514 Harrison Ave,"1514 Harrison Ave, Des Moines, IA 50314",https://www.zillow.com/homedetails/1514-Harrison-Ave-Des-Moines-IA-50314/251547601_zpid/,220000,6,3,2491,1900,3
