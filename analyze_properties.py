@@ -1,10 +1,11 @@
+import csv
+
 import pandas as pd
 import questionary
 import yaml
-import csv
-from rich.console import Console 
-from rich.table import Table
+from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 
 console = Console() 
 
@@ -171,71 +172,75 @@ df["deal_score"] = df.apply(deal_score_property, axis=1)
 df["mobility_score"] = df.apply(mobility_score, axis=1)
 
 def display_all_properties(properties_df, title):
-    """Display all properties in a formatted Rich table"""
-    dataframe = df if properties_df is None else properties_df
-    table = Table(title=title, show_header=True, header_style="bold magenta")
-    
-    # Add columns with proper alignment
-    table.add_column("Address", style="cyan", no_wrap=True)
-    table.add_column("Price", justify="right", style="green")
-    table.add_column("Cash Needed", justify="right", style="yellow")
-    table.add_column("Costs/mo", justify="right", style="yellow")
-    table.add_column("CF/mo Y1", justify="right", style="red" if df['monthly_cash_flow_y1'].iloc[0] < 0 else "green")
-    table.add_column("CF/mo Y2", justify="right", style="red" if df['monthly_cash_flow_y2'].iloc[0] < 0 else "green")
-    table.add_column("NOI Y2", justify="right", style="yellow")
-    table.add_column("CapR Y1", justify="right", style="blue")
-    table.add_column("CapR Y2", justify="right", style="blue")
-    table.add_column("CoC Y2", justify="right", style="purple")
-    table.add_column("GRM Y1", justify="right", style="orange3")
-    table.add_column("1% Rule", justify="right", style="cyan")
-    table.add_column("50% Rule", justify="right", style="magenta")
-    table.add_column("DSCR", justify="right", style="blue")
-    table.add_column("DS", justify="right", style="bold white") # deal score
-    table.add_column("MS", justify="right", style="bold white") # mobility score
-    
-    # Add rows for each property
-    for _, row in dataframe.iterrows():
-        # Determine cash flow colors
-        cf_y1_style = "red" if row['monthly_cash_flow_y1'] < 0 else "green"
-        cf_y2_style = "red" if row['monthly_cash_flow_y2'] < 0 else "green"
+  """Display all properties in a formatted Rich table"""
+  dataframe = df if properties_df is None else properties_df
+  table = Table(title=title, show_header=True, header_style="bold magenta")
 
-        # net operating income color
-        noi_style = "red" if row["monthly_NOI"] < 0 else "green"
-        
-        # Determine metric colors based on goals
-        mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
-        opex_rent_style = "green" if 0.45 <= row['OpEx_Rent'] <= 0.55 else ("yellow" if 0.35 <= row['OpEx_Rent'] <= 0.65 else "red")
-        dscr_style = "green" if row['DSCR'] >= 1.25 else "red"
-        
-        # Deal score color coding (20-point scale)
-        deal_score_style = ("green" if row['deal_score'] >= 15 else 
-                            "yellow" if row['deal_score'] >= 12 else 
-                            "red")
+  # Calculate mobility score percentiles for color coding
+  mobility_75th_percentile = df['mobility_score'].quantile(0.75)
+  mobility_25th_percentile = df['mobility_score'].quantile(0.25)
+  
+  # Add columns with proper alignment
+  table.add_column("Address", style="cyan", no_wrap=True)
+  table.add_column("Price", justify="right", style="green")
+  table.add_column("Cash Needed", justify="right", style="yellow")
+  table.add_column("Costs/mo", justify="right", style="yellow")
+  table.add_column("CF/mo Y1", justify="right", style="red" if df['monthly_cash_flow_y1'].iloc[0] < 0 else "green")
+  table.add_column("CF/mo Y2", justify="right", style="red" if df['monthly_cash_flow_y2'].iloc[0] < 0 else "green")
+  table.add_column("NOI Y2", justify="right", style="yellow")
+  table.add_column("CapR Y1", justify="right", style="blue")
+  table.add_column("CapR Y2", justify="right", style="blue")
+  table.add_column("CoC Y2", justify="right", style="purple")
+  table.add_column("GRM Y1", justify="right", style="orange3")
+  table.add_column("1% Rule", justify="right", style="cyan")
+  table.add_column("50% Rule", justify="right", style="magenta")
+  table.add_column("DSCR", justify="right", style="blue")
+  table.add_column("DS", justify="right", style="bold white") # deal score
+  table.add_column("MS", justify="right", style="bold white") # mobility score
+  
+  # Add rows for each property
+  for _, row in dataframe.iterrows():
+      # Determine cash flow colors
+      cf_y1_style = "red" if row['monthly_cash_flow_y1'] < 0 else "green"
+      cf_y2_style = "red" if row['monthly_cash_flow_y2'] < 0 else "green"
 
-        mobility_score_style = ("green" if row['mobility_score'] >= 75 else 
-                            "yellow" if row['mobility_score'] >= 50 else 
-                            "red")
-        
-        table.add_row(
-            str(row['address1']),
-            format_currency(row['purchase_price']),
-            format_currency(row['cash_needed']),
-            format_currency(row['total_monthly_cost']),
-            f"[{cf_y1_style}]{format_currency(row['monthly_cash_flow_y1'])}[/{cf_y1_style}]",
-            f"[{cf_y2_style}]{format_currency(row['monthly_cash_flow_y2'])}[/{cf_y2_style}]",
-            f"[{noi_style}]{format_currency(row['monthly_NOI'])}[/{noi_style}]",
-            format_percentage(row['cap_rate_y1']),
-            format_percentage(row['cap_rate_y2']),
-            format_percentage(row['CoC_y2']),
-            format_number(row['GRM_y1']),
-            f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
-            f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
-            f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
-            f"[{deal_score_style}]{int(row['deal_score'])}/20[/{deal_score_style}]",
-            f"[{mobility_score_style}]{int(row['mobility_score'])}/20[/{mobility_score_style}]"
-        )
-    
-    console.print(table)
+      # net operating income color
+      noi_style = "red" if row["monthly_NOI"] < 0 else "green"
+      
+      # Determine metric colors based on goals
+      mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
+      opex_rent_style = "green" if 0.45 <= row['OpEx_Rent'] <= 0.55 else ("yellow" if 0.35 <= row['OpEx_Rent'] <= 0.65 else "red")
+      dscr_style = "green" if row['DSCR'] >= 1.25 else "red"
+      
+      # Deal score color coding (20-point scale)
+      deal_score_style = ("green" if row['deal_score'] >= 15 else 
+                          "yellow" if row['deal_score'] >= 12 else 
+                          "red")
+
+      mobility_score_style = ("green" if row['mobility_score'] >= mobility_75th_percentile else 
+                          "yellow" if row['mobility_score'] >= mobility_25th_percentile else 
+                          "red")
+      
+      table.add_row(
+          str(row['address1']),
+          format_currency(row['purchase_price']),
+          format_currency(row['cash_needed']),
+          format_currency(row['total_monthly_cost']),
+          f"[{cf_y1_style}]{format_currency(row['monthly_cash_flow_y1'])}[/{cf_y1_style}]",
+          f"[{cf_y2_style}]{format_currency(row['monthly_cash_flow_y2'])}[/{cf_y2_style}]",
+          f"[{noi_style}]{format_currency(row['monthly_NOI'])}[/{noi_style}]",
+          format_percentage(row['cap_rate_y1']),
+          format_percentage(row['cap_rate_y2']),
+          format_percentage(row['CoC_y2']),
+          format_number(row['GRM_y1']),
+          f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
+          f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
+          f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
+          f"[{deal_score_style}]{int(row['deal_score'])}/20[/{deal_score_style}]",
+          f"[{mobility_score_style}]{int(row['mobility_score'])}/20[/{mobility_score_style}]"
+      )
+  
+  console.print(table)
 
 # displays all properties that match our dealflow analysis strict criteria
 def display_all_qualifying_properties():
@@ -255,7 +260,119 @@ def display_all_qualifying_properties():
         properties_df=filtered_df, title="Phase 1 Criteria Qualifying Properties"
     )
 
-using_application = True
+def display_all_properties_info(properties_df):
+    """Display all properties with basic info: address, sqft, age, units, mobility scores, and electricity cost"""
+    dataframe = df if properties_df is None else properties_df
+    table = Table(
+        title="Properties Basic Information",
+        show_header=True,
+        header_style="bold magenta",
+    )
+
+    # Calculate percentiles for color coding from the dataframe being displayed
+    built_75th_percentile = dataframe["built_in"].quantile(0.75)
+    built_25th_percentile = dataframe["built_in"].quantile(0.25)
+    sqft_75th_percentile = dataframe["square_ft"].quantile(0.75)
+    sqft_25th_percentile = dataframe["square_ft"].quantile(0.25)
+    walk_75th_percentile = dataframe["walk_score"].quantile(0.75)
+    walk_25th_percentile = dataframe["walk_score"].quantile(0.25)
+    transit_75th_percentile = dataframe["transit_score"].quantile(0.75)
+    transit_25th_percentile = dataframe["transit_score"].quantile(0.25)
+    bike_75th_percentile = dataframe["bike_score"].quantile(0.75)
+    bike_25th_percentile = dataframe["bike_score"].quantile(0.25)
+    elec_75th_percentile = dataframe["annual_electricity_cost_est"].quantile(0.75)
+    elec_25th_percentile = dataframe["annual_electricity_cost_est"].quantile(0.25)
+
+    # Add columns with proper alignment
+    table.add_column("Address", style="cyan", no_wrap=True)
+    table.add_column("Sqrft", justify="right", style="green")
+    table.add_column("Built", justify="right", style="yellow")
+    table.add_column("Units", justify="center", style="blue")
+    table.add_column("Walk", justify="right", style="orange3")
+    table.add_column("Transit", justify="right", style="orange3")
+    table.add_column("Bike", justify="right", style="orange3")
+    table.add_column("Elec.", justify="right", style="red")
+
+    # Add rows for each property
+    for _, row in dataframe.iterrows():
+        # Convert units to descriptive text
+        units_value = int(row["units"])
+        if units_value == 2:
+            units_display = "duplex"
+        elif units_value == 3:
+            units_display = "triplex"
+        elif units_value == 4:
+            units_display = "fourplex"
+        else:
+            units_display = str(units_value)
+
+        # Color coding for metrics based on percentiles
+        # Square footage: higher is better
+        sqft_style = (
+            "green"
+            if row["square_ft"] >= sqft_75th_percentile
+            else "yellow"
+            if row["square_ft"] >= sqft_25th_percentile
+            else "red"
+        )
+
+        # Age: lower is better (younger houses are green)
+        built_in_style = (
+            "green"
+            if row["home_age"] >= built_75th_percentile
+            else "yellow"
+            if row["home_age"] >= built_25th_percentile
+            else "red"
+        )
+
+        # Walk score: higher is better
+        walk_style = (
+            "green"
+            if row["walk_score"] >= walk_75th_percentile
+            else "yellow"
+            if row["walk_score"] >= walk_25th_percentile
+            else "red"
+        )
+
+        # Transit score: higher is better
+        transit_style = (
+            "green"
+            if row["transit_score"] >= transit_75th_percentile
+            else "yellow"
+            if row["transit_score"] >= transit_25th_percentile
+            else "red"
+        )
+
+        # Bike score: higher is better
+        bike_style = (
+            "green"
+            if row["bike_score"] >= bike_75th_percentile
+            else "yellow"
+            if row["bike_score"] >= bike_25th_percentile
+            else "red"
+        )
+
+        # Electricity cost: lower is better (reverse logic)
+        elec_style = (
+            "green"
+            if row["annual_electricity_cost_est"] <= elec_25th_percentile
+            else "yellow"
+            if row["annual_electricity_cost_est"] <= elec_75th_percentile
+            else "red"
+        )
+
+        table.add_row(
+            str(row["address1"]),
+            f"[{sqft_style}]{int(row['square_ft']):,}[/{sqft_style}]",
+            f"[{built_in_style}]{int(row['built_in'])}[/{built_in_style}]",
+            units_display,
+            f"[{walk_style}]{int(row['walk_score'])}[/{walk_style}]",
+            f"[{transit_style}]{int(row['transit_score'])}[/{transit_style}]",
+            f"[{bike_style}]{int(row['bike_score'])}[/{bike_style}]",
+            f"[{elec_style}]{format_currency(row['annual_electricity_cost_est'])}[/{elec_style}]",
+        )
+
+    console.print(table)
 
 def analyze_property(property_id):
     """Display detailed analysis for a single property"""
@@ -400,6 +517,36 @@ def analyze_property(property_id):
                           f"[bold {deal_score_style}]{'Excellent' if row['deal_score'] >= 15 else 'Good' if row['deal_score'] >= 12 else 'Poor'}[/bold {deal_score_style}]")
     
     console.print(criteria_table)
+
+    # Mobility Score Breakdown Table
+    mobility_table = Table(title="Mobility Score Breakdown", show_header=True, header_style="bold magenta")
+    mobility_table.add_column("Metric", style="yellow", width=25)
+    mobility_table.add_column("Score", justify="right", style="white", width=8)
+    mobility_table.add_column("Max", justify="right", style="dim white", width=5)
+    mobility_table.add_column("Weight", justify="right", style="white", width=8)
+    mobility_table.add_column("Result", justify="right", style="white", width=8)
+
+    walk_score = row['walk_score']
+    transit_score = row['transit_score']
+    bike_score = row['bike_score']
+    
+    walk_weight = 0.6
+    transit_weight = 0.3
+    bike_weight = 0.1
+
+    walk_result = walk_score * walk_weight
+    transit_result = transit_score * transit_weight
+    bike_result = bike_score * bike_weight
+
+    total_mobility_score = row['mobility_score']
+    mobility_score_style = ("green" if total_mobility_score >= 75 else "yellow" if total_mobility_score >= 50 else "red")
+
+    mobility_table.add_row("Walk Score", f"{walk_score:.0f}", "100", f"{walk_weight:.0%}", f"{walk_result:.2f}")
+    mobility_table.add_row("Transit Score", f"{transit_score:.0f}", "100", f"{transit_weight:.0%}", f"{transit_result:.2f}")
+    mobility_table.add_row("Bike Score", f"{bike_score:.0f}", "100", f"{bike_weight:.0%}", f"{bike_result:.2f}")
+    mobility_table.add_row("[bold]TOTAL SCORE[/bold]", f"[{mobility_score_style}]{total_mobility_score:.2f}[/{mobility_score_style}]", "[bold]100[/bold]", "", f"[{mobility_score_style}]{total_mobility_score:.2f}[/{mobility_score_style}]")
+
+    console.print(mobility_table)
     
     # Cost breakdown
     cost_table = Table(title="Cost Breakdown", show_header=True, header_style="bold red")
@@ -414,6 +561,7 @@ def analyze_property(property_id):
     cost_table.add_row("Vacancy Reserve", format_currency(row['monthly_vacancy_costs']), format_currency(row['monthly_vacancy_costs'] * 12))
     cost_table.add_row("Repair Reserve", format_currency(row['monthly_repair_costs']), format_currency(row['monthly_repair_costs'] * 12))
     cost_table.add_row("[bold]Total Monthly Cost[/bold]", f"[bold red]{format_currency(row['total_monthly_cost'])}[/bold red]", f"[bold red]{format_currency(row['total_monthly_cost'] * 12)}[/bold red]")
+    cost_table.add_row("Electricity (est.)", format_currency(row['annual_electricity_cost_est']), format_currency(row['annual_electricity_cost_est'] / 12))
     
     console.print(cost_table)
     
@@ -425,17 +573,31 @@ def analyze_property(property_id):
                       f"Loan Amount: {format_currency(row['loan_amount'])}", 
                       title="Investment Requirements"))
 
+using_application = True
 
+def run_all_properties_options():
+  using_all_properties = True
+  choices = ["FHA Loan - All properties", "Phase 1 Qualifiers", "Property Info", "Quit"]
+
+  while using_all_properties:
+    option = questionary.select("What would you like to display?", choices=choices).ask()
+
+    if option == "Quit":
+      using_all_properties = False
+    elif option == "FHA Loan - All properties":
+      display_all_properties(properties_df=None, title="Property Analysis - FHA Loan Scenario")
+    elif option == "Phase 1 Qualifiers":
+      display_all_qualifying_properties()
+    elif option == "Property Info":
+      display_all_properties_info(properties_df=df)
 
 while using_application:
-  option = questionary.select("What would you like to analyze?", choices=['All properties', 'Phase 1 Qualifiers', 'One property', "Quit"]).ask()
+  option = questionary.select("What would you like to analyze?", choices=['All properties', 'One property', "Quit"]).ask()
 
   if option == "Quit":
     using_application = False
   elif option == "All properties":
-    display_all_properties(properties_df=None, title="Property Analysis - FHA Loan Scenario")
-  elif option == "Phase 1 Qualifiers":
-    display_all_qualifying_properties()
+    run_all_properties_options()
   elif option == "One property":
     property_ids = []
     with open('properties.csv', 'r') as csvfile:
