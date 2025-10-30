@@ -1,14 +1,19 @@
-import csv
-
+import os
 import pandas as pd
 import questionary
 import yaml
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from dotenv import load_dotenv
+from supabase import create_client, Client
+
 from add_property import run_add_property
 
+load_dotenv()
+
 console = Console() 
+supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
 def format_currency(value):
     """Format currency values with $ sign, commas, and 2 decimal places"""
@@ -39,25 +44,14 @@ with open('assumptions.yaml', 'r') as file:
   repair_savings_rate = assumptions["repair_savings_rate"]
   closing_costs_rate = assumptions["closing_costs_rate"]
   live_in_unit_setting = assumptions["unit_living_in"]
+## LOAN DETAILS - load FHA loan details from Supabase and setup global variables
+fha_loan_get_response = supabase.table('loans').select("*").eq("id", 1).limit(1).single().execute()
 
-with open('loans.csv', 'r', newline='') as loans_file:
-    reader = csv.DictReader(loans_file)
-    for row in reader:
-        if row["name"] != "FHA":
-            continue
-        interest_rate = float(row["interest_rate"])
-        down_payment_rate = float(row["down_payment_rate"])
-        loan_length_years = int(row["years"])
-        mip_upfront_rate = float(row["mip_upfront_rate"])
-        mip_annual_rate = float(row["mip_annual_rate"])
-
-# pd.set_option("display.max_rows", None)
-# pd.set_option("display.max_columns", None)
-# pd.set_option("display.width", None)
-# pd.set_option("display.max_colwidth", None)
-
-df = pd.read_csv('properties.csv')
-df = df.drop(["zillow_link", "full_address"], axis=1)
+interest_rate = float(fha_loan_get_response.data['interest_rate'])
+down_payment_rate = int(fha_loan_get_response.data['down_payment_rate'])
+loan_length_years = float(fha_loan_get_response.data['years'])
+mip_upfront_rate = float(fha_loan_get_response.data['mip_upfront_rate'])
+mip_annual_rate = float(fha_loan_get_response.data['mip_annual_rate'])
 
 def calculate_mortgage(principal, annual_rate, years):
   monthly_rate = annual_rate / 12
@@ -105,72 +99,93 @@ def mobility_score(row):
   score = (row["walk_score"] * 0.6) + (row["transit_score"] * 0.30) + (row["bike_score"] * 0.10)
   return score
 
-# replace all WalkScore scoring values that are NA with 0
-cols = ["walk_score", "transit_score", "bike_score"]
-df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
-df[cols] = df[cols].fillna(0)
+def reload_dataframe():
+    """Reload and recalculate all property data from supabase"""
+    global df, rents
+    
+    console.print("[yellow]Reloading property data...[/yellow]")
 
-# get all per_property calculations completed 
-# first, property-only calculations
-df["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
-df["home_age"] = 2025 - df["built_in"]
+    # Load fresh data from Supabase query
+    properties_get_response = supabase.table('properties').select('*').execute()
+    df = pd.DataFrame(properties_get_response.data)
 
-# second, calculate financials (ONLY DOING FHA NOW)
-df["closing_costs"] = df["purchase_price"] * closing_costs_rate
-df["down_payment"] = df["purchase_price"] * down_payment_rate
-df["loan_amount"] = df["purchase_price"] - df["down_payment"] + (df["purchase_price"] * mip_upfront_rate)
+    df = df.drop(["zillow_link", "full_address"], axis=1)
+    
+    # replace all WalkScore scoring values that are NA with 0
+    cols = ["walk_score", "transit_score", "bike_score"]
+    df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
+    df[cols] = df[cols].fillna(0)
 
-df["monthly_mortgage"] = df["loan_amount"].apply(lambda x: calculate_mortgage(x, interest_rate, loan_length_years))
-df["monthly_mip"] = (df["loan_amount"] * mip_annual_rate) / 12
-df["monthly_taxes"] = (df["purchase_price"] * property_tax_rate) / 12
-df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
-df["cash_needed"] = df["closing_costs"] + df["down_payment"]
+    # get all per_property calculations completed 
+    # first, property-only calculations
+    df["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
+    df["home_age"] = 2025 - df["built_in"]
 
-# third, calculate cash flow variables for analysis
-# need to use rent estimates data for each property
-rents = pd.read_csv('rent_estimates.csv')
-# Aggregate: sum all rents and find minimum rent per property
-rent_summary = rents.groupby("address_1")["rent_estimate"].agg(["sum", "min"]).reset_index()
-rent_summary.columns = ["address1", "total_rent", "min_rent"]
+    # second, calculate financials (ONLY DOING FHA NOW)
+    df["closing_costs"] = df["purchase_price"] * closing_costs_rate
+    df["down_payment"] = df["purchase_price"] * down_payment_rate
+    df["loan_amount"] = df["purchase_price"] - df["down_payment"] + (df["purchase_price"] * mip_upfront_rate)
 
-# Calculate net rental income (total - cheapest unit you'll live in)
-rent_summary["net_rent_y1"] = rent_summary["total_rent"] - rent_summary["min_rent"]
+    df["monthly_mortgage"] = df["loan_amount"].apply(lambda x: calculate_mortgage(x, interest_rate, loan_length_years))
+    df["monthly_mip"] = (df["loan_amount"] * mip_annual_rate) / 12
+    df["monthly_taxes"] = (df["purchase_price"] * property_tax_rate) / 12
+    df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
+    df["cash_needed"] = df["closing_costs"] + df["down_payment"]
 
-# Merge with properties
-df = df.merge(rent_summary, on="address1", how="left")
+    # third, calculate cash flow variables for analysis
+    # need to use rent estimates data for each property
 
-df["annual_rent_y1"] = df["net_rent_y1"] * 12
-df["annual_rent_y2"] = df["total_rent"] * 12
+    rents_get_response = supabase.table('rent_estimates').select('*').execute()
+    rents = pd.DataFrame(rents_get_response.data)
+    rents.drop(['id'], axis=1)
 
-df["monthly_vacancy_costs"] = df["total_rent"] * vacancy_rate
-df["monthly_repair_costs"] = df["total_rent"] * repair_savings_rate
-df["operating_expenses"] = df["monthly_vacancy_costs"] + df["monthly_repair_costs"] + df["monthly_taxes"] + df["monthly_insurance"]
-df["total_monthly_cost"] = df["monthly_mortgage"] + df["monthly_mip"] + df["operating_expenses"]
+    # Aggregate: sum all rents and find minimum rent per property
+    rent_summary = rents.groupby("address1")["rent_estimate"].agg(["sum", "min"]).reset_index()
+    rent_summary.columns = ["address1", "total_rent", "min_rent"]
 
-# Net Operating Income (NOI) - this is what you use for cap rate
-df["monthly_NOI"] = df["total_rent"] - df["operating_expenses"]
-df["annual_NOI_y1"] = (df["net_rent_y1"] - df["operating_expenses"]) * 12
-df["annual_NOI_y2"] = df["monthly_NOI"] * 12
+    # Calculate net rental income (total - cheapest unit you'll live in)
+    rent_summary["net_rent_y1"] = rent_summary["total_rent"] - rent_summary["min_rent"]
 
-df["monthly_cash_flow_y1"] = df["net_rent_y1"] - df["total_monthly_cost"]
-df["monthly_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost"]
-df["annual_cash_flow_y1"] = df["monthly_cash_flow_y1"] * 12
-df["annual_cash_flow_y2"] = df["monthly_cash_flow_y2"] * 12
+    # Merge with properties
+    df = df.merge(rent_summary, on="address1", how="left")
 
-# fourth, calculate investment metrics
-df["cap_rate_y1"] = df["annual_NOI_y1"] / df["purchase_price"]
-df["cap_rate_y2"] = df["annual_NOI_y2"] / df["purchase_price"]
-df["CoC_y1"] = df["annual_cash_flow_y1"] / df["cash_needed"]
-df["CoC_y2"] = df["annual_cash_flow_y2"] / df["cash_needed"]
-df["GRM_y1"] = df["purchase_price"] / df["annual_rent_y1"] # Gross Rent Multiplier (lower = better)
-df["GRM_y2"] = df["purchase_price"] / df["annual_rent_y2"]
-df["MGR_PP"] = df["total_rent"] / df["purchase_price"] # Monthly Gross Rent : Purchase Price, goal is for it to be greater than 0.01
-df["OpEx_Rent"] = df["operating_expenses"] / df["total_rent"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
-df["DSCR"] = df["total_rent"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
+    df["annual_rent_y1"] = df["net_rent_y1"] * 12
+    df["annual_rent_y2"] = df["total_rent"] * 12
 
-# fifth, calculate property scores
-df["deal_score"] = df.apply(deal_score_property, axis=1)
-df["mobility_score"] = df.apply(mobility_score, axis=1)
+    df["monthly_vacancy_costs"] = df["total_rent"] * vacancy_rate
+    df["monthly_repair_costs"] = df["total_rent"] * repair_savings_rate
+    df["operating_expenses"] = df["monthly_vacancy_costs"] + df["monthly_repair_costs"] + df["monthly_taxes"] + df["monthly_insurance"]
+    df["total_monthly_cost"] = df["monthly_mortgage"] + df["monthly_mip"] + df["operating_expenses"]
+
+    # Net Operating Income (NOI) - this is what you use for cap rate
+    df["monthly_NOI"] = df["total_rent"] - df["operating_expenses"]
+    df["annual_NOI_y1"] = (df["net_rent_y1"] - df["operating_expenses"]) * 12
+    df["annual_NOI_y2"] = df["monthly_NOI"] * 12
+
+    df["monthly_cash_flow_y1"] = df["net_rent_y1"] - df["total_monthly_cost"]
+    df["monthly_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost"]
+    df["annual_cash_flow_y1"] = df["monthly_cash_flow_y1"] * 12
+    df["annual_cash_flow_y2"] = df["monthly_cash_flow_y2"] * 12
+
+    # fourth, calculate investment metrics
+    df["cap_rate_y1"] = df["annual_NOI_y1"] / df["purchase_price"]
+    df["cap_rate_y2"] = df["annual_NOI_y2"] / df["purchase_price"]
+    df["CoC_y1"] = df["annual_cash_flow_y1"] / df["cash_needed"]
+    df["CoC_y2"] = df["annual_cash_flow_y2"] / df["cash_needed"]
+    df["GRM_y1"] = df["purchase_price"] / df["annual_rent_y1"] # Gross Rent Multiplier (lower = better)
+    df["GRM_y2"] = df["purchase_price"] / df["annual_rent_y2"]
+    df["MGR_PP"] = df["total_rent"] / df["purchase_price"] # Monthly Gross Rent : Purchase Price, goal is for it to be greater than 0.01
+    df["OpEx_Rent"] = df["operating_expenses"] / df["total_rent"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
+    df["DSCR"] = df["total_rent"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
+
+    # fifth, calculate property scores
+    df["deal_score"] = df.apply(deal_score_property, axis=1)
+    df["mobility_score"] = df.apply(mobility_score, axis=1)
+    
+    console.print("[green]Property data reloaded successfully![/green]")
+
+# Initialize dataframe at startup
+reload_dataframe()
 
 def display_all_properties(properties_df, title):
   """Display all properties in a formatted Rich table"""
@@ -396,7 +411,7 @@ def analyze_property(property_id):
                       title="Basic Info"))
     
     # Rent estimates table
-    property_rents = rents[rents['address_1'] == property_id]
+    property_rents = rents[rents['address1'] == property_id]
     min_rent_value = property_rents['rent_estimate'].min()
     
     rent_table = Table(title="Unit Rent Estimates", show_header=True, header_style="bold green")
@@ -609,7 +624,7 @@ def run_loans_options():
       view_loans_table()
 
 while using_application:
-  choices = ['All properties', 'One property', "Add new property", "Loans", "Quit"]
+  choices = ['All properties', 'One property', "Add new property", "Loans", "Refresh data", "Quit"]
   option = questionary.select("What would you like to analyze?", choices=choices).ask()
 
   if option == "Quit":
@@ -618,13 +633,15 @@ while using_application:
     run_all_properties_options()
   elif option == "One property":
     property_ids = []
-    with open('properties.csv', 'r') as csvfile:
-      properties_reader = csv.DictReader(csvfile)
-      for row in properties_reader:
-        property_ids.append(row["address1"])
+    properties_get_response = supabase.table('properties').select('address1').execute()
+    for row in properties_get_response.data:
+      property_ids.append(row['address1'])
     property_id = questionary.select("Select property", choices=property_ids).ask()
     analyze_property(property_id)
   elif option == "Add new property":
-    run_add_property()
+    run_add_property(supabase_client=supabase)
+    reload_dataframe()
   elif option == "Loans":
     run_loans_options()
+  elif option == "Refresh data":
+    reload_dataframe()

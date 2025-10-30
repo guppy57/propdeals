@@ -4,7 +4,6 @@ from rich.table import Table
 from dotenv import load_dotenv
 import os
 import questionary
-import csv
 import requests
 
 load_dotenv()
@@ -18,7 +17,6 @@ RENTCAST_HEADERS = {
 }
 
 console = Console()
-# wb = load_workbook(EXCEL_FILE_PATH)
 
 def get_rentcast_data(property_details, rent_comps):
   pass
@@ -39,6 +37,7 @@ def get_geocode(address):
 
 def get_solar_potential_data(address):
     lng, lat = get_geocode(address)
+    print(f"Getting solar potential data for: {address}")
     response = requests.get(
         "https://solar.googleapis.com/v1/buildingInsights:findClosest",
         params={
@@ -110,6 +109,7 @@ def get_solar_potential_data(address):
     return result
 
 def get_walkscore_data(lng, lat, address):
+    print(f"Getting walkscore data for: {address}")
     response = requests.get(
         "https://api.walkscore.com/score",
         params={
@@ -165,11 +165,7 @@ def collect_property_details():
     baths = questionary.text("Bathrooms").ask()
     square_ft = questionary.text("Square footage").ask()
     built_in = questionary.text("Year built").ask()
-
     address1 = full_address.split(",")[0]
-    # city = full_address.split(", ")[1].replace(" ", "")
-    # state = full_address.split(", ")[2][1:].split(" ")[0]
-    # zip = full_address.split(", ")[2][1:].split(" ")[1]
 
     unit_conversion = {
       "Duplex": 2,
@@ -180,10 +176,10 @@ def collect_property_details():
     units = unit_conversion[property_type]
 
     return {
-      "full_address": full_address,
-      "zillow_link": zillow_link,
+      "full_address": full_address.strip(),
+      "zillow_link": zillow_link.strip(),
       "purchase_price": int(purchase_price),
-      "address1": address1,
+      "address1": address1.strip(),
       "beds": int(beds),
       "baths": int(baths),
       "square_ft": int(square_ft),
@@ -212,52 +208,44 @@ def display_property_details(property_details):
 
   console.print(Panel(text, title="Property Details", title_align="center", padding=1))
 
-def add_property_sheet(property_details):
-    template = wb["template"]
-    prop = wb.copy_worksheet(template)
-    prop.title = property_details["address1"]
-    prop["B1"] = property_details["full_address"]
-    prop["B1"].hyperlink = property_details["zillow_link"] 
-    prop["B2"] = property_details["units"]
-    prop["B3"] = property_details["purchase_price"]
-    prop["B4"] = property_details["square_ft"]
-    prop["B5"] = property_details["beds"]
-    prop["B6"] = property_details["baths"]
-    prop["B8"] = property_details["built_in"]
+def add_property_to_supabase(property_details, supabase) -> bool:
+  try:
+    lon, lat = get_geocode(property_details["full_address"])
+    console.print(f"Found long: {lon} and lat: {lat}", style="green bold")
+    walk, transit, bike = get_walkscore_data(lon, lat, property_details["full_address"])
+    console.print(f"Found walk score: {walk}, transit: {transit}, bike: {bike}", style="green bold")
+    solar_data = get_solar_potential_data(property_details["full_address"])
+    console.print("Found solar potential data", style="green bold")
+    electricity_costs = solar_data["cost_electricity_without_solar"]
+    console.print(f"Found electricity costs: {electricity_costs}", style="green bold")
+  except Exception as e:
+    print(e)
+  
+  property_details['walk_score'] = walk
+  property_details['bike_score'] = bike
+  property_details['transit_score'] = transit
+  property_details['lat'] = lat
+  property_details['lon'] = lon
+  property_details['annual_electricity_cost_est'] = electricity_costs
+  
+  try:
+    query = supabase.table('properties').insert(property_details)
+    response = query.execute()
+    
+    # Check if response has data
+    if hasattr(response, 'data'):
+      print(f"Response data: {response.data}")
+      return response.data[0]['address1'] == property_details['address1']
+    else:
+      print("Response has no 'data' attribute")
+      return False
+      
+  except Exception as e:
+    print(f"Exception: {e}")
+    print(f"Exception type: {type(e)}")
+    return False
 
-def add_property_to_csv(property_details):
-  lon, lat = get_geocode(property_details["full_address"])
-  walk, transit, bike = get_walkscore_data(lon, lat, property_details["full_address"])
-  solar_data = get_solar_potential_data(property_details["full_address"])
-  electricity_costs = solar_data["cost_electricity_without_solar"]
-
-  with open(PROPERTIES_CSV_PATH, 'a', newline='') as csvfile:
-    writer = csv.writer(csvfile)
-    writer.writerow([
-      property_details["address1"],
-      property_details["full_address"],
-      property_details["zillow_link"],
-      property_details["purchase_price"],
-      property_details["beds"],
-      property_details["baths"],
-      property_details["square_ft"],
-      property_details["built_in"],
-      property_details["units"],
-      walk,
-      transit,
-      bike,
-      lat,
-      lon,
-      electricity_costs,
-    ])
-
-def edit_master_sheet(property_details):
-    master = wb["Master"]
-    last_row = master.max_row
-    new_row = last_row + 1
-    master[f"A{new_row}"] = property_details["address1"] 
-
-def collect_rent_comps(unit_count):
+def collect_rent_comps(unit_count, address1):
   rent_comparables = []
   units_compared = 0
 
@@ -269,10 +257,11 @@ def collect_rent_comps(unit_count):
     
     for i in range(int(num_units)):
       rent_comp = {
+        "address1": address1,
         "unit_num": units_compared + i,
         "beds": beds,
         "baths": baths,
-        "rent": rent
+        "rent_estimate": rent
       }
       rent_comparables.append(rent_comp)
     units_compared += int(num_units)
@@ -284,39 +273,39 @@ def display_rent_comps(rent_comps):
   table.add_column("Unit #")
   table.add_column("Configuration", no_wrap=True)
   table.add_column("Estimated Rent")
-
   for comp in rent_comps:
     configuration = f"{comp["beds"]}-beds {comp["baths"]}-baths"
-    table.add_row(str(comp["unit_num"] + 1), configuration, str(comp["rent"]))
-  
+    table.add_row(str(comp["unit_num"] + 1), configuration, str(comp["rent_estimate"]))
   console.print(table)
 
-def add_rent_comps_to_sheet(property_details, rent_comps, unit_living_in):
-  prop = wb[property_details["address1"]]
-  prop["B43"] = unit_living_in
+def add_rent_to_supabase(rent_comps, supabase):
+  current_rents = supabase.table('rent_estimates').select('id').execute()
+  current_count = len(current_rents.data)
 
-  unit_to_row = {
-    0: 39,
-    1: 40,
-    2: 41,
-    3: 42
-  }
-
-  for comp in rent_comps:
-    row = unit_to_row[comp["unit_num"]]
-    prop[f"B{row}"] = f"{comp["beds"]}-beds {comp["baths"]}-baths" 
-    prop[f"C{row}"] = int(comp["rent"])
-
-def add_rent_comps_to_csv(property_details, rent_comps):
-  with open('./rent_estimates.csv', 'a', newline='') as csvfile:
-    writer = csv.writer(csvfile)
-    for comp in rent_comps:
-      writer.writerow([property_details["address1"], int(comp["unit_num"]) + 1, comp["beds"], comp["beds"], comp["rent"]])
+  for rent_comp in rent_comps:
+    rent_comp["id"] = current_count + 1
+    try:
+        query = supabase.table("rent_estimates").insert(rent_comp)
+        response = query.execute()
+        # Check if response has data
+        if hasattr(response, "data"):
+            print(f"Response data: {response.data}")
+        else:
+            print("Response has no 'data' attribute")
+            return False
+    except Exception as e:
+        print(f"Exception: {e}")
+        print(f"Exception type: {type(e)}")
+        return False
+    finally:
+      current_count += 1
+  
+  return True
 
 # --------------------------------------------------------
 
-def run_add_property():
-  console.print(Panel("Let's add a new property to analyze"), style="bold red")
+def run_add_property(supabase_client):
+  console.print("Let's add a new property to analyze", style="bold red")
   proceed = False
 
   while not proceed:
@@ -326,34 +315,28 @@ def run_add_property():
     if not proceed:
       console.print("Add the property details again", style="bold blue")
 
-  # add_property_sheet(property_details)
-  add_property_to_csv(property_details)
-  # edit_master_sheet(property_details)
+  succeeded = add_property_to_supabase(property_details, supabase_client)
+  
+  if not succeeded:
+    console.print("Something went wrong when adding the property, exiting early", style="bold red")
+    return
 
+  console.print("Property details added to Supabase", style="bold green")
   proceed2 = False
 
   while not proceed2:
     unit_count = property_details["units"]
-    console.print(Panel(f"Let's now add our rent comparables for this property.\nWe will add details for the {unit_count} units.", title="Rent Comparables"), style="bold red")
-    rent_comps = collect_rent_comps(unit_count)
+    console.print(f"Let's now add our rent comparables for this property.\nWe will add details for the {unit_count} units.", style="bold red")
+    rent_comps = collect_rent_comps(unit_count, property_details['address1'])
     display_rent_comps(rent_comps)
     proceed2 = questionary.confirm("Does everything look correct?").ask()
     if not proceed2:
       console.print("Add the rent comparables again", style="bold blue")
 
-  # available_units = []
+  succeeded2 = add_rent_to_supabase(rent_comps, supabase_client)
 
-  # for i in rent_comps:
-  #   available_units.append(f"Unit {i["unit_num"] + 1}")
+  if not succeeded2:
+    console.print("Something went wrong when adding rent comps", style="bold red")
+    return
 
-  # unit_living_in = questionary.select("Unit living in", choices=available_units).ask()
-  # add_rent_comps_to_sheet(property_details, rent_comps, unit_living_in)
-  add_rent_comps_to_csv(property_details, rent_comps)
-
-  # wb.save(EXCEL_FILE_PATH)
-  # wb.close()
-
-  # console.print(Panel("Workbook is saved and closed!"), style="bold green")
-
-if __name__ == "__main__":
-  run_add_property()
+  console.print("Property and rent comps added to Supabase", style="bold green")
