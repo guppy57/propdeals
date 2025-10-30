@@ -6,6 +6,7 @@ import yaml
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from add_property import run_add_property
 
 console = Console() 
 
@@ -573,16 +574,19 @@ def analyze_property(property_id):
                       f"Loan Amount: {format_currency(row['loan_amount'])}", 
                       title="Investment Requirements"))
 
+def view_loans_table():
+  pass
+
 using_application = True
 
 def run_all_properties_options():
   using_all_properties = True
-  choices = ["FHA Loan - All properties", "Phase 1 Qualifiers", "Property Info", "Quit"]
+  choices = ["Go back", "FHA Loan - All properties", "Phase 1 Qualifiers", "Property Info"]
 
   while using_all_properties:
     option = questionary.select("What would you like to display?", choices=choices).ask()
 
-    if option == "Quit":
+    if option == "Go back":
       using_all_properties = False
     elif option == "FHA Loan - All properties":
       display_all_properties(properties_df=None, title="Property Analysis - FHA Loan Scenario")
@@ -591,8 +595,22 @@ def run_all_properties_options():
     elif option == "Property Info":
       display_all_properties_info(properties_df=df)
 
+def run_loans_options():
+  using_loans = True
+  choices = ["Go back", "Add new loan", "View loans"]
+
+  while using_loans:
+    option = questionary.select("Select an option", choices=choices).ask()
+    if option == "Go back":
+      using_loans = False
+    elif option == "Add new loan":
+      console.print("Coming soon!!")
+    elif option == "View loans":
+      view_loans_table()
+
 while using_application:
-  option = questionary.select("What would you like to analyze?", choices=['All properties', 'One property', "Quit"]).ask()
+  choices = ['All properties', 'One property', "Add new property", "Loans", "Quit"]
+  option = questionary.select("What would you like to analyze?", choices=choices).ask()
 
   if option == "Quit":
     using_application = False
@@ -606,4 +624,7 @@ while using_application:
         property_ids.append(row["address1"])
     property_id = questionary.select("Select property", choices=property_ids).ask()
     analyze_property(property_id)
-
+  elif option == "Add new property":
+    run_add_property()
+  elif option == "Loans":
+    run_loans_options()

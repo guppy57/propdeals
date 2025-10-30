@@ -1,7 +1,6 @@
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from openpyxl import load_workbook
 from dotenv import load_dotenv
 import os
 import questionary
@@ -19,7 +18,7 @@ RENTCAST_HEADERS = {
 }
 
 console = Console()
-wb = load_workbook(EXCEL_FILE_PATH)
+# wb = load_workbook(EXCEL_FILE_PATH)
 
 def get_rentcast_data(property_details, rent_comps):
   pass
@@ -314,12 +313,9 @@ def add_rent_comps_to_csv(property_details, rent_comps):
     for comp in rent_comps:
       writer.writerow([property_details["address1"], int(comp["unit_num"]) + 1, comp["beds"], comp["beds"], comp["rent"]])
 
-def backfill_neighborhood_data():
-  pass
-
 # --------------------------------------------------------
 
-def run_program():
+def run_add_property():
   console.print(Panel("Let's add a new property to analyze"), style="bold red")
   proceed = False
 
@@ -354,10 +350,10 @@ def run_program():
   # add_rent_comps_to_sheet(property_details, rent_comps, unit_living_in)
   add_rent_comps_to_csv(property_details, rent_comps)
 
-  wb.save(EXCEL_FILE_PATH)
-  wb.close()
+  # wb.save(EXCEL_FILE_PATH)
+  # wb.close()
 
   # console.print(Panel("Workbook is saved and closed!"), style="bold green")
 
 if __name__ == "__main__":
-  run_program()
+  run_add_property()
