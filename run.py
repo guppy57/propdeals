@@ -38,17 +38,19 @@ def format_number(value):
 with open('assumptions.yaml', 'r') as file:
   assumptions = yaml.safe_load(file)
   appreciation_rate = assumptions["appreciation_rate"]
+  rent_appreciation_rate = assumptions["rent_appreciation_rate"]
   property_tax_rate = assumptions["property_tax_rate"]
   home_insurance_rate = assumptions["home_insurance_rate"]
   vacancy_rate = assumptions["vacancy_rate"]
   repair_savings_rate = assumptions["repair_savings_rate"]
   closing_costs_rate = assumptions["closing_costs_rate"]
   live_in_unit_setting = assumptions["unit_living_in"]
+
 ## LOAN DETAILS - load FHA loan details from Supabase and setup global variables
 fha_loan_get_response = supabase.table('loans').select("*").eq("id", 1).limit(1).single().execute()
 
 interest_rate = float(fha_loan_get_response.data['interest_rate'])
-down_payment_rate = int(fha_loan_get_response.data['down_payment_rate'])
+down_payment_rate = float(fha_loan_get_response.data['down_payment_rate'])
 loan_length_years = float(fha_loan_get_response.data['years'])
 mip_upfront_rate = float(fha_loan_get_response.data['mip_upfront_rate'])
 mip_annual_rate = float(fha_loan_get_response.data['mip_annual_rate'])
@@ -68,11 +70,11 @@ def calculate_mortgage(principal, annual_rate, years):
 def deal_score_property(row):
     score = 0
     
-    # 1. Cash Flow Performance (0-4 points)
+    # 1. Cash Flow Performance (0-6 points)
     score += (3 if row["monthly_cash_flow_y2"] > 500 else 
-              2 if row["monthly_cash_flow_y2"] > 300 else 
-              1 if row["monthly_cash_flow_y2"] > 100 else 0)
-    score += (1 if row["monthly_cash_flow_y1"] > 0 else 0)  # House-hacking bonus
+              2 if row["monthly_cash_flow_y2"] > 400 else 
+              1 if row["monthly_cash_flow_y2"] > 200 else 0)
+    score += (3 if row["monthly_cash_flow_y1"] > 0 else 2 if row["monthly_cash_flow_y1"] > -350 else 0)  # House-hacking bonus
     
     # 2. Return Metrics (0-4 points)  
     score += (3 if row["CoC_y2"] > 0.15 else 
@@ -89,15 +91,45 @@ def deal_score_property(row):
     score += (2 if row["cash_needed"] < 20000 else 1 if row["cash_needed"] < 30000 else 0)
     score += (1 if row["GRM_y2"] < 12 else 0)  # Lower GRM is better
     
-    # 5. Property Quality (0-3 points)
+    # 5. Property Quality (0-4 points)
     score += (2 if row["cost_per_sqrft"] < 100 else 1 if row["cost_per_sqrft"] < 150 else 0)
-    score += (1 if row["home_age"] < 20 else 0)
+    score += (2 if row["home_age"] < 20 else 0)
     
     return score
 
 def mobility_score(row):
   score = (row["walk_score"] * 0.6) + (row["transit_score"] * 0.30) + (row["bike_score"] * 0.10)
   return score
+
+def get_expected_gains(row, length_years):
+  current_home_value = row["purchase_price"]
+  loan_amount = row["loan_amount"]
+  y1_cashflow = row["annual_cash_flow_y1"]
+  y2_cashflow = row["annual_cash_flow_y2"]
+
+  # Calculate cumulative cashflows with compound growth
+  y1_cashflow_grown = y1_cashflow * (1 + rent_appreciation_rate)
+  cumulative_cashflow = y1_cashflow_grown
+  for year in range(2, length_years + 1):
+    yearly_cashflow = y2_cashflow * ((1 + rent_appreciation_rate) ** (year - 1))
+    cumulative_cashflow += yearly_cashflow
+
+  # Property appreciation gains
+  appreciation_gains = current_home_value * ((1 + appreciation_rate) ** length_years - 1)
+  
+  # Principal paydown using amortization formula
+  monthly_rate = interest_rate / 12
+  num_payments = loan_length_years * 12
+  total_payments_in_period = length_years * 12
+  
+  # Calculate remaining balance after length_years
+  remaining_balance = loan_amount * (
+    ((1 + monthly_rate) ** num_payments - (1 + monthly_rate) ** total_payments_in_period) /
+    ((1 + monthly_rate) ** num_payments - 1)
+  )
+  equity_gains = loan_amount - remaining_balance
+
+  return cumulative_cashflow + appreciation_gains + equity_gains
 
 def reload_dataframe():
     """Reload and recalculate all property data from supabase"""
@@ -177,6 +209,8 @@ def reload_dataframe():
     df["MGR_PP"] = df["total_rent"] / df["purchase_price"] # Monthly Gross Rent : Purchase Price, goal is for it to be greater than 0.01
     df["OpEx_Rent"] = df["operating_expenses"] / df["total_rent"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
     df["DSCR"] = df["total_rent"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
+    df["5y_forecast"] = df.apply(get_expected_gains, axis=1, args=(5,))
+    df["10y_forecast"] = df.apply(get_expected_gains, axis=1, args=(10,))
 
     # fifth, calculate property scores
     df["deal_score"] = df.apply(deal_score_property, axis=1)
@@ -195,6 +229,10 @@ def display_all_properties(properties_df, title):
   # Calculate mobility score percentiles for color coding
   mobility_75th_percentile = df['mobility_score'].quantile(0.75)
   mobility_25th_percentile = df['mobility_score'].quantile(0.25)
+
+  # Calculate investment growth percentiles for color coding
+  forecast_10y_75th_percentile = df['10y_forecast'].quantile(0.75)
+  forecast_10y_25th_percentile = df['10y_forecast'].quantile(0.25)
   
   # Add columns with proper alignment
   table.add_column("Address", style="cyan", no_wrap=True)
@@ -213,6 +251,7 @@ def display_all_properties(properties_df, title):
   table.add_column("DSCR", justify="right", style="blue")
   table.add_column("DS", justify="right", style="bold white") # deal score
   table.add_column("MS", justify="right", style="bold white") # mobility score
+  table.add_column("10Y", justify="right", style="bold white") # 10 year investment growth
   
   # Add rows for each property
   for _, row in dataframe.iterrows():
@@ -228,7 +267,7 @@ def display_all_properties(properties_df, title):
       opex_rent_style = "green" if 0.45 <= row['OpEx_Rent'] <= 0.55 else ("yellow" if 0.35 <= row['OpEx_Rent'] <= 0.65 else "red")
       dscr_style = "green" if row['DSCR'] >= 1.25 else "red"
       
-      # Deal score color coding (20-point scale)
+      # Deal score color coding (24-point scale)
       deal_score_style = ("green" if row['deal_score'] >= 15 else 
                           "yellow" if row['deal_score'] >= 12 else 
                           "red")
@@ -236,6 +275,11 @@ def display_all_properties(properties_df, title):
       mobility_score_style = ("green" if row['mobility_score'] >= mobility_75th_percentile else 
                           "yellow" if row['mobility_score'] >= mobility_25th_percentile else 
                           "red")
+      
+      # Forecast color coding based on percentiles
+      forecast_10y_style = ("green" if row['10y_forecast'] >= forecast_10y_75th_percentile else 
+                            "yellow" if row['10y_forecast'] >= forecast_10y_25th_percentile else 
+                            "red")
       
       table.add_row(
           str(row['address1']),
@@ -252,8 +296,9 @@ def display_all_properties(properties_df, title):
           f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
           f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
           f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
-          f"[{deal_score_style}]{int(row['deal_score'])}/20[/{deal_score_style}]",
-          f"[{mobility_score_style}]{int(row['mobility_score'])}/20[/{mobility_score_style}]"
+          f"[{deal_score_style}]{int(row['deal_score'])}/24[/{deal_score_style}]",
+          f"[{mobility_score_style}]{int(row['mobility_score'])}/20[/{mobility_score_style}]",
+          f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]"
       )
   
   console.print(table)
@@ -477,6 +522,12 @@ def analyze_property(property_id):
     table.add_row("Annual Rent",
                   format_currency(row['annual_rent_y1']),
                   format_currency(row['annual_rent_y2']))
+    table.add_row("5-Year Investment Gain",
+                  format_currency(row['5y_forecast']),
+                  format_currency(row['5y_forecast']))
+    table.add_row("10-Year Investment Gain",
+                  format_currency(row['10y_forecast']),
+                  format_currency(row['10y_forecast']))
     
     # Add new metrics with color coding
     mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
@@ -513,7 +564,7 @@ def analyze_property(property_id):
     cash_score = (2 if row["cash_needed"] < 20000 else 1 if row["cash_needed"] < 30000 else 0)
     grm_score = (1 if row["GRM_y2"] < 12 else 0)
     sqft_score = (2 if row["cost_per_sqrft"] < 100 else 1 if row["cost_per_sqrft"] < 150 else 0)
-    age_score = (1 if row["home_age"] < 20 else 0)
+    age_score = (2 if row["home_age"] < 20 else 0)
     
     # Deal score color
     deal_score_style = ("green" if row['deal_score'] >= 15 else "yellow" if row['deal_score'] >= 12 else "red")
@@ -528,8 +579,8 @@ def analyze_property(property_id):
     criteria_table.add_row("Cash Needed", f"[white]{cash_score}[/white]", "2", f"${row['cash_needed']:,.0f}")
     criteria_table.add_row("GRM", f"[white]{grm_score}[/white]", "1", f"{row['GRM_y2']:.1f}")
     criteria_table.add_row("Cost per Sqft", f"[white]{sqft_score}[/white]", "2", f"${row['cost_per_sqrft']:.0f}")
-    criteria_table.add_row("Property Age", f"[white]{age_score}[/white]", "1", f"{row['home_age']:.0f} years")
-    criteria_table.add_row("[bold]TOTAL SCORE[/bold]", f"[bold {deal_score_style}]{int(row['deal_score'])}[/bold {deal_score_style}]", "[bold]20[/bold]", 
+    criteria_table.add_row("Property Age", f"[white]{age_score}[/white]", "2", f"{row['home_age']:.0f} years")
+    criteria_table.add_row("[bold]TOTAL SCORE[/bold]", f"[bold {deal_score_style}]{int(row['deal_score'])}[/bold {deal_score_style}]", "[bold]24[/bold]", 
                           f"[bold {deal_score_style}]{'Excellent' if row['deal_score'] >= 15 else 'Good' if row['deal_score'] >= 12 else 'Poor'}[/bold {deal_score_style}]")
     
     console.print(criteria_table)

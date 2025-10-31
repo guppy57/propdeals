@@ -1,4 +1,5 @@
 appreciation_rate: 0.02
+rent_appreciation_rate: 0.01
 property_tax_rate: 0.01565
 home_insurance_rate: 0.02
 vacancy_rate: 0.0833
