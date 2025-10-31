@@ -234,10 +234,34 @@ def display_all_properties(properties_df, title):
   forecast_10y_75th_percentile = df['10y_forecast'].quantile(0.75)
   forecast_10y_25th_percentile = df['10y_forecast'].quantile(0.25)
   
+  # Calculate quintile percentiles for price and cash needed (lower is better)
+  price_20th = dataframe['purchase_price'].quantile(0.20)
+  price_40th = dataframe['purchase_price'].quantile(0.40)
+  price_60th = dataframe['purchase_price'].quantile(0.60)
+  price_80th = dataframe['purchase_price'].quantile(0.80)
+  
+  cash_20th = dataframe['cash_needed'].quantile(0.20)
+  cash_40th = dataframe['cash_needed'].quantile(0.40)
+  cash_60th = dataframe['cash_needed'].quantile(0.60)
+  cash_80th = dataframe['cash_needed'].quantile(0.80)
+  
+  def get_quintile_color(value, p20, p40, p60, p80):
+    """Return color based on quintile position (lower values = better = greener)"""
+    if value <= p20:
+      return "bright_green"
+    elif value <= p40:
+      return "green"
+    elif value <= p60:
+      return "yellow"
+    elif value <= p80:
+      return "orange3"
+    else:
+      return "red"
+  
   # Add columns with proper alignment
   table.add_column("Address", style="cyan", no_wrap=True)
-  table.add_column("Price", justify="right", style="green", no_wrap=True)
-  table.add_column("Cash Needed", justify="right", style="yellow")
+  table.add_column("Price", justify="right", no_wrap=True)
+  table.add_column("Cash Needed", justify="right")
   table.add_column("Costs/mo", justify="right", style="yellow")
   table.add_column("CF/mo Y1", justify="right", no_wrap=True, style="red" if df['monthly_cash_flow_y1'].iloc[0] < 0 else "green")
   table.add_column("CF/mo Y2", justify="right", no_wrap=True, style="red" if df['monthly_cash_flow_y2'].iloc[0] < 0 else "green")
@@ -281,10 +305,14 @@ def display_all_properties(properties_df, title):
                             "yellow" if row['10y_forecast'] >= forecast_10y_25th_percentile else 
                             "red")
       
+      # Price and cash needed quintile color coding (lower values = better)
+      price_style = get_quintile_color(row['purchase_price'], price_20th, price_40th, price_60th, price_80th)
+      cash_style = get_quintile_color(row['cash_needed'], cash_20th, cash_40th, cash_60th, cash_80th)
+      
       table.add_row(
           str(row['address1']),
-          format_currency(row['purchase_price']),
-          format_currency(row['cash_needed']),
+          f"[{price_style}]{format_currency(row['purchase_price'])}[/{price_style}]",
+          f"[{cash_style}]{format_currency(row['cash_needed'])}[/{cash_style}]",
           format_currency(row['total_monthly_cost']),
           f"[{cf_y1_style}]{format_currency(row['monthly_cash_flow_y1'])}[/{cf_y1_style}]",
           f"[{cf_y2_style}]{format_currency(row['monthly_cash_flow_y2'])}[/{cf_y2_style}]",
