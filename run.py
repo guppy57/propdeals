@@ -236,16 +236,16 @@ def display_all_properties(properties_df, title):
   
   # Add columns with proper alignment
   table.add_column("Address", style="cyan", no_wrap=True)
-  table.add_column("Price", justify="right", style="green")
+  table.add_column("Price", justify="right", style="green", no_wrap=True)
   table.add_column("Cash Needed", justify="right", style="yellow")
   table.add_column("Costs/mo", justify="right", style="yellow")
-  table.add_column("CF/mo Y1", justify="right", style="red" if df['monthly_cash_flow_y1'].iloc[0] < 0 else "green")
-  table.add_column("CF/mo Y2", justify="right", style="red" if df['monthly_cash_flow_y2'].iloc[0] < 0 else "green")
+  table.add_column("CF/mo Y1", justify="right", no_wrap=True, style="red" if df['monthly_cash_flow_y1'].iloc[0] < 0 else "green")
+  table.add_column("CF/mo Y2", justify="right", no_wrap=True, style="red" if df['monthly_cash_flow_y2'].iloc[0] < 0 else "green")
   table.add_column("NOI Y2", justify="right", style="yellow")
   table.add_column("CapR Y1", justify="right", style="blue")
   table.add_column("CapR Y2", justify="right", style="blue")
   table.add_column("CoC Y2", justify="right", style="purple")
-  table.add_column("GRM Y1", justify="right", style="orange3")
+  # table.add_column("GRM Y1", justify="right", style="orange3")
   table.add_column("1% Rule", justify="right", style="cyan")
   table.add_column("50% Rule", justify="right", style="magenta")
   table.add_column("DSCR", justify="right", style="blue")
@@ -263,7 +263,7 @@ def display_all_properties(properties_df, title):
       noi_style = "red" if row["monthly_NOI"] < 0 else "green"
       
       # Determine metric colors based on goals
-      mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
+      # mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
       opex_rent_style = "green" if 0.45 <= row['OpEx_Rent'] <= 0.55 else ("yellow" if 0.35 <= row['OpEx_Rent'] <= 0.65 else "red")
       dscr_style = "green" if row['DSCR'] >= 1.25 else "red"
       
@@ -293,11 +293,11 @@ def display_all_properties(properties_df, title):
           format_percentage(row['cap_rate_y2']),
           format_percentage(row['CoC_y2']),
           format_number(row['GRM_y1']),
-          f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
+          # f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
           f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
           f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
           f"[{deal_score_style}]{int(row['deal_score'])}/24[/{deal_score_style}]",
-          f"[{mobility_score_style}]{int(row['mobility_score'])}/20[/{mobility_score_style}]",
+          f"[{mobility_score_style}]{int(row['mobility_score'])}[/{mobility_score_style}]",
           f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]"
       )
   
