@@ -7,13 +7,28 @@ from rich.panel import Panel
 from rich.table import Table
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from prompt_toolkit.styles import Style
+from InquirerPy import inquirer
 
 from add_property import run_add_property
+from rent_research import RentResearcher
 
 load_dotenv()
 
 console = Console() 
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+
+# Create white style for questionary prompts
+white_style = Style([
+    ('qmark', 'fg:white bold'),           # question mark
+    ('question', 'fg:white'),             # question text
+    ('answer', 'fg:white bold'),          # submitted answer
+    ('text', 'fg:white'),                 # input text
+    ('completion-menu', 'fg:white'),      # autocomplete menu
+    ('completion-menu.completion', 'fg:white'),  # autocomplete items
+    ('completion-menu.completion.current', 'fg:white bg:blue'),  # selected item
+    ('', 'fg:white')                      # fallback
+])
 
 def format_currency(value):
     """Format currency values with $ sign, commas, and 2 decimal places"""
@@ -332,7 +347,7 @@ def display_all_properties(properties_df, title):
   console.print(table)
 
 # displays all properties that match our dealflow analysis strict criteria
-def display_all_qualifying_properties():
+def display_all_phase1_qualifying_properties():
     """
     This method filters all properties based on our criteria for what is a financially viable property
     Current criteria:
@@ -348,6 +363,23 @@ def display_all_qualifying_properties():
     display_all_properties(
         properties_df=filtered_df, title="Phase 1 Criteria Qualifying Properties"
     )
+
+# determines what price each property would have to be to qualify for phase 1 criteria 
+def fit_purchase_price_to_phase_1():
+  """
+  Method determines what percentage to decrease purchase price to fix all of our phase 1 criteria
+  This factor would then answer the question: "At what price does this property qualify for Phase 1"
+
+  We will *not* apply this to properties that *already qualify for Phase 1*
+  """
+  filtered_df = df.copy()
+  filtered_df = filtered_df.query(
+      "MGR_PP < 0.01 & OpEx_Rent > 0.5 & DSCR < 1.25 & cash_needed > 25000 & monthly_cash_flow_y1 < -400 & monthly_cash_flow_y2 < 400"
+  )
+
+  # for _, row in dataframe.iterrows():
+  #   pass
+
 
 def display_all_properties_info(properties_df):
     """Display all properties with basic info: address, sqft, age, units, mobility scores, and electricity cost"""
@@ -667,6 +699,86 @@ def analyze_property(property_id):
                       f"[bold]Total Cash Needed: {format_currency(row['cash_needed'])}[/bold]\n"
                       f"Loan Amount: {format_currency(row['loan_amount'])}", 
                       title="Investment Requirements"))
+    
+    # Rent research options
+    console.print("\n")
+    research_choice = questionary.select(
+        "Would you like to generate or view rental market research for this property?",
+        choices=[
+            "Generate new rent research (AI-powered)",
+            "View existing research reports", 
+            "Skip - return to main menu"
+        ]
+    ).ask()
+    
+    if research_choice == "Generate new rent research (AI-powered)":
+        handle_rent_research_generation(property_id)
+    elif research_choice == "View existing research reports":
+        handle_view_research_reports(property_id)
+
+def handle_rent_research_generation(property_id: str):
+    researcher = RentResearcher(supabase, console)
+    
+    try:
+        report_id = researcher.generate_rent_research(property_id)
+        
+        if report_id:
+            console.print(f"[green]✅ Research completed! Report ID: {report_id}[/green]")
+            
+            # Ask if user wants to view the report immediately
+            view_now = questionary.confirm("Would you like to view the report now?").ask()
+            
+            if view_now:
+                report_data = researcher.get_report_by_id(report_id)
+                if report_data:
+                    researcher.display_report(report_data['report_content'])
+        else:
+            console.print("[red]❌ Research generation failed.[/red]")
+            
+    except Exception as e:
+        console.print(f"[red]Error during research generation: {str(e)}[/red]")
+
+def handle_view_research_reports(property_id: str):
+    """Handle viewing existing research reports for a property"""
+    
+    researcher = RentResearcher(supabase, console)
+    reports = researcher.get_reports_for_property(property_id)
+    
+    if not reports:
+        console.print("[yellow]No research reports found for this property.[/yellow]")
+        return
+    
+    # Create report selection list
+    report_choices = []
+    for report in reports:
+        created_date = report['created_at'][:10]  # Extract date part
+        status = report['status']
+        cost = report['api_cost']
+        report_choices.append(f"{created_date} - {status} (${cost:.4f}) - ID: {report['id'][:8]}")
+    
+    report_choices.append("← Go back")
+    
+    selected = questionary.select(
+        "Select a research report to view:",
+        choices=report_choices
+    ).ask()
+    
+    if selected == "← Go back":
+        return
+    
+    # Extract report ID from selection
+    selected_id = None
+    for report in reports:
+        if report['id'][:8] in selected:
+            selected_id = report['id']
+            break
+    
+    if selected_id:
+        report_data = researcher.get_report_by_id(selected_id)
+        if report_data:
+            researcher.display_report(report_data['report_content'])
+        else:
+            console.print("[red]Error loading report.[/red]")
 
 def view_loans_table():
   pass
@@ -685,7 +797,7 @@ def run_all_properties_options():
     elif option == "FHA Loan - All properties":
       display_all_properties(properties_df=None, title="Property Analysis - FHA Loan Scenario")
     elif option == "Phase 1 Qualifiers":
-      display_all_qualifying_properties()
+      display_all_phase1_qualifying_properties()
     elif option == "Property Info":
       display_all_properties_info(properties_df=df)
 
@@ -715,7 +827,14 @@ while using_application:
     properties_get_response = supabase.table('properties').select('address1').execute()
     for row in properties_get_response.data:
       property_ids.append(row['address1'])
-    property_id = questionary.select("Select property", choices=property_ids).ask()
+    property_id = inquirer.fuzzy(
+        message="Type to search properties",
+        choices=property_ids,
+        default="",
+        multiselect=False,
+        validate=None,
+        invalid_message="Invalid input"
+    ).execute()
     analyze_property(property_id)
   elif option == "Add new property":
     run_add_property(supabase_client=supabase)
