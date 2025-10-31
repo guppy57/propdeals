@@ -184,7 +184,7 @@ def reload_dataframe():
 
     rents_get_response = supabase.table('rent_estimates').select('*').execute()
     rents = pd.DataFrame(rents_get_response.data)
-    rents.drop(['id'], axis=1)
+    rents = rents.drop(['id'], axis=1)
 
     # Aggregate: sum all rents and find minimum rent per property
     rent_summary = rents.groupby("address1")["rent_estimate"].agg(["sum", "min"]).reset_index()
@@ -278,8 +278,8 @@ def display_all_properties(properties_df, title):
   table.add_column("Price", justify="right", no_wrap=True)
   table.add_column("Cash Needed", justify="right")
   table.add_column("Costs/mo", justify="right", style="yellow")
-  table.add_column("CF/mo Y1", justify="right", no_wrap=True, style="red" if df['monthly_cash_flow_y1'].iloc[0] < 0 else "green")
-  table.add_column("CF/mo Y2", justify="right", no_wrap=True, style="red" if df['monthly_cash_flow_y2'].iloc[0] < 0 else "green")
+  table.add_column("CF/mo Y1", justify="right", no_wrap=True)
+  table.add_column("CF/mo Y2", justify="right", no_wrap=True)
   table.add_column("NOI Y2", justify="right", style="yellow")
   table.add_column("CapR Y1", justify="right", style="blue")
   table.add_column("CapR Y2", justify="right", style="blue")
@@ -372,13 +372,27 @@ def fit_purchase_price_to_phase_1():
 
   We will *not* apply this to properties that *already qualify for Phase 1*
   """
+  # Get properties that DON'T qualify for Phase 1 (use OR logic to catch any failing criteria)
   filtered_df = df.copy()
   filtered_df = filtered_df.query(
-      "MGR_PP < 0.01 & OpEx_Rent > 0.5 & DSCR < 1.25 & cash_needed > 25000 & monthly_cash_flow_y1 < -400 & monthly_cash_flow_y2 < 400"
+      "MGR_PP < 0.01 | OpEx_Rent > 0.5 | DSCR < 1.25 | cash_needed > 25000 | monthly_cash_flow_y1 < -400 | monthly_cash_flow_y2 < 400"
   )
+  
+  console.print(f"[yellow]Found {len(filtered_df)} properties that don't meet Phase 1 criteria[/yellow]")
+  console.print("[dim]This feature is still under development[/dim]")
+  
+  # TODO: Implement price adjustment calculation
+  # For each property, calculate what price would make:
+  # - MGR_PP >= 0.01 (1% rule)
+  # - OpEx_Rent <= 0.5 (50% rule) 
+  # - DSCR >= 1.25
+  # - cash_needed <= 25000
+  # - monthly_cash_flow_y1 >= -400
+  # - monthly_cash_flow_y2 >= 400
 
-  # for _, row in dataframe.iterrows():
-  #   pass
+  for _, row in filtered_df.iterrows():
+    x_1 = row["total_rent"] / (row["purchase_price"] * 0.0105) # find x for MGR_PP
+    x_2 
 
 
 def display_all_properties_info(properties_df):
@@ -440,9 +454,9 @@ def display_all_properties_info(properties_df):
         # Age: lower is better (younger houses are green)
         built_in_style = (
             "green"
-            if row["home_age"] >= built_75th_percentile
+            if row["home_age"] <= built_25th_percentile
             else "yellow"
-            if row["home_age"] >= built_25th_percentile
+            if row["home_age"] <= built_75th_percentile
             else "red"
         )
 
@@ -613,9 +627,9 @@ def analyze_property(property_id):
     criteria_table.add_column("Max", justify="right", style="dim white", width=5)
     criteria_table.add_column("Details", style="dim cyan")
     
-    # Calculate individual component scores for display
-    cf_y2_score = (3 if row["monthly_cash_flow_y2"] > 500 else 2 if row["monthly_cash_flow_y2"] > 300 else 1 if row["monthly_cash_flow_y2"] > 100 else 0)
-    cf_y1_bonus = (1 if row["monthly_cash_flow_y1"] > 0 else 0)
+    # Calculate individual component scores for display (match the actual scoring function)
+    cf_y2_score = (3 if row["monthly_cash_flow_y2"] > 500 else 2 if row["monthly_cash_flow_y2"] > 400 else 1 if row["monthly_cash_flow_y2"] > 200 else 0)
+    cf_y1_bonus = (3 if row["monthly_cash_flow_y1"] > 0 else 2 if row["monthly_cash_flow_y1"] > -350 else 0)
     coc_score = (3 if row["CoC_y2"] > 0.15 else 2 if row["CoC_y2"] > 0.12 else 1 if row["CoC_y2"] > 0.08 else 0)
     cap_score = (1 if row["cap_rate_y2"] > 0.06 else 0)
     mgr_score = (2 if row["MGR_PP"] >= 0.01 else 1 if row["MGR_PP"] >= 0.008 else 0)
@@ -630,7 +644,7 @@ def analyze_property(property_id):
     deal_score_style = ("green" if row['deal_score'] >= 15 else "yellow" if row['deal_score'] >= 12 else "red")
     
     criteria_table.add_row("Cash Flow Y2", f"[white]{cf_y2_score}[/white]", "3", f"${row['monthly_cash_flow_y2']:.0f}/month")
-    criteria_table.add_row("Cash Flow Y1 Bonus", f"[white]{cf_y1_bonus}[/white]", "1", f"${row['monthly_cash_flow_y1']:.0f}/month")
+    criteria_table.add_row("Cash Flow Y1 Bonus", f"[white]{cf_y1_bonus}[/white]", "3", f"${row['monthly_cash_flow_y1']:.0f}/month")
     criteria_table.add_row("Cash-on-Cash Return", f"[white]{coc_score}[/white]", "3", f"{row['CoC_y2']:.1%}")
     criteria_table.add_row("Cap Rate", f"[white]{cap_score}[/white]", "1", f"{row['cap_rate_y2']:.1%}")
     criteria_table.add_row("1% Rule", f"[white]{mgr_score}[/white]", "2", f"{row['MGR_PP']:.2%}")

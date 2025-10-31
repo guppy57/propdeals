@@ -23,12 +23,11 @@ from supabase import Client
 @dataclass
 class ResearchConfig:
     """Configuration for rent research operations"""
-    reasoning_model: str = "o1-mini"
-    max_tokens: int = 65536  # o1-mini supports up to 65k output tokens
+    reasoning_model: str = "gpt-5"
+    max_tokens: int = 120000 
     search_cost_per_query: float = 0.008  # Tavily cost
-    reasoning_cost_per_input_token: float = 0.000003  # o1-mini input
-    reasoning_cost_per_output_token: float = 0.000012  # o1-mini output
-    timeout_seconds: int = 180  # o1-mini can take longer for reasoning
+    reasoning_cost_per_input_token: float = 1.25 / 1000000
+    reasoning_cost_per_output_token: float = 10 / 1000000
     searches_per_property: int = 12
 
 
@@ -41,10 +40,10 @@ class RentResearcher:
         self.config = ResearchConfig()
         
         # Initialize OpenAI client for reasoning
-        openai.api_key = os.getenv("OPENAI_API_KEY")
-        if not openai.api_key:
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable not set")
-        self.openai_client = openai.OpenAI(api_key=openai.api_key)
+        self.openai_client = openai.OpenAI(api_key=openai_api_key)
         
         # Initialize Tavily client for search
         tavily_api_key = os.getenv("TAVILY_API_KEY")
@@ -99,8 +98,15 @@ class RentResearcher:
         """Perform Tavily searches for all queries"""
         
         search_results = []
+        total_queries = len(queries)
+        successful_searches = 0
         
-        for query in queries:
+        self.console.print(f"\n[bold cyan]🔍 Starting Tavily search for {total_queries} queries...[/bold cyan]\n")
+        
+        for i, query in enumerate(queries, 1):
+            # Pre-search logging
+            self.console.print(f"[cyan]🔍 [{i}/{total_queries}] Searching:[/cyan] [white]\"{query}\"[/white]")
+            
             try:
                 response = self.tavily_client.search(
                     query=query,
@@ -111,6 +117,9 @@ class RentResearcher:
                 )
                 
                 if response and 'results' in response:
+                    results_count = len(response['results'])
+                    sources_count = len(set(result.get('url', '') for result in response['results']))
+                    
                     for result in response['results']:
                         search_results.append({
                             'query': query,
@@ -120,16 +129,32 @@ class RentResearcher:
                             'raw_content': result.get('raw_content', ''),
                             'score': result.get('score', 0)
                         })
+                    
+                    # Post-search success logging
+                    self.console.print(f"[green]   ✅ Found {results_count} results from {sources_count} sources[/green]\n")
+                    successful_searches += 1
+                else:
+                    # Post-search no results logging
+                    self.console.print("[yellow]   ❌ No results found[/yellow]\n")
                         
             except Exception as e:
-                self.console.print(f"[yellow]Search failed for query '{query}': {str(e)}[/yellow]")
+                # Enhanced error logging
+                self.console.print(f"[red]   ❌ Search failed: {str(e)}[/red]\n")
                 continue
+        
+        # Overall search statistics summary
+        total_results = len(search_results)
+        failed_searches = total_queries - successful_searches
+        
+        self.console.print("[bold green]📊 Search Summary:[/bold green]")
+        self.console.print(f"[green]   • Successful searches: {successful_searches}/{total_queries}[/green]")
+        if failed_searches > 0:
+            self.console.print(f"[yellow]   • Failed searches: {failed_searches}[/yellow]")
+        self.console.print(f"[cyan]   • Total results collected: {total_results} data points[/cyan]\n")
         
         return search_results
     
     def _create_analysis_prompt(self, property_data: Dict[str, Any], search_results: List[Dict[str, Any]]) -> str:
-        """Create comprehensive analysis prompt for o1-mini"""
-        
         address = property_data.get('address1', 'Unknown Address')
         purchase_price = property_data.get('purchase_price', 0)
         beds = property_data.get('beds', 0)
@@ -252,8 +277,6 @@ Generate a comprehensive, data-driven analysis that demonstrates deep reasoning 
         return prompt.strip()
     
     def _analyze_with_reasoning_model(self, prompt: str) -> Dict[str, Any]:
-        """Use o1-mini to analyze search results and generate comprehensive report"""
-        
         try:
             response = self.openai_client.chat.completions.create(
                 model=self.config.reasoning_model,
@@ -264,7 +287,6 @@ Generate a comprehensive, data-driven analysis that demonstrates deep reasoning 
                     }
                 ],
                 max_completion_tokens=self.config.max_tokens
-                # Note: o1-mini doesn't use system messages or temperature
             )
             
             content = response.choices[0].message.content
@@ -323,6 +345,9 @@ Generate a comprehensive, data-driven analysis that demonstrates deep reasoning 
         # Get property data
         try:
             property_response = self.supabase.table('properties').select('*').eq('address1', property_id).single().execute()
+            if not property_response.data:
+                self.console.print(f"[red]Property not found: {property_id}[/red]")
+                return None
             property_data = property_response.data
         except Exception as e:
             self.console.print(f"[red]Error fetching property data: {str(e)}[/red]")
@@ -352,7 +377,7 @@ Generate a comprehensive, data-driven analysis that demonstrates deep reasoning 
                 self._store_report(property_id, "No market data found for analysis", Decimal('0.0000'), "failed")
                 return None
             
-            progress.update(task, description=f"[cyan]Deep reasoning analysis with o1-mini ({len(search_results)} data points)...")
+            progress.update(task, description=f"[cyan]Deep reasoning analysis with {self.config.reasoning_model} ({len(search_results)} data points)...")
             
             # Create analysis prompt
             analysis_prompt = self._create_analysis_prompt(property_data, search_results)
@@ -435,20 +460,3 @@ Generate a comprehensive, data-driven analysis that demonstrates deep reasoning 
             return []
 
 
-# Convenience function for standalone usage
-def run_rent_research(property_id: str, supabase_client: Client, 
-                          console: Console) -> Optional[str]:
-    """
-    Convenience function to run rent research for a property
-    
-    Args:
-        property_id: The property address/ID to research
-        supabase_client: Supabase client instance
-        console: Rich console instance
-        
-    Returns:
-        Report ID if successful, None if failed
-    """
-    
-    researcher = RentResearcher(supabase_client, console)
-    return researcher.generate_rent_research(property_id)
