@@ -760,37 +760,40 @@ def handle_view_research_reports(property_id: str):
         console.print("[yellow]No research reports found for this property.[/yellow]")
         return
     
-    # Create report selection list
-    report_choices = []
-    for report in reports:
-        created_date = report['created_at'][:10]  # Extract date part
-        status = report['status']
-        cost = report['api_cost']
-        report_choices.append(f"{created_date} - {status} (${cost:.4f}) - ID: {report['id'][:8]}")
-    
-    report_choices.append("← Go back")
-    
-    selected = questionary.select(
-        "Select a research report to view:",
-        choices=report_choices
-    ).ask()
-    
-    if selected == "← Go back":
-        return
-    
-    # Extract report ID from selection
-    selected_id = None
-    for report in reports:
-        if report['id'][:8] in selected:
-            selected_id = report['id']
-            break
-    
-    if selected_id:
-        report_data = researcher.get_report_by_id(selected_id)
-        if report_data:
-            researcher.display_report(report_data['report_content'])
-        else:
-            console.print("[red]Error loading report.[/red]")
+    # Loop to keep showing the report selection menu after viewing reports
+    while True:
+        # Create report selection list
+        report_choices = []
+        for report in reports:
+            created_date = report['created_at'][:10]  # Extract date part
+            status = report['status']
+            cost = report['api_cost']
+            report_choices.append(f"{created_date} - {status} (${cost:.4f}) - ID: {report['id'][:8]}")
+        
+        report_choices.append("← Go back")
+        
+        selected = questionary.select(
+            "Select a research report to view:",
+            choices=report_choices
+        ).ask()
+        
+        if selected == "← Go back":
+            return
+        
+        # Extract report ID from selection
+        selected_id = None
+        for report in reports:
+            if report['id'][:8] in selected:
+                selected_id = report['id']
+                break
+        
+        if selected_id:
+            report_data = researcher.get_report_by_id(selected_id)
+            if report_data:
+                researcher.display_report(report_data['report_content'])
+                # After viewing the report, continue the loop to show the selection menu again
+            else:
+                console.print("[red]Error loading report.[/red]")
 
 def view_loans_table():
   pass
