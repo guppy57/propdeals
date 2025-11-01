@@ -426,22 +426,20 @@ Generate a comprehensive, data-driven analysis that demonstrates deep reasoning 
             return report_id
     
     def display_report(self, report_content: str):
-        """Display a research report using Rich markdown rendering"""
-        
         # Create markdown object
         markdown = Markdown(report_content)
         
         # Display with panel
-        self.console.print(Panel(
-            markdown,
-            title="[bold cyan]Rental Market Research Report[/bold cyan]",
-            border_style="cyan",
-            padding=(1, 2)
-        ))
+        
+        with self.console.pager(styles=True):
+          self.console.print(Panel(
+              markdown,
+              title="[bold cyan]Rental Market Research Report[/bold cyan]",
+              border_style="cyan",
+              padding=(1, 2)
+          ))
     
     def get_report_by_id(self, report_id: str) -> Optional[Dict[str, Any]]:
-        """Retrieve a research report by ID"""
-        
         try:
             result = self.supabase.table('research_reports').select('*').eq('id', report_id).single().execute()
             return result.data
@@ -450,8 +448,6 @@ Generate a comprehensive, data-driven analysis that demonstrates deep reasoning 
             return None
     
     def get_reports_for_property(self, property_id: str) -> list:
-        """Get all research reports for a property"""
-        
         try:
             result = self.supabase.table('research_reports').select('*').eq('property_id', property_id).order('created_at', desc=True).execute()
             return result.data

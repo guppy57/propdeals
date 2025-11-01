@@ -753,8 +753,6 @@ def handle_rent_research_generation(property_id: str):
         console.print(f"[red]Error during research generation: {str(e)}[/red]")
 
 def handle_view_research_reports(property_id: str):
-    """Handle viewing existing research reports for a property"""
-    
     researcher = RentResearcher(supabase, console)
     reports = researcher.get_reports_for_property(property_id)
     
