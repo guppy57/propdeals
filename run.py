@@ -12,6 +12,7 @@ from InquirerPy import inquirer
 
 from add_property import run_add_property
 from rent_research import RentResearcher
+from loans import LoansProvider
 
 load_dotenv()
 
@@ -872,56 +873,172 @@ def handle_generate_rent_estimates(property_id: str):
         result = researcher.generate_rent_estimates_from_report(selected_id)
         
         if result["success"]:
-            # Display the estimates in a nice table
-            estimates_table = Table(title=f"Rent Estimates for {property_id}", 
-                                  show_header=True, header_style="bold green")
-            estimates_table.add_column("Estimate Type", style="cyan", width=20)
-            estimates_table.add_column("Monthly Amount", justify="right", style="green", width=15)
-            estimates_table.add_column("Annual Amount", justify="right", style="blue", width=15)
-            
             estimates = result["estimates"]
+            existing_estimates = result.get("existing_estimates", {})
+            unit_configs = result.get("unit_configs", [])
             
-            # Add rows for each estimate type
+            # Display per-unit comparison table
+            estimates_table = Table(title=f"Rent Estimate Comparison for {property_id}", 
+                                  show_header=True, header_style="bold green")
+            estimates_table.add_column("Unit", style="cyan", width=6)
+            estimates_table.add_column("Config", style="yellow", width=12)
+            estimates_table.add_column("Current Rent", justify="right", style="white", width=12)
+            estimates_table.add_column("New Primary", justify="right", style="green", width=12)
+            estimates_table.add_column("New Range", justify="right", style="blue", width=15)
+            estimates_table.add_column("Difference", justify="right", style="bold", width=12)
+            estimates_table.add_column("Change %", justify="right", style="bold", width=10)
+            
+            total_current_primary = 0
+            total_new_low = 0
+            total_new_primary = 0
+            total_new_high = 0
+            
+            # Process each unit configuration
+            for config in unit_configs:
+                for unit in config['units']:
+                    unit_num = unit['unit_num']
+                    config_key = config['config_key']
+                    base_name = f"unit_{unit_num}_{config_key}"
+                    
+                    # Get new estimates for this unit
+                    new_low = estimates.get(f"{base_name}_rent_estimate_low", 0)
+                    new_primary = estimates.get(f"{base_name}_rent_estimate", 0)
+                    new_high = estimates.get(f"{base_name}_rent_estimate_high", 0)
+                    
+                    # Get existing estimates for this unit
+                    existing_data = existing_estimates.get(base_name, {})
+                    current_primary = existing_data.get('rent_estimate', 0)
+                    
+                    # Calculate differences
+                    difference = new_primary - current_primary
+                    change_percent = (difference / current_primary * 100) if current_primary > 0 else 0
+                    
+                    # Add to totals
+                    total_current_primary += current_primary
+                    total_new_low += new_low
+                    total_new_primary += new_primary
+                    total_new_high += new_high
+                    
+                    # Format configuration display
+                    config_display = f"{config['beds']}b{config['baths']}b"
+                    
+                    # Style difference based on increase/decrease
+                    if difference > 0:
+                        diff_style = "green"
+                        diff_symbol = "+"
+                        change_style = "green"
+                        change_percent_formatted = f"+{change_percent:.1f}%"
+                    elif difference < 0:
+                        diff_style = "red"
+                        diff_symbol = ""
+                        change_style = "red"
+                        change_percent_formatted = f"{change_percent:.1f}%"
+                    else:
+                        diff_style = "white"
+                        diff_symbol = ""
+                        change_style = "white"
+                        change_percent_formatted = f"{change_percent:.1f}%"
+                    
+                    # Add row to table
+                    estimates_table.add_row(
+                        f"Unit {unit_num}",
+                        config_display,
+                        f"${current_primary:,.0f}",
+                        f"[bold]${new_primary:,.0f}[/bold]",
+                        f"${new_low:,.0f}-{new_high:,.0f}",
+                        f"[{diff_style}]{diff_symbol}${abs(difference):,.0f}[/{diff_style}]",
+                        f"[{change_style}]{change_percent_formatted}[/{change_style}]"
+                    )
+            
+            # Calculate total differences
+            total_difference = total_new_primary - total_current_primary
+            total_change_percent = (total_difference / total_current_primary * 100) if total_current_primary > 0 else 0
+            
+            # Style total difference
+            if total_difference > 0:
+                total_diff_style = "green"
+                total_diff_symbol = "+"
+                total_change_style = "green"
+                total_change_percent_formatted = f"+{total_change_percent:.1f}%"
+            elif total_difference < 0:
+                total_diff_style = "red"
+                total_diff_symbol = ""
+                total_change_style = "red"
+                total_change_percent_formatted = f"{total_change_percent:.1f}%"
+            else:
+                total_diff_style = "white"
+                total_diff_symbol = ""
+                total_change_style = "white"
+                total_change_percent_formatted = f"{total_change_percent:.1f}%"
+            
+            # Add totals row
+            estimates_table.add_section()
             estimates_table.add_row(
-                "Conservative (Low)",
-                f"${estimates['rent_estimate_low']:,.0f}",
-                f"${estimates['rent_estimate_low'] * 12:,.0f}"
-            )
-            estimates_table.add_row(
-                "[bold]Primary Estimate[/bold]",
-                f"[bold]${estimates['rent_estimate']:,.0f}[/bold]",
-                f"[bold]${estimates['rent_estimate'] * 12:,.0f}[/bold]"
-            )
-            estimates_table.add_row(
-                "Optimistic (High)",
-                f"${estimates['rent_estimate_high']:,.0f}",
-                f"${estimates['rent_estimate_high'] * 12:,.0f}"
+                "[bold]TOTAL[/bold]",
+                "[bold]All[/bold]",
+                f"[bold]${total_current_primary:,.0f}[/bold]",
+                f"[bold green]${total_new_primary:,.0f}[/bold green]",
+                f"[bold]${total_new_low:,.0f}-{total_new_high:,.0f}[/bold]",
+                f"[bold {total_diff_style}]{total_diff_symbol}${abs(total_difference):,.0f}[/bold {total_diff_style}]",
+                f"[bold {total_change_style}]{total_change_percent_formatted}[/bold {total_change_style}]"
             )
             
             console.print("\n")
             console.print(estimates_table)
             
             # Show summary panel
-            range_amount = estimates['rent_estimate_high'] - estimates['rent_estimate_low']
-            range_percent = (range_amount / estimates['rent_estimate']) * 100
+            range_amount = total_new_high - total_new_low
+            range_percent = (range_amount / total_new_primary * 100) if total_new_primary > 0 else 0
+            unit_count = sum(len(config['units']) for config in unit_configs)
             
             console.print(Panel(
-                f"[bold cyan]Estimate Summary[/bold cyan]\n\n"
-                f"**Estimated Range**: ${estimates['rent_estimate_low']:,.0f} - ${estimates['rent_estimate_high']:,.0f}\n"
-                f"**Range Spread**: ${range_amount:,.0f} ({range_percent:.1f}%)\n"
-                f"**Based on Report**: {selected[:50]}...\n"
-                f"**Generation Cost**: ${result['cost']:.4f}",
-                title="Analysis Summary",
+                f"[bold cyan]Rent Estimate Analysis Summary[/bold cyan]\n\n"
+                f"Total Units Analyzed: {unit_count}\n"
+                f"Current Total Rent: ${total_current_primary:,.0f}/month\n"
+                f"New Total Range: ${total_new_low:,.0f} - ${total_new_high:,.0f}\n"
+                f"New Primary Estimate: ${total_new_primary:,.0f}/month\n"
+                f"Total Monthly Change: {total_diff_symbol}${abs(total_difference):,.0f} ({total_diff_symbol}{total_change_percent:.1f}%)\n"
+                f"Range Spread: ${range_amount:,.0f} ({range_percent:.1f}%)\n"
+                f"Based on Report: {selected[:50]}...\n"
+                f"Generation Cost: ${result['cost']:.4f}",
+                title="Comparison Summary",
                 border_style="cyan"
             ))
+            
+            # Ask user if they want to update the database
+            console.print("\n")
+            update_database = questionary.confirm(
+                "Would you like to update the database with these new rent estimates?",
+                default=False
+            ).ask()
+            
+            if update_database:
+                console.print("\n[bold yellow]⚠️  This will overwrite the current estimates in the database.[/bold yellow]")
+                final_confirm = questionary.confirm(
+                    "Are you sure you want to proceed with the database update?",
+                    default=False
+                ).ask()
+                
+                if final_confirm:
+                    # Perform the database update
+                    update_success = researcher._update_rent_estimates_in_db(
+                        property_id, unit_configs, estimates
+                    )
+                    
+                    if update_success:
+                        console.print("\n[bold green]✅ Database updated successfully![/bold green]")
+                    else:
+                        console.print("\n[bold red]❌ Database update failed. See details above.[/bold red]")
+                else:
+                    console.print("\n[yellow]Database update cancelled.[/yellow]")
+            else:
+                console.print("\n[blue]Database update skipped. Estimates are displayed above for review only.[/blue]")
         else:
             console.print(f"[red]Failed to generate estimates: {result['error']}[/red]")
             
     except Exception as e:
         console.print(f"[red]Error generating estimates: {str(e)}[/red]")
 
-def view_loans_table():
-  pass
 
 using_application = True
 
@@ -948,15 +1065,41 @@ def run_all_properties_options():
 def run_loans_options():
   using_loans = True
   choices = ["Go back", "Add new loan", "View loans"]
+  loans_provider = LoansProvider(supabase, console)
 
   while using_loans:
     option = questionary.select("Select an option", choices=choices).ask()
     if option == "Go back":
       using_loans = False
     elif option == "Add new loan":
-      console.print("Coming soon!!")
+      console.print("Let's add a new loan", style="bold blue")
+      proceed = False
+      
+      while not proceed:
+        loan_details = loans_provider.collect_loan_details()
+        console.print(Panel(f"Loan Name: {loan_details.name}\n"
+                          f"Interest Rate: {loan_details.interest_rate * 100:.2f}%\n"
+                          f"Down Payment: {loan_details.down_payment_rate * 100:.1f}%\n"
+                          f"Term: {loan_details.years} years\n"
+                          f"MIP Upfront: {loan_details.mip_upfront_rate * 100:.2f}%\n"
+                          f"MIP Annual: {loan_details.mip_annual_rate * 100:.2f}%\n"
+                          f"Upfront Discounts: ${loan_details.upfront_discounts:,.2f}\n"
+                          f"Preapproved Amount: ${loan_details.preapproved_amount:,}\n"
+                          f"Expiration Date: {loan_details.expiration_date}",
+                          title="Loan Details Review"))
+        proceed = questionary.confirm("Does everything look correct?").ask()
+        
+        if not proceed:
+          console.print("Please enter the loan details again", style="bold blue")
+      
+      success = loans_provider.add_loan(loan_details)
+      if success:
+        console.print("[green]Loan added successfully![/green]")
+      else:
+        console.print("[red]Failed to add loan[/red]")
+        
     elif option == "View loans":
-      view_loans_table()
+      loans_provider.display_loans()
 
 while using_application:
   choices = ['All properties', 'One property', "Add new property", "Loans", "Refresh data", "Quit"]
