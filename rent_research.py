@@ -17,7 +17,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
 from supabase import Client
+from pydantic import BaseModel
 
 
 @dataclass
@@ -29,6 +31,13 @@ class ResearchConfig:
     reasoning_cost_per_input_token: float = 1.25 / 1000000
     reasoning_cost_per_output_token: float = 10 / 1000000
     searches_per_property: int = 12
+
+
+class RentEstimates(BaseModel):
+    """Pydantic model for structured rent estimate outputs"""
+    rent_estimate: float
+    rent_estimate_high: float
+    rent_estimate_low: float
 
 
 class RentResearcher:
@@ -275,6 +284,36 @@ Use your advanced reasoning to:
 Generate a comprehensive, data-driven analysis that demonstrates deep reasoning and provides specific, actionable recommendations for rental pricing optimization.
 """
         return prompt.strip()
+
+    def _create_estimate_extraction_prompt(self, report) -> str:
+        prompt = f"""
+Analyze the following rental market research report and extract specific rent estimates for the property.
+
+# Research Report to Analyze:
+{report}
+
+# Instructions:
+1. **Primary Estimate (rent_estimate)**: Extract the most recommended monthly rent amount from the report. This should be the main suggested rental price.
+
+2. **High Estimate (rent_estimate_high)**: Extract the upper bound of the recommended rent range. This represents the optimistic/premium scenario.
+
+3. **Low Estimate (rent_estimate_low)**: Extract the lower bound of the recommended rent range. This represents the conservative/minimum scenario.
+
+# Analysis Requirements:
+- Provide only numeric values for monthly rental amounts
+- If the report mentions multiple units, use the total combined rent for all units
+- If ranges are provided (e.g., "$2,400-$2,800"), use the middle as rent_estimate, the upper as rent_estimate_high, and lower as rent_estimate_low
+- If only one estimate is provided, create a reasonable range (±5-10% for high/low estimates)
+- If no clear estimates are found, use your best judgment based on comparable properties mentioned in the report
+- Consider market conditions, property features, and location factors mentioned in the report
+
+# Context for Analysis:
+- Focus on the most data-driven recommendations in the report
+- Prioritize estimates that are supported by comparable property analysis
+- Consider both current market rates and any seasonal or trend adjustments mentioned
+- Account for the specific property characteristics and neighborhood factors
+"""
+        return prompt.strip()
     
     def _analyze_with_reasoning_model(self, prompt: str) -> Dict[str, Any]:
         try:
@@ -309,6 +348,65 @@ Generate a comprehensive, data-driven analysis that demonstrates deep reasoning 
                 "error": str(e)
             }
     
+    def _generate_rent_estimates_with_reasoning_model(self, prompt: str) -> Dict[str, Any]:
+        """Generate rent estimates using structured outputs with Pydantic"""
+        try:
+            response = self.openai_client.beta.chat.completions.parse(
+                model=self.config.reasoning_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                response_format=RentEstimates,
+                max_completion_tokens=4000
+            )
+            
+            input_tokens = response.usage.prompt_tokens
+            output_tokens = response.usage.completion_tokens
+            
+            # Check for refusal
+            if response.choices[0].message.refusal:
+                return {
+                    "estimates": None,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "success": False,
+                    "error": f"Model refused to generate estimates: {response.choices[0].message.refusal}"
+                }
+            
+            # Get the parsed result
+            estimates = response.choices[0].message.parsed
+            if estimates:
+                return {
+                    "estimates": {
+                        "rent_estimate": estimates.rent_estimate,
+                        "rent_estimate_high": estimates.rent_estimate_high,
+                        "rent_estimate_low": estimates.rent_estimate_low
+                    },
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "success": True
+                }
+            else:
+                return {
+                    "estimates": None,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "success": False,
+                    "error": "Failed to parse structured response"
+                }
+                
+        except Exception as e:
+            return {
+                "estimates": None,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "success": False,
+                "error": f"API call failed: {str(e)}"
+            }
+    
     def _store_report(self, property_id: str, report_content: str, 
                           cost: Decimal, status: str = "completed") -> Optional[str]:
         """Store the research report in the database"""
@@ -332,17 +430,6 @@ Generate a comprehensive, data-driven analysis that demonstrates deep reasoning 
             return None
     
     def generate_rent_research(self, property_id: str) -> Optional[str]:
-        """
-        Generate comprehensive rent research for a property
-        
-        Args:
-            property_id: The property address/ID to research
-            
-        Returns:
-            The report ID if successful, None if failed
-        """
-        
-        # Get property data
         try:
             property_response = self.supabase.table('properties').select('*').eq('address1', property_id).single().execute()
             if not property_response.data:
@@ -379,10 +466,7 @@ Generate a comprehensive, data-driven analysis that demonstrates deep reasoning 
             
             progress.update(task, description=f"[cyan]Deep reasoning analysis with {self.config.reasoning_model} ({len(search_results)} data points)...")
             
-            # Create analysis prompt
             analysis_prompt = self._create_analysis_prompt(property_data, search_results)
-            
-            # Analyze with reasoning model
             result = self._analyze_with_reasoning_model(analysis_prompt)
             
             if not result["success"]:
@@ -425,11 +509,93 @@ Generate a comprehensive, data-driven analysis that demonstrates deep reasoning 
             
             return report_id
     
+    def generate_rent_estimates_from_report(self, report_id: str) -> Dict[str, Any]:
+        """Generate rent estimates from an existing research report"""
+        try:
+            result = self.supabase.table('research_reports').select('*').eq('id', report_id).single().execute()
+            if not result.data:
+                return {
+                    "success": False,
+                    "error": f"Report not found: {report_id}",
+                    "estimates": None,
+                    "cost": 0
+                }
+        except Exception as e:
+            self.console.print(f"[red]Error fetching report {report_id}: {str(e)}[/red]")
+            return {
+                "success": False,
+                "error": f"Database error: {str(e)}",
+                "estimates": None,
+                "cost": 0
+            }
+        
+        report_content = result.data['report_content']
+        
+        if not report_content:
+            return {
+                "success": False,
+                "error": "Report has no content",
+                "estimates": None,
+                "cost": 0
+            }
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+            transient=True,
+        ) as progress:
+            progress.add_task("[cyan]Generating rental estimates from report...", total=None)
+            
+            # Create the extraction prompt
+            extraction_prompt = self._create_estimate_extraction_prompt(report_content)
+            
+            # Generate estimates using the reasoning model
+            result = self._generate_rent_estimates_with_reasoning_model(extraction_prompt)
+            
+            if result["success"]:
+                # Calculate cost for this operation
+                reasoning_cost = self._calculate_cost(0, result['input_tokens'], result['output_tokens'])
+                
+                self.console.print(Panel(
+                    f"[green]Rent estimates generated successfully![/green]\n\n"
+                    f"**Reasoning Tokens**: {result['input_tokens']:,} input, {result['output_tokens']:,} output\n"
+                    f"**API Cost**: ${reasoning_cost:.4f}\n"
+                    f"**Primary Estimate**: ${result['estimates']['rent_estimate']:,.0f}\n"
+                    f"**Range**: ${result['estimates']['rent_estimate_low']:,.0f} - ${result['estimates']['rent_estimate_high']:,.0f}",
+                    title="Estimate Generation Summary",
+                    border_style="green"
+                ))
+                
+                return {
+                    "success": True,
+                    "estimates": result["estimates"],
+                    "cost": float(reasoning_cost),
+                    "tokens_used": {
+                        "input": result['input_tokens'],
+                        "output": result['output_tokens']
+                    }
+                }
+            else:
+                self.console.print(f"[red]Failed to generate estimates: {result['error']}[/red]")
+                return {
+                    "success": False,
+                    "error": result["error"],
+                    "estimates": None,
+                    "cost": 0
+                }
+        
+        return {
+            "success": False,
+            "error": "Unknown error occurred",
+            "estimates": None,
+            "cost": 0
+        }
+
+    
     def display_report(self, report_content: str):
         # Create markdown object
         markdown = Markdown(report_content)
-        
-        # Display with panel
         
         with self.console.pager(styles=True):
           self.console.print(Panel(

@@ -405,24 +405,20 @@ def fit_purchase_price_to_phase_1():
   # Get properties that DON'T qualify for Phase 1 (use OR logic to catch any failing criteria)
   filtered_df = df.copy()
   filtered_df = filtered_df.query(
-      "MGR_PP < 0.01 | OpEx_Rent > 0.5 | DSCR < 1.25 | cash_needed > 25000 | monthly_cash_flow_y1 < -400 | monthly_cash_flow_y2 < 400"
+      "ThMGR_PP < 0.01 | OpEx_Rent > 0.5 | DSCR < 1.25 | cash_needed > 25000 | monthly_cash_flow_y1 < -400 | monthly_cash_flow_y2 < 400"
   )
   
   console.print(f"[yellow]Found {len(filtered_df)} properties that don't meet Phase 1 criteria[/yellow]")
-  console.print("[dim]This feature is still under development[/dim]")
-  
-  # TODO: Implement price adjustment calculation
-  # For each property, calculate what price would make:
-  # - MGR_PP >= 0.01 (1% rule)
-  # - OpEx_Rent <= 0.5 (50% rule) 
-  # - DSCR >= 1.25
-  # - cash_needed <= 25000
-  # - monthly_cash_flow_y1 >= -400
-  # - monthly_cash_flow_y2 >= 400
 
   for _, row in filtered_df.iterrows():
     x_1 = row["total_rent"] / (row["purchase_price"] * 0.0105) # find x for MGR_PP
-    x_2 
+    # x_2 = opex / rent
+    # opex = vacancy + repair + taxes + insurances
+    # vacancy and repair are baed on rent (constant)
+    # taxes and insurance are based on the purchase price (so variable)
+    # opex = vacancy + repair + (pp * x * tax_rate) + (pp * x * insurance rate)
+    # (opex - (vacancy + repair)) / (pp * (tax_rate + insurance_rate)) = x
+    # x_2 = ( / row["rent"] # TODO: fix this calculation
 
 
 def display_all_properties_info(properties_df):
@@ -751,6 +747,7 @@ def analyze_property(property_id):
         choices=[
             "Generate new rent research (AI-powered)",
             "View existing research reports", 
+            "Generate rent estimates from report",
             "Skip - return to main menu"
         ]
     ).ask()
@@ -759,6 +756,8 @@ def analyze_property(property_id):
         handle_rent_research_generation(property_id)
     elif research_choice == "View existing research reports":
         handle_view_research_reports(property_id)
+    elif research_choice == "Generate rent estimates from report":
+        handle_generate_rent_estimates(property_id)
 
 def handle_rent_research_generation(property_id: str):
     researcher = RentResearcher(supabase, console)
@@ -824,6 +823,102 @@ def handle_view_research_reports(property_id: str):
                 # After viewing the report, continue the loop to show the selection menu again
             else:
                 console.print("[red]Error loading report.[/red]")
+
+def handle_generate_rent_estimates(property_id: str):
+    """Handle generating rent estimates from an existing research report"""
+    researcher = RentResearcher(supabase, console)
+    reports = researcher.get_reports_for_property(property_id)
+    
+    if not reports:
+        console.print("[yellow]No research reports found for this property.[/yellow]")
+        console.print("[dim]Generate a research report first to use this feature.[/dim]")
+        return
+    
+    # Create choices for InquirerPy fuzzy search
+    report_choices = []
+    for report in reports:
+        created_date = report['created_at'][:10]  # Extract date part
+        status = report['status']
+        cost = report['api_cost']
+        choice_label = f"{created_date} - {status} (${cost:.4f}) - ID: {report['id'][:8]}"
+        report_choices.append(choice_label)
+    
+    # Use InquirerPy fuzzy search to select a report
+    selected = inquirer.fuzzy(
+        message="Type to search and select a research report:",
+        choices=report_choices,
+        default="",
+        multiselect=False,
+        validate=None,
+        invalid_message="Invalid selection"
+    ).execute()
+    
+    if not selected:
+        return
+    
+    # Extract report ID from selection
+    selected_id = None
+    for report in reports:
+        if report['id'][:8] in selected:
+            selected_id = report['id']
+            break
+    
+    if not selected_id:
+        console.print("[red]Error: Could not identify selected report.[/red]")
+        return
+    
+    # Generate rent estimates from the selected report
+    try:
+        result = researcher.generate_rent_estimates_from_report(selected_id)
+        
+        if result["success"]:
+            # Display the estimates in a nice table
+            estimates_table = Table(title=f"Rent Estimates for {property_id}", 
+                                  show_header=True, header_style="bold green")
+            estimates_table.add_column("Estimate Type", style="cyan", width=20)
+            estimates_table.add_column("Monthly Amount", justify="right", style="green", width=15)
+            estimates_table.add_column("Annual Amount", justify="right", style="blue", width=15)
+            
+            estimates = result["estimates"]
+            
+            # Add rows for each estimate type
+            estimates_table.add_row(
+                "Conservative (Low)",
+                f"${estimates['rent_estimate_low']:,.0f}",
+                f"${estimates['rent_estimate_low'] * 12:,.0f}"
+            )
+            estimates_table.add_row(
+                "[bold]Primary Estimate[/bold]",
+                f"[bold]${estimates['rent_estimate']:,.0f}[/bold]",
+                f"[bold]${estimates['rent_estimate'] * 12:,.0f}[/bold]"
+            )
+            estimates_table.add_row(
+                "Optimistic (High)",
+                f"${estimates['rent_estimate_high']:,.0f}",
+                f"${estimates['rent_estimate_high'] * 12:,.0f}"
+            )
+            
+            console.print("\n")
+            console.print(estimates_table)
+            
+            # Show summary panel
+            range_amount = estimates['rent_estimate_high'] - estimates['rent_estimate_low']
+            range_percent = (range_amount / estimates['rent_estimate']) * 100
+            
+            console.print(Panel(
+                f"[bold cyan]Estimate Summary[/bold cyan]\n\n"
+                f"**Estimated Range**: ${estimates['rent_estimate_low']:,.0f} - ${estimates['rent_estimate_high']:,.0f}\n"
+                f"**Range Spread**: ${range_amount:,.0f} ({range_percent:.1f}%)\n"
+                f"**Based on Report**: {selected[:50]}...\n"
+                f"**Generation Cost**: ${result['cost']:.4f}",
+                title="Analysis Summary",
+                border_style="cyan"
+            ))
+        else:
+            console.print(f"[red]Failed to generate estimates: {result['error']}[/red]")
+            
+    except Exception as e:
+        console.print(f"[red]Error generating estimates: {str(e)}[/red]")
 
 def view_loans_table():
   pass

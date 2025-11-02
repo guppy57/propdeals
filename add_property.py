@@ -409,7 +409,7 @@ def run_add_property(supabase_client):
 
   while not proceed2:
     unit_count = property_details["units"]
-    console.print(f"Let's now add our rent comparables for this property.\nWe will add details for the {unit_count} units.", style="bold red")
+    console.print(f"Let's now add our rent comparables for this property.\nWe will add details for the {unit_count} units.", style="bold blue")
     unit_configs = collect_unit_configurations(unit_count, property_details['address1'])
     display_unit_configs(unit_configs)
     proceed2 = questionary.confirm("Does everything look correct?").ask()
