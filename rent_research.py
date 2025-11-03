@@ -205,8 +205,6 @@ class RentResearcher:
                 .eq("rent_comp_to_rent_estimate.estimate_id", rent_estimate['id'])
                 .gte("rent_comp_to_rent_estimate.correlation", 0.7)  # Filter by correlation > 0.7
                 .lte("rent_comp_to_rent_estimate.distance", 2.0)    # Filter by distance < 2 miles
-                .order("rent_comp_to_rent_estimate.correlation", desc=True)  # Order by correlation DESC
-                .order("rent_comp_to_rent_estimate.distance", desc=False)    # Then by distance ASC
                 .limit(15)  # Limit to top 15 comparables
             )
             response2 = query2.execute()
@@ -491,6 +489,7 @@ You must provide rent estimates for EACH individual unit listed above. Each unit
         self,
         property_id: str,
         report_content: str,
+        prompt_used: str,
         cost: Decimal,
         status: str = "completed",
     ) -> Optional[str]:
@@ -503,6 +502,7 @@ You must provide rent estimates for EACH individual unit listed above. Each unit
                     {
                         "property_id": property_id,
                         "report_content": report_content,
+                        "prompt_used": prompt_used,
                         "status": status,
                         "api_cost": float(cost),
                         "research_type": "rental_comparison",
@@ -565,6 +565,7 @@ You must provide rent estimates for EACH individual unit listed above. Each unit
                 self._store_report(
                     property_id,
                     "No market data found for analysis",
+                    "NA",
                     Decimal("0.0000"),
                     "failed",
                 )
@@ -590,6 +591,7 @@ You must provide rent estimates for EACH individual unit listed above. Each unit
                 self._store_report(
                     property_id,
                     f"Analysis failed: {error_msg}",
+                    analysis_prompt,
                     Decimal("0.0000"),
                     "failed",
                 )
@@ -604,7 +606,7 @@ You must provide rent estimates for EACH individual unit listed above. Each unit
             progress.update(task, description="[green]Storing research report...")
 
             # Store successful report
-            report_id = self._store_report(property_id, result["content"], cost)
+            report_id = self._store_report(property_id, result["content"], analysis_prompt, cost)
 
             progress.update(task, description="[green]Research completed successfully!")
 
