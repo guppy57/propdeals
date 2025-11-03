@@ -198,11 +198,16 @@ class RentResearcher:
             unit_num = rent_estimate.get('unit_num', 'NA')
             table += f"Unit {unit_num} - {unit_config}\n"
             
-            # Query for comparables with the many-to-many relationship data
+            # Query for comparables with smart filtering and ordering
             query2 = (
                 self.supabase.table("comparable_rents")
                 .select("*, rent_comp_to_rent_estimate!inner(*)")
                 .eq("rent_comp_to_rent_estimate.estimate_id", rent_estimate['id'])
+                .gte("rent_comp_to_rent_estimate.correlation", 0.7)  # Filter by correlation > 0.7
+                .lte("rent_comp_to_rent_estimate.distance", 2.0)    # Filter by distance < 2 miles
+                .order("rent_comp_to_rent_estimate.correlation", desc=True)  # Order by correlation DESC
+                .order("rent_comp_to_rent_estimate.distance", desc=False)    # Then by distance ASC
+                .limit(15)  # Limit to top 15 comparables
             )
             response2 = query2.execute()
 
@@ -210,20 +215,26 @@ class RentResearcher:
                 table += "No comparable rents found for this unit.\n\n"
                 continue
             
-            # Create markdown table header
-            table += "| Address | Type | Beds | Baths | Sq Ft | Built | Rent | Days Old | Distance | Correlation |\n"
-            table += "|---------|------|------|-------|-------|-------|------|----------|----------|-------------|\n"
+            # Create markdown table header (optimized with 6 columns)
+            table += "| Address | Config | Sq Ft | Rent | Dist | Corr |\n"
+            table += "|---------|--------|-------|------|------|------|\n"
             
             # Add each comparable as a table row
             for comp in response2.data:
-                address = comp.get('address', 'NA')
-                property_type = comp.get('property_type', 'NA')
+                # Extract street name only from address (remove city/state)
+                full_address = comp.get('address', 'NA')
+                if full_address != 'NA' and ',' in full_address:
+                    address = full_address.split(',')[0].strip()
+                else:
+                    address = full_address
+                
+                # Combine beds/baths into config format (e.g., "2/1")
                 beds = comp.get('beds', 'NA')
                 baths = comp.get('baths', 'NA')
+                config = f"{beds}/{baths}" if beds != 'NA' and baths != 'NA' else 'NA'
+                
                 square_feet = comp.get('square_feet', 'NA')
-                built_in = comp.get('built_in', 'NA')
                 rent_price = comp.get('rent_price', 'NA')
-                days_old = comp.get('days_old', 'NA')
                 
                 # Get distance and correlation from the many-to-many relationship
                 relationship_data = comp.get('rent_comp_to_rent_estimate', [])
@@ -234,8 +245,8 @@ class RentResearcher:
                     distance = 'NA'
                     correlation = 'NA'
                 
-                # Format the table row
-                table += f"| {address} | {property_type} | {beds} | {baths} | {square_feet} | {built_in} | {rent_price} | {days_old} | {distance} | {correlation} |\n"
+                # Format the table row with optimized columns
+                table += f"| {address} | {config} | {square_feet} | {rent_price} | {distance} | {correlation} |\n"
             
             table += "\n"
 
@@ -276,116 +287,65 @@ class RentResearcher:
                 unit_details += f"(Unit numbers: {', '.join(unit_nums)})\n"
 
         prompt = f"""
-Analyze this rental property investment using the market research data provided below. Apply deep reasoning to provide comprehensive insights.
+Analyze this rental property investment using the market research data. Provide comprehensive insights with specific dollar amounts and confidence levels.
 
 # Property Details
 - **Address**: {address}
 - **Purchase Price**: ${purchase_price:,}
-- **Bedrooms**: {beds}
-- **Bathrooms**: {baths}
-- **Square Footage**: {square_ft:,} sq ft
-- **Number of Units**: {units}
-- **Year Built**: {built_in}{unit_details}
+- **Bedrooms**: {beds} | **Bathrooms**: {baths} | **Square Footage**: {square_ft:,} sq ft
+- **Units**: {units} | **Year Built**: {built_in}{unit_details}
 
 # Market Research Data
 ## Web search data
 {search_data}
 
-## Comparable rents from Rentcast API
-Rentcast data may or may not be accurate and/or outdated. This should be used to informm your analysis but up to date information and current rental lists should be prioritized.
+## Comparable rents (filtered by correlation >0.7, distance <2mi)
 {rent_comp_md_table}
 
 # Analysis Requirements
 
-Provide a comprehensive rental analysis report in markdown format. Use your reasoning capabilities to synthesize the data and provide deep insights:
-
 ## 1. Executive Summary
 - Key findings and actionable recommendations
 - **Specific recommended rent range with confidence level**
-- Market positioning assessment
-- Investment viability summary
+- Market positioning and investment viability
 
-## 2. Comparable Properties Analysis
-- Identify and analyze 5-8 most relevant comparable properties
-- Calculate rent per square foot benchmarks
-- Analyze property features that affect pricing
-- Distance and location premium/discount factors
-- **Provide specific rent ranges with justification**
+## 2. Market Rate & Comparable Analysis
+- Current market rental rates by unit configuration
+- Rent per square foot benchmarks from comparables
+- Distance/location premium/discount factors
+- **Specific rent ranges with justification for each unit type**
 
-## 3. Market Rate Analysis
-- Current market rental rates for this specific property type
-- Price per square foot analysis by unit configuration
-- Unit configuration premium/discounts (studio, 1BR, 2BR, etc.)
-- Seasonal rental variations and optimal timing
-- **Specific dollar amounts for each unit type**
+## 3. Historical Trends & Forecasting
+- 6-12 month rental trend analysis
+- Year-over-year percentage changes and market direction
+- **Quantified trend data with growth projections**
 
-## 4. Historical Trends & Market Forecasting
-- 6-12 month rental trend analysis with specific data points
-- Year-over-year percentage changes
-- Market direction and 12-month growth projections
-- Economic factors driving price changes
-- **Quantified trend data with percentages**
-
-## 5. Neighborhood & Location Analysis
-- Walkability, transit, and accessibility scores
-- Local amenities impact on rental premiums
-- Employment centers and school district effects
-- Demographic analysis and tenant demand patterns
+## 4. Neighborhood & Location Analysis
+- Walkability, transit, accessibility impact on rents
+- Local amenities and employment center effects
 - **Location-based rental premiums/discounts**
 
-## 6. Competitive Positioning & Strategy
-- Properties with superior amenities and their exact premiums
-- Properties with inferior features and their discounts
+## 5. Competitive Positioning
+- Properties with superior/inferior features and their premiums/discounts
 - Market gaps and positioning opportunities
-- Competitive advantages of this property
 - **Strategic rental positioning recommendations**
 
-## 7. Per-Unit Rental Optimization Recommendations
-- **Individual Unit Rent Recommendations**: Provide specific dollar amounts for EACH unit by unit number and configuration
-- Analyze each unit configuration separately (e.g., 2-bed 1-bath vs 1-bed 1-bath)
-- Consider unit-specific factors (floor level, orientation, amenities, etc.) that may affect pricing
-- Property improvement ROI analysis for rent increases per unit type
-- Marketing strategies and tenant acquisition approaches for each unit configuration
-- Optimal lease terms and rental timing by unit type
-- **Cost-benefit analysis of improvements per unit configuration**
+## 6. Per-Unit Rent Recommendations
+- **Individual Unit Rent Recommendations**: Specific dollar amounts for EACH unit by number and configuration
+- Unit-specific factors affecting pricing
+- Optimal lease terms and timing by unit type
 
-## 8. Risk Assessment & Market Intelligence
-- Vacancy risk factors and mitigation strategies
-- Competition analysis and market saturation
-- Economic sensitivity and demand elasticity
-- Regulatory and market risks
-- **Quantified risk factors with probabilities**
-
-## 9. Comparative Analysis Summary
-- How this property compares to market average
-- Percentile ranking in local market
-- Value proposition for tenants
-- Investment performance projections
-- **Specific performance metrics and rankings**
-
-## 10. Historical Trend Analysis
-- Multi-year rental growth patterns
-- Seasonal demand cycles
-- Market cycle positioning
-- Future growth catalysts
-- **Historical data analysis with projections**
-
-# Reasoning Approach
-Use your advanced reasoning to:
-1. Cross-reference data points for accuracy
-2. Identify patterns and correlations in the market data
-3. Calculate weighted averages and statistical insights
-4. Consider multiple scenarios and their implications
-5. Provide confidence intervals for recommendations
+## 7. Risk Assessment & Performance Projections
+- Vacancy risk factors and competition analysis
+- Economic sensitivity and regulatory risks
+- **Quantified risk factors and market performance rankings**
 
 # Output Requirements
 - Include specific dollar amounts and percentages throughout
-- Provide confidence levels for all major recommendations
-- Cite sources and data quality assessments
-- Focus on actionable, investment-grade insights
-- Use clear headings and professional formatting
+- Provide confidence levels for major recommendations
+- Focus on actionable, investment-grade insights with clear professional formatting
 
-Generate a comprehensive, data-driven analysis that demonstrates deep reasoning and provides specific, actionable recommendations for rental pricing optimization.
+Generate a data-driven analysis with specific, actionable rental pricing recommendations.
 """
         return prompt.strip()
 
