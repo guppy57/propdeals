@@ -558,7 +558,9 @@ def analyze_property(property_id):
     
     # Rent estimates table
     property_rents = rents[rents['address1'] == property_id]
-    min_rent_value = property_rents['rent_estimate'].min()
+    
+    # Find the first unit with minimum rent to be marked as "Your Unit"
+    your_unit_index = property_rents['rent_estimate'].idxmin()
     
     rent_table = Table(title="Unit Rent Estimates", show_header=True, header_style="bold green")
     rent_table.add_column("Unit", style="cyan", justify="center")
@@ -567,8 +569,8 @@ def analyze_property(property_id):
     rent_table.add_column("Status", style="magenta")
     
     total_monthly_rent = 0
-    for _, rent_row in property_rents.iterrows():
-        is_your_unit = rent_row['rent_estimate'] == min_rent_value
+    for idx, rent_row in property_rents.iterrows():
+        is_your_unit = idx == your_unit_index
         unit_config = f"{int(rent_row['beds'])}-bed {int(rent_row['baths'])}-bath"
         status = "[bold red]Your Unit[/bold red]" if is_your_unit else "Rental"
         rent_style = "bold red" if is_your_unit else "green"
@@ -1024,6 +1026,8 @@ def handle_generate_rent_estimates(property_id: str):
                     update_success = researcher._update_rent_estimates_in_db(
                         property_id, unit_configs, estimates
                     )
+
+                    reload_dataframe()
                     
                     if update_success:
                         console.print("\n[bold green]✅ Database updated successfully![/bold green]")
