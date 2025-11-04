@@ -376,8 +376,6 @@ def save_comps_to_db(comps, subject_rent_id, supabase):
                 else:
                     print("Response has no 'data' attribute (save_comps_to_db)")
 
-            # check if the many-to-many relationship exists for this comp_id + subject_rent_id
-
             existing_join = (
                 supabase.table("rent_comp_to_rent_estimate")
                 .select("id, distance, correlation")
