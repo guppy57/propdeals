@@ -473,7 +473,7 @@ def add_rent_to_supabase(rent_comps, comparables, supabase) -> int:
 # --------------------------------------------------------
 
 
-def run_add_property(supabase_client):
+def run_add_property(supabase_client) -> dict:
     console.print("Let's add a new property to analyze", style="bold red")
     proceed = False
 
@@ -518,3 +518,5 @@ def run_add_property(supabase_client):
         return
 
     console.print("Property and rent comps added to Supabase", style="bold green")
+
+    return property_details
