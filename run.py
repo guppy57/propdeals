@@ -1209,6 +1209,38 @@ def handle_generate_rent_estimates(property_id: str):
     except Exception as e:
         console.print(f"[red]Error generating estimates: {str(e)}[/red]")
 
+def handle_rent_research_after_add(property_id):
+    researcher = RentResearcher(supabase, console)
+    property_id = property_details['address1']
+    report_id = researcher.generate_rent_research(property_id)
+
+    try:
+        result = researcher.generate_rent_estimates_from_report(report_id)
+        
+        if result["success"]:
+            estimates = result["estimates"]
+            existing_estimates = result.get("existing_estimates", {})
+            unit_configs = result.get("unit_configs", [])
+            
+            # Use the shared comparison display function
+            display_rent_estimates_comparison(
+                property_id, estimates, existing_estimates, unit_configs, 
+                result['cost'], "Report we just made" 
+            )
+            
+            update_success = researcher._update_rent_estimates_in_db(
+                property_id, unit_configs, estimates
+            )
+
+            if update_success:
+                console.print("\n[bold green]✅ Database updated successfully![/bold green]")
+            else:
+                console.print("\n[bold red]❌ Database update failed. See details above.[/bold red]")
+        else:
+            console.print(f"[red]Failed to generate estimates: {result['error']}[/red]")
+            
+    except Exception as e:
+        console.print(f"[red]Error generating estimates: {str(e)}[/red]")
 
 using_application = True
 
@@ -1320,7 +1352,8 @@ if __name__ == "__main__":
       ).execute()
       analyze_property(property_id)
     elif option == "Add new property":
-      run_add_property(supabase_client=supabase)
+      property_details = run_add_property(supabase_client=supabase)
+      handle_rent_research_after_add(property_details['address1'])
       reload_dataframe()
     elif option == "Loans":
       run_loans_options()
