@@ -21,7 +21,7 @@ from InquirerPy import inquirer
 
 # Import existing modules
 from rent_research import RentResearcher
-from run import reload_dataframe, format_currency
+from run import reload_dataframe, format_currency, display_rent_estimates_comparison
 
 # Load environment variables
 load_dotenv()
@@ -217,15 +217,17 @@ def main():
                         if result.get("success"):
                             stats.estimates_extracted += 1
                             
-                            # Ask about database update
-                            update_db = questionary.confirm(
-                                "Would you like to update the database with these estimates?"
-                            ).ask()
+                            # Display detailed comparison using shared function
+                            estimates = result["estimates"]
+                            existing_estimates = result.get("existing_estimates", {})
+                            unit_configs = result.get("unit_configs", [])
+                            
+                            update_db = display_rent_estimates_comparison(
+                                property_id, estimates, existing_estimates, unit_configs,
+                                result['cost'], f"Generated from new report (ID: {report_id[:8]})"
+                            )
                             
                             if update_db:
-                                estimates = result["estimates"]
-                                unit_configs = result.get("unit_configs", [])
-                                
                                 # Perform database update
                                 update_success = researcher._update_rent_estimates_in_db(
                                     property_id, unit_configs, estimates
@@ -319,15 +321,17 @@ def main():
                             if result.get("success"):
                                 stats.estimates_extracted += 1
                                 
-                                # Ask about database update
-                                update_db = questionary.confirm(
-                                    "Would you like to update the database with these estimates?"
-                                ).ask()
+                                # Display detailed comparison using shared function
+                                estimates = result["estimates"]
+                                existing_estimates = result.get("existing_estimates", {})
+                                unit_configs = result.get("unit_configs", [])
+                                
+                                update_db = display_rent_estimates_comparison(
+                                    property_id, estimates, existing_estimates, unit_configs,
+                                    result['cost'], selected
+                                )
                                 
                                 if update_db:
-                                    estimates = result["estimates"]
-                                    unit_configs = result.get("unit_configs", [])
-                                    
                                     # Perform database update
                                     update_success = researcher._update_rent_estimates_in_db(
                                         property_id, unit_configs, estimates

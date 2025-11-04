@@ -83,6 +83,19 @@ def calculate_mortgage(principal, annual_rate, years):
 
   return monthly_payment
 
+def calculate_principal_from_payment(monthly_payment, annual_rate, years):
+  """Calculate loan principal given desired monthly payment"""
+  monthly_rate = annual_rate / 12
+  num_payments = years * 12
+  
+  principal = (
+      monthly_payment
+      * ((1 + monthly_rate) ** num_payments - 1)
+      / (monthly_rate * (1 + monthly_rate) ** num_payments)
+  )
+  
+  return principal
+
 def deal_score_property(row):
     score = 0
     
@@ -231,7 +244,7 @@ def reload_dataframe():
     # fifth, calculate property scores
     df["deal_score"] = df.apply(deal_score_property, axis=1)
     df["mobility_score"] = df.apply(mobility_score, axis=1)
-    
+  
     console.print("[green]Property data reloaded successfully![/green]")
 
 # Initialize dataframe at startup
@@ -387,12 +400,30 @@ def display_all_phase1_qualifying_properties():
       - Cash needed must be below $25,000
       - Debt Service Coverage Ratio should be above 1.25
     """
+    critera = "status == 'active' & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400"
+
     filtered_df = df.copy()
-    filtered_df = filtered_df.query(
-        "status == 'active' & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400"
-    )
+    filtered_df = filtered_df.query(critera)
+
     display_all_properties(
-        properties_df=filtered_df, title="Phase 1 Criteria Qualifying Properties"
+        properties_df=filtered_df, title="Phase 1 Criteria Qualifiers - Current Prices"
+    )
+
+    # create a list of address1's from the qualifiers to remove from the reduced price dataframe
+    qualifier_address1s = []
+
+    for _, row in filtered_df.iterrows():
+      qualifier_address1s.append(row["address1"])
+
+    # Reduce price and recalculate
+    reduced_df = get_reduced_pp_df(0.10)
+    reduced_df = reduced_df.query(critera)
+
+    for address1 in qualifier_address1s:
+      reduced_df = reduced_df.drop(reduced_df[reduced_df['address1'] == address1].index)
+    
+    display_all_properties(
+      properties_df=reduced_df, title="Phase 1 Criteria Qualifiers - Contingent on 10% Price Reduction"
     )
 
 # determines what price each property would have to be to qualify for phase 1 criteria 
@@ -406,21 +437,141 @@ def fit_purchase_price_to_phase_1():
   # Get properties that DON'T qualify for Phase 1 (use OR logic to catch any failing criteria)
   filtered_df = df.copy()
   filtered_df = filtered_df.query(
-      "ThMGR_PP < 0.01 | OpEx_Rent > 0.5 | DSCR < 1.25 | cash_needed > 25000 | monthly_cash_flow_y1 < -400 | monthly_cash_flow_y2 < 400"
+      "MGR_PP < 0.01 | OpEx_Rent > 0.5 | DSCR < 1.25 | cash_needed > 25000 | monthly_cash_flow_y1 < -400 | monthly_cash_flow_y2 < 400"
   )
   
   console.print(f"[yellow]Found {len(filtered_df)} properties that don't meet Phase 1 criteria[/yellow]")
 
   for _, row in filtered_df.iterrows():
-    x_1 = row["total_rent"] / (row["purchase_price"] * 0.0105) # find x for MGR_PP
-    # x_2 = opex / rent
-    # opex = vacancy + repair + taxes + insurances
-    # vacancy and repair are baed on rent (constant)
-    # taxes and insurance are based on the purchase price (so variable)
-    # opex = vacancy + repair + (pp * x * tax_rate) + (pp * x * insurance rate)
-    # (opex - (vacancy + repair)) / (pp * (tax_rate + insurance_rate)) = x
-    # x_2 = ( / row["rent"] # TODO: fix this calculation
+    # find x for MGR_PP (1% rule)
+    x_1 = row["total_rent"] / (row["purchase_price"] * 0.01) 
+    
+    # find x for OpEx_rent (50% rule)
+    fixed_costs = row["monthly_repair_costs"] + row["monthly_vacancy_costs"]
+    variable_costs = property_tax_rate + home_insurance_rate
+    x_2 = (0.5 * row["total_rent"] - fixed_costs) / (variable_costs * row["purchase_price"])
+    
+    # find x for cash_needed
+    x_3 = 25000 / (row["purchase_price"] * (down_payment_rate + closing_costs_rate))
+    
+    # find x for DSCR (debt service coverage ratio >= 1.25)
+    x_4 = row["DSCR"] / 1.25 if row["DSCR"] < 1.25 else 1.0
+    
+    # find x for monthly_cash_flow_y1 >= -400
+    # Cash flow Y1 = net_rent_y1 - total_monthly_cost >= -400
+    # Solve: net_rent_y1 - (target_mortgage + mip + taxes + insurance + fixed_costs) = -400
+    x_5 = 1.0  # Default to no reduction needed
+    if row["monthly_cash_flow_y1"] < -400:
+      fixed_costs = row["monthly_repair_costs"] + row["monthly_vacancy_costs"]
+      target_mortgage_plus_variable = row["net_rent_y1"] + 400 - fixed_costs
+      
+      # Estimate target mortgage (assume mip + taxes + insurance = 25% of mortgage roughly)
+      target_mortgage = target_mortgage_plus_variable / 1.25
+      
+      if target_mortgage > 0:
+        # Find required loan amount using our new function
+        required_loan_amount = calculate_principal_from_payment(target_mortgage, interest_rate, loan_length_years)
+        
+        # Work backwards to purchase price: loan = purchase_price * (1 - down_payment_rate) + upfront_mip
+        # Solving: required_loan_amount = new_price * (1 - down_payment_rate + mip_upfront_rate)
+        required_purchase_price = required_loan_amount / (1 - down_payment_rate + mip_upfront_rate)
+        x_5 = required_purchase_price / row["purchase_price"]
+      else:
+        x_5 = 0.1
+    
+    # find x for monthly_cash_flow_y2 >= 400
+    # Cash flow Y2 = total_rent - total_monthly_cost >= 400
+    x_6 = 1.0  # Default to no reduction needed
+    if row["monthly_cash_flow_y2"] < 400:
+      fixed_costs = row["monthly_repair_costs"] + row["monthly_vacancy_costs"]
+      target_mortgage_plus_variable = row["total_rent"] - 400 - fixed_costs
+      
+      # Estimate target mortgage (assume mip + taxes + insurance = 25% of mortgage roughly)
+      target_mortgage = target_mortgage_plus_variable / 1.25
+      
+      if target_mortgage > 0:
+        # Find required loan amount using our new function
+        required_loan_amount = calculate_principal_from_payment(target_mortgage, interest_rate, loan_length_years)
+        
+        # Work backwards to purchase price
+        required_purchase_price = required_loan_amount / (1 - down_payment_rate + mip_upfront_rate)
+        x_6 = required_purchase_price / row["purchase_price"]
+      else:
+        x_6 = 0.1
+    
+    # Find the most restrictive factor (smallest value less than 1)
+    factors = [x_1, x_2, x_3, x_4, x_5, x_6]
+    valid_factors = [x for x in factors if 0 < x < 1]
+    
+    if valid_factors:
+      price_reduction_factor = min(valid_factors)
+      new_purchase_price = row["purchase_price"] * price_reduction_factor
+      price_reduction_amount = row["purchase_price"] - new_purchase_price
+      price_reduction_percentage = (1 - price_reduction_factor) * 100
+      
+      console.print(f"[cyan]{row['address1']}:[/cyan]")
+      console.print(f"  Current price: {format_currency(row['purchase_price'])}")
+      console.print(f"  Required price: {format_currency(new_purchase_price)}")
+      console.print(f"  Reduction: {format_currency(price_reduction_amount)} ({price_reduction_percentage:.1f}%)")
+      console.print(f"  Factors: MGR={x_1:.3f}, OpEx={x_2:.3f}, Cash={x_3:.3f}, DSCR={x_4:.3f}, CF1={x_5:.3f}, CF2={x_6:.3f}")
+      console.print("")
+    else:
+      console.print(f"[yellow]{row['address1']}: No valid price reduction factor found[/yellow]")
 
+def get_reduced_pp_df(reduction_factor):
+  dataframe = df.copy()
+
+  # multiply purchase price by the reduction_factor, then recalculate all values based on that
+  dataframe["purchase_price"] = dataframe["purchase_price"] * (1 - reduction_factor)
+  
+  # Recalculate all price-dependent variables
+  dataframe["cost_per_sqrft"] = dataframe["purchase_price"] / dataframe["square_ft"]
+  
+  # Financial calculations
+  dataframe["closing_costs"] = dataframe["purchase_price"] * closing_costs_rate
+  dataframe["down_payment"] = dataframe["purchase_price"] * down_payment_rate
+  dataframe["loan_amount"] = dataframe["purchase_price"] - dataframe["down_payment"] + (dataframe["purchase_price"] * mip_upfront_rate)
+  
+  dataframe["monthly_mortgage"] = dataframe["loan_amount"].apply(lambda x: calculate_mortgage(x, interest_rate, loan_length_years))
+  dataframe["monthly_mip"] = (dataframe["loan_amount"] * mip_annual_rate) / 12
+  dataframe["monthly_taxes"] = (dataframe["purchase_price"] * property_tax_rate) / 12
+  dataframe["monthly_insurance"] = (dataframe["purchase_price"] * home_insurance_rate) / 12
+  dataframe["cash_needed"] = dataframe["closing_costs"] + dataframe["down_payment"]
+  
+  # Recalculate operating expenses and costs
+  dataframe["operating_expenses"] = dataframe["monthly_vacancy_costs"] + dataframe["monthly_repair_costs"] + dataframe["monthly_taxes"] + dataframe["monthly_insurance"]
+  dataframe["total_monthly_cost"] = dataframe["monthly_mortgage"] + dataframe["monthly_mip"] + dataframe["operating_expenses"]
+  
+  # Recalculate cash flows
+  dataframe["monthly_cash_flow_y1"] = dataframe["net_rent_y1"] - dataframe["total_monthly_cost"]
+  dataframe["monthly_cash_flow_y2"] = dataframe["total_rent"] - dataframe["total_monthly_cost"]
+  dataframe["annual_cash_flow_y1"] = dataframe["monthly_cash_flow_y1"] * 12
+  dataframe["annual_cash_flow_y2"] = dataframe["monthly_cash_flow_y2"] * 12
+  
+  # Recalculate NOI
+  dataframe["monthly_NOI"] = dataframe["total_rent"] - dataframe["operating_expenses"]
+  dataframe["annual_NOI_y1"] = (dataframe["net_rent_y1"] - dataframe["operating_expenses"]) * 12
+  dataframe["annual_NOI_y2"] = dataframe["monthly_NOI"] * 12
+  
+  # Recalculate investment metrics
+  dataframe["cap_rate_y1"] = dataframe["annual_NOI_y1"] / dataframe["purchase_price"]
+  dataframe["cap_rate_y2"] = dataframe["annual_NOI_y2"] / dataframe["purchase_price"]
+  dataframe["CoC_y1"] = dataframe["annual_cash_flow_y1"] / dataframe["cash_needed"]
+  dataframe["CoC_y2"] = dataframe["annual_cash_flow_y2"] / dataframe["cash_needed"]
+  dataframe["GRM_y1"] = dataframe["purchase_price"] / dataframe["annual_rent_y1"]
+  dataframe["GRM_y2"] = dataframe["purchase_price"] / dataframe["annual_rent_y2"]
+  dataframe["MGR_PP"] = dataframe["total_rent"] / dataframe["purchase_price"]
+  dataframe["OpEx_Rent"] = dataframe["operating_expenses"] / dataframe["total_rent"]
+  dataframe["DSCR"] = dataframe["total_rent"] / dataframe["monthly_mortgage"]
+  
+  # Recalculate forecasts
+  dataframe["5y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(5,))
+  dataframe["10y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(10,))
+  
+  # Recalculate scores
+  dataframe["deal_score"] = dataframe.apply(deal_score_property, axis=1)
+
+  return dataframe
 
 def display_all_properties_info(properties_df):
     """Display all properties with basic info: address, sqft, age, units, mobility scores, and electricity cost"""
@@ -827,6 +978,150 @@ def handle_view_research_reports(property_id: str):
             else:
                 console.print("[red]Error loading report.[/red]")
 
+def display_rent_estimates_comparison(property_id: str, estimates: dict, existing_estimates: dict, 
+                                    unit_configs: list, result_cost: float, selected_report_info: str) -> bool:
+    """
+    Display detailed comparison between current and new rent estimates.
+    
+    Returns True if user wants to update database, False otherwise.
+    """
+    # Display per-unit comparison table
+    estimates_table = Table(title=f"Rent Estimate Comparison for {property_id}", 
+                          show_header=True, header_style="bold green")
+    estimates_table.add_column("Unit", style="cyan", width=6)
+    estimates_table.add_column("Config", style="yellow", width=12)
+    estimates_table.add_column("Current Rent", justify="right", style="white", width=12)
+    estimates_table.add_column("New Primary", justify="right", style="green", width=12)
+    estimates_table.add_column("New Range", justify="right", style="blue", width=15)
+    estimates_table.add_column("Difference", justify="right", style="bold", width=12)
+    estimates_table.add_column("Change %", justify="right", style="bold", width=10)
+    
+    total_current_primary = 0
+    total_new_low = 0
+    total_new_primary = 0
+    total_new_high = 0
+    
+    # Process each unit configuration
+    for config in unit_configs:
+        for unit in config['units']:
+            unit_num = unit['unit_num']
+            config_key = config['config_key']
+            base_name = f"unit_{unit_num}_{config_key}"
+            
+            # Get new estimates for this unit
+            new_low = estimates.get(f"{base_name}_rent_estimate_low", 0)
+            new_primary = estimates.get(f"{base_name}_rent_estimate", 0)
+            new_high = estimates.get(f"{base_name}_rent_estimate_high", 0)
+            
+            # Get existing estimates for this unit
+            existing_data = existing_estimates.get(base_name, {})
+            current_primary = existing_data.get('rent_estimate', 0)
+            
+            # Calculate differences
+            difference = new_primary - current_primary
+            change_percent = (difference / current_primary * 100) if current_primary > 0 else 0
+            
+            # Add to totals
+            total_current_primary += current_primary
+            total_new_low += new_low
+            total_new_primary += new_primary
+            total_new_high += new_high
+            
+            # Format configuration display
+            config_display = f"{config['beds']}b{config['baths']}b"
+            
+            # Style difference based on increase/decrease
+            if difference > 0:
+                diff_style = "green"
+                diff_symbol = "+"
+                change_style = "green"
+                change_percent_formatted = f"+{change_percent:.1f}%"
+            elif difference < 0:
+                diff_style = "red"
+                diff_symbol = ""
+                change_style = "red"
+                change_percent_formatted = f"{change_percent:.1f}%"
+            else:
+                diff_style = "white"
+                diff_symbol = ""
+                change_style = "white"
+                change_percent_formatted = f"{change_percent:.1f}%"
+            
+            # Add row to table
+            estimates_table.add_row(
+                f"Unit {unit_num}",
+                config_display,
+                f"${current_primary:,.0f}",
+                f"[bold]${new_primary:,.0f}[/bold]",
+                f"${new_low:,.0f}-{new_high:,.0f}",
+                f"[{diff_style}]{diff_symbol}${abs(difference):,.0f}[/{diff_style}]",
+                f"[{change_style}]{change_percent_formatted}[/{change_style}]"
+            )
+    
+    # Calculate total differences
+    total_difference = total_new_primary - total_current_primary
+    total_change_percent = (total_difference / total_current_primary * 100) if total_current_primary > 0 else 0
+    
+    # Style total difference
+    if total_difference > 0:
+        total_diff_style = "green"
+        total_diff_symbol = "+"
+        total_change_style = "green"
+        total_change_percent_formatted = f"+{total_change_percent:.1f}%"
+    elif total_difference < 0:
+        total_diff_style = "red"
+        total_diff_symbol = ""
+        total_change_style = "red"
+        total_change_percent_formatted = f"{total_change_percent:.1f}%"
+    else:
+        total_diff_style = "white"
+        total_diff_symbol = ""
+        total_change_style = "white"
+        total_change_percent_formatted = f"{total_change_percent:.1f}%"
+    
+    # Add totals row
+    estimates_table.add_section()
+    estimates_table.add_row(
+        "[bold]TOTAL[/bold]",
+        "[bold]All[/bold]",
+        f"[bold]${total_current_primary:,.0f}[/bold]",
+        f"[bold green]${total_new_primary:,.0f}[/bold green]",
+        f"[bold]${total_new_low:,.0f}-{total_new_high:,.0f}[/bold]",
+        f"[bold {total_diff_style}]{total_diff_symbol}${abs(total_difference):,.0f}[/bold {total_diff_style}]",
+        f"[bold {total_change_style}]{total_change_percent_formatted}[/bold {total_change_style}]"
+    )
+    
+    console.print("\n")
+    console.print(estimates_table)
+    
+    # Show summary panel
+    range_amount = total_new_high - total_new_low
+    range_percent = (range_amount / total_new_primary * 100) if total_new_primary > 0 else 0
+    unit_count = sum(len(config['units']) for config in unit_configs)
+    
+    console.print(Panel(
+        f"[bold cyan]Rent Estimate Analysis Summary[/bold cyan]\n\n"
+        f"Total Units Analyzed: {unit_count}\n"
+        f"Current Total Rent: ${total_current_primary:,.0f}/month\n"
+        f"New Total Range: ${total_new_low:,.0f} - ${total_new_high:,.0f}\n"
+        f"New Primary Estimate: ${total_new_primary:,.0f}/month\n"
+        f"Total Monthly Change: {total_diff_symbol}${abs(total_difference):,.0f} ({total_diff_symbol}{total_change_percent:.1f}%)\n"
+        f"Range Spread: ${range_amount:,.0f} ({range_percent:.1f}%)\n"
+        f"Based on Report: {selected_report_info[:50]}...\n"
+        f"Generation Cost: ${result_cost:.4f}",
+        title="Comparison Summary",
+        border_style="cyan"
+    ))
+    
+    # Ask user if they want to update the database
+    console.print("\n")
+    update_database = questionary.confirm(
+        "Would you like to update the database with these new rent estimates?",
+        default=False
+    ).ask()
+    
+    return update_database
+
 def handle_generate_rent_estimates(property_id: str):
     """Handle generating rent estimates from an existing research report"""
     researcher = RentResearcher(supabase, console)
@@ -879,140 +1174,11 @@ def handle_generate_rent_estimates(property_id: str):
             existing_estimates = result.get("existing_estimates", {})
             unit_configs = result.get("unit_configs", [])
             
-            # Display per-unit comparison table
-            estimates_table = Table(title=f"Rent Estimate Comparison for {property_id}", 
-                                  show_header=True, header_style="bold green")
-            estimates_table.add_column("Unit", style="cyan", width=6)
-            estimates_table.add_column("Config", style="yellow", width=12)
-            estimates_table.add_column("Current Rent", justify="right", style="white", width=12)
-            estimates_table.add_column("New Primary", justify="right", style="green", width=12)
-            estimates_table.add_column("New Range", justify="right", style="blue", width=15)
-            estimates_table.add_column("Difference", justify="right", style="bold", width=12)
-            estimates_table.add_column("Change %", justify="right", style="bold", width=10)
-            
-            total_current_primary = 0
-            total_new_low = 0
-            total_new_primary = 0
-            total_new_high = 0
-            
-            # Process each unit configuration
-            for config in unit_configs:
-                for unit in config['units']:
-                    unit_num = unit['unit_num']
-                    config_key = config['config_key']
-                    base_name = f"unit_{unit_num}_{config_key}"
-                    
-                    # Get new estimates for this unit
-                    new_low = estimates.get(f"{base_name}_rent_estimate_low", 0)
-                    new_primary = estimates.get(f"{base_name}_rent_estimate", 0)
-                    new_high = estimates.get(f"{base_name}_rent_estimate_high", 0)
-                    
-                    # Get existing estimates for this unit
-                    existing_data = existing_estimates.get(base_name, {})
-                    current_primary = existing_data.get('rent_estimate', 0)
-                    
-                    # Calculate differences
-                    difference = new_primary - current_primary
-                    change_percent = (difference / current_primary * 100) if current_primary > 0 else 0
-                    
-                    # Add to totals
-                    total_current_primary += current_primary
-                    total_new_low += new_low
-                    total_new_primary += new_primary
-                    total_new_high += new_high
-                    
-                    # Format configuration display
-                    config_display = f"{config['beds']}b{config['baths']}b"
-                    
-                    # Style difference based on increase/decrease
-                    if difference > 0:
-                        diff_style = "green"
-                        diff_symbol = "+"
-                        change_style = "green"
-                        change_percent_formatted = f"+{change_percent:.1f}%"
-                    elif difference < 0:
-                        diff_style = "red"
-                        diff_symbol = ""
-                        change_style = "red"
-                        change_percent_formatted = f"{change_percent:.1f}%"
-                    else:
-                        diff_style = "white"
-                        diff_symbol = ""
-                        change_style = "white"
-                        change_percent_formatted = f"{change_percent:.1f}%"
-                    
-                    # Add row to table
-                    estimates_table.add_row(
-                        f"Unit {unit_num}",
-                        config_display,
-                        f"${current_primary:,.0f}",
-                        f"[bold]${new_primary:,.0f}[/bold]",
-                        f"${new_low:,.0f}-{new_high:,.0f}",
-                        f"[{diff_style}]{diff_symbol}${abs(difference):,.0f}[/{diff_style}]",
-                        f"[{change_style}]{change_percent_formatted}[/{change_style}]"
-                    )
-            
-            # Calculate total differences
-            total_difference = total_new_primary - total_current_primary
-            total_change_percent = (total_difference / total_current_primary * 100) if total_current_primary > 0 else 0
-            
-            # Style total difference
-            if total_difference > 0:
-                total_diff_style = "green"
-                total_diff_symbol = "+"
-                total_change_style = "green"
-                total_change_percent_formatted = f"+{total_change_percent:.1f}%"
-            elif total_difference < 0:
-                total_diff_style = "red"
-                total_diff_symbol = ""
-                total_change_style = "red"
-                total_change_percent_formatted = f"{total_change_percent:.1f}%"
-            else:
-                total_diff_style = "white"
-                total_diff_symbol = ""
-                total_change_style = "white"
-                total_change_percent_formatted = f"{total_change_percent:.1f}%"
-            
-            # Add totals row
-            estimates_table.add_section()
-            estimates_table.add_row(
-                "[bold]TOTAL[/bold]",
-                "[bold]All[/bold]",
-                f"[bold]${total_current_primary:,.0f}[/bold]",
-                f"[bold green]${total_new_primary:,.0f}[/bold green]",
-                f"[bold]${total_new_low:,.0f}-{total_new_high:,.0f}[/bold]",
-                f"[bold {total_diff_style}]{total_diff_symbol}${abs(total_difference):,.0f}[/bold {total_diff_style}]",
-                f"[bold {total_change_style}]{total_change_percent_formatted}[/bold {total_change_style}]"
+            # Use the shared comparison display function
+            update_database = display_rent_estimates_comparison(
+                property_id, estimates, existing_estimates, unit_configs, 
+                result['cost'], selected
             )
-            
-            console.print("\n")
-            console.print(estimates_table)
-            
-            # Show summary panel
-            range_amount = total_new_high - total_new_low
-            range_percent = (range_amount / total_new_primary * 100) if total_new_primary > 0 else 0
-            unit_count = sum(len(config['units']) for config in unit_configs)
-            
-            console.print(Panel(
-                f"[bold cyan]Rent Estimate Analysis Summary[/bold cyan]\n\n"
-                f"Total Units Analyzed: {unit_count}\n"
-                f"Current Total Rent: ${total_current_primary:,.0f}/month\n"
-                f"New Total Range: ${total_new_low:,.0f} - ${total_new_high:,.0f}\n"
-                f"New Primary Estimate: ${total_new_primary:,.0f}/month\n"
-                f"Total Monthly Change: {total_diff_symbol}${abs(total_difference):,.0f} ({total_diff_symbol}{total_change_percent:.1f}%)\n"
-                f"Range Spread: ${range_amount:,.0f} ({range_percent:.1f}%)\n"
-                f"Based on Report: {selected[:50]}...\n"
-                f"Generation Cost: ${result['cost']:.4f}",
-                title="Comparison Summary",
-                border_style="cyan"
-            ))
-            
-            # Ask user if they want to update the database
-            console.print("\n")
-            update_database = questionary.confirm(
-                "Would you like to update the database with these new rent estimates?",
-                default=False
-            ).ask()
             
             if update_database:
                 console.print("\n[bold yellow]⚠️  This will overwrite the current estimates in the database.[/bold yellow]")
@@ -1047,24 +1213,49 @@ def handle_generate_rent_estimates(property_id: str):
 using_application = True
 
 def run_all_properties_options():
-  using_all_properties = True
-  choices = ["Go back", "All properties - Active (FHA)", "Phase 1 Qualifiers", "Property Info", "All properties - Sold / Passed (FHA)"]
+    using_all_properties = True
+    choices = [
+        "Go back",
+        "All properties - Active (FHA)",
+        "Phase 1 Qualifiers",
+        "Reduce price and recalculate",
+        "Phase 1 Disqualifiers Fit",
+        "Property Info",
+        "All properties - Sold / Passed (FHA)",
+    ]
 
-  while using_all_properties:
-    option = questionary.select("What would you like to display?", choices=choices).ask()
+    while using_all_properties:
+        option = questionary.select(
+            "What would you like to display?", choices=choices
+        ).ask()
 
-    if option == "Go back":
-      using_all_properties = False
-    elif option == "All properties - Active (FHA)":
-      dataframe = df.query("status == 'active'")
-      display_all_properties(properties_df=dataframe, title="All active properties using FHA")
-    elif option == "Phase 1 Qualifiers":
-      display_all_phase1_qualifying_properties()
-    elif option == "Property Info":
-      display_all_properties_info(properties_df=df)
-    elif option == "All properties - Sold / Passed (FHA)":
-      dataframe = df.query("status != 'active'")
-      display_all_properties(properties_df=dataframe, title="All inactive properties using FHA", show_status=True)
+        if option == "Go back":
+            using_all_properties = False
+        elif option == "All properties - Active (FHA)":
+            dataframe = df.query("status == 'active'")
+            display_all_properties(
+                properties_df=dataframe, title="All active properties using FHA"
+            )
+        elif option == "Phase 1 Qualifiers":
+            display_all_phase1_qualifying_properties()
+        elif option == "Reduce price and recalculate":
+            percent = questionary.text(
+                "Enter a percent to reduce purchase price by"
+            ).ask()
+            converted = float(int(percent)) / 100.0
+            reduced_df = get_reduced_pp_df(reduction_factor=converted)
+            display_all_properties(properties_df=reduced_df, title=f"{converted}% Price Reduction")
+        elif option == "Phase 1 Disqualifiers Fit":
+            fit_purchase_price_to_phase_1()
+        elif option == "Property Info":
+            display_all_properties_info(properties_df=df)
+        elif option == "All properties - Sold / Passed (FHA)":
+            dataframe = df.query("status != 'active'")
+            display_all_properties(
+                properties_df=dataframe,
+                title="All inactive properties using FHA",
+                show_status=True,
+            )
 
 def run_loans_options():
   using_loans = True
@@ -1105,32 +1296,33 @@ def run_loans_options():
     elif option == "View loans":
       loans_provider.display_loans()
 
-while using_application:
-  choices = ['All properties', 'One property', "Add new property", "Loans", "Refresh data", "Quit"]
-  option = questionary.select("What would you like to analyze?", choices=choices).ask()
+if __name__ == "__main__":
+  while using_application:
+    choices = ['All properties', 'One property', "Add new property", "Loans", "Refresh data", "Quit"]
+    option = questionary.select("What would you like to analyze?", choices=choices).ask()
 
-  if option == "Quit":
-    using_application = False
-  elif option == "All properties":
-    run_all_properties_options()
-  elif option == "One property":
-    property_ids = []
-    properties_get_response = supabase.table('properties').select('address1').execute()
-    for row in properties_get_response.data:
-      property_ids.append(row['address1'])
-    property_id = inquirer.fuzzy(
-        message="Type to search properties",
-        choices=property_ids,
-        default="",
-        multiselect=False,
-        validate=None,
-        invalid_message="Invalid input"
-    ).execute()
-    analyze_property(property_id)
-  elif option == "Add new property":
-    run_add_property(supabase_client=supabase)
-    reload_dataframe()
-  elif option == "Loans":
-    run_loans_options()
-  elif option == "Refresh data":
-    reload_dataframe()
+    if option == "Quit":
+      using_application = False
+    elif option == "All properties":
+      run_all_properties_options()
+    elif option == "One property":
+      property_ids = []
+      properties_get_response = supabase.table('properties').select('address1').execute()
+      for row in properties_get_response.data:
+        property_ids.append(row['address1'])
+      property_id = inquirer.fuzzy(
+          message="Type to search properties",
+          choices=property_ids,
+          default="",
+          multiselect=False,
+          validate=None,
+          invalid_message="Invalid input"
+      ).execute()
+      analyze_property(property_id)
+    elif option == "Add new property":
+      run_add_property(supabase_client=supabase)
+      reload_dataframe()
+    elif option == "Loans":
+      run_loans_options()
+    elif option == "Refresh data":
+      reload_dataframe()

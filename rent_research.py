@@ -485,6 +485,29 @@ You must provide rent estimates for EACH individual unit listed above. Each unit
                 "error": f"API call failed: {str(e)}",
             }
 
+    def _sanitize_content(self, content: str) -> str:
+        """Sanitize content to remove problematic characters for PostgreSQL storage"""
+        if not content:
+            return content
+            
+        try:
+            # Remove null bytes which cause PostgreSQL errors
+            sanitized = content.replace('\u0000', '')
+            
+            # Remove other problematic control characters except common whitespace
+            sanitized = ''.join(char for char in sanitized 
+                              if ord(char) >= 32 or char in '\n\r\t')
+            
+            # Ensure valid UTF-8 encoding
+            sanitized = sanitized.encode('utf-8', errors='ignore').decode('utf-8')
+            
+            return sanitized
+            
+        except Exception as e:
+            self.console.print(f"[yellow]Warning: Content sanitization failed: {str(e)}[/yellow]")
+            # Fallback: return empty string if sanitization fails completely
+            return ""
+
     def _store_report(
         self,
         property_id: str,
@@ -496,13 +519,21 @@ You must provide rent estimates for EACH individual unit listed above. Each unit
         """Store the research report in the database"""
 
         try:
+            # Sanitize content to prevent PostgreSQL Unicode errors
+            sanitized_content = self._sanitize_content(report_content)
+            sanitized_prompt = self._sanitize_content(prompt_used)
+            
+            # Log if significant content was removed during sanitization
+            if len(sanitized_content) < len(report_content) * 0.9:
+                self.console.print(f"[yellow]Warning: Significant content removed during sanitization for {property_id}[/yellow]")
+            
             result = (
                 self.supabase.table("research_reports")
                 .insert(
                     {
                         "property_id": property_id,
-                        "report_content": report_content,
-                        "prompt_used": prompt_used,
+                        "report_content": sanitized_content,
+                        "prompt_used": sanitized_prompt,
                         "status": status,
                         "api_cost": float(cost),
                         "research_type": "rental_comparison",
@@ -517,7 +548,14 @@ You must provide rent estimates for EACH individual unit listed above. Each unit
             return None
 
         except Exception as e:
-            self.console.print(f"[red]Error storing report: {str(e)}[/red]")
+            # Enhanced error logging to help with debugging
+            error_details = {
+                'message': getattr(e, 'message', str(e)),
+                'code': getattr(e, 'code', 'Unknown'),
+                'hint': getattr(e, 'hint', None),
+                'details': getattr(e, 'details', None)
+            }
+            self.console.print(f"[red]Error storing report: {error_details}[/red]")
             return None
 
     def generate_rent_research(self, property_id: str) -> Optional[str]:
