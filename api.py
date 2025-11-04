@@ -22,24 +22,107 @@ from run import (
 
 load_dotenv()
 
+# Initialize Supabase client early
+supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+
 # Global dataframe - will be loaded on startup
 df = None
 rents = None
+
+# Load assumptions with fallbacks
+def load_assumptions():
+    """Load assumptions from YAML file with fallback defaults"""
+    default_assumptions = {
+        'appreciation_rate': 0.02,
+        'rent_appreciation_rate': 0.01,
+        'property_tax_rate': 0.01565,
+        'home_insurance_rate': 0.02,
+        'vacancy_rate': 0.0833,
+        'repair_savings_rate': 0.05,
+        'closing_costs_rate': 0.04,
+        'unit_living_in': 'cheapest'
+    }
+    
+    try:
+        import yaml
+        with open('assumptions.yaml', 'r') as file:
+            assumptions = yaml.safe_load(file)
+        print("✅ Loaded assumptions from assumptions.yaml")
+        return assumptions
+    except Exception as e:
+        print(f"⚠️ Failed to load assumptions.yaml: {str(e)}")
+        print("🔧 Using default assumptions")
+        return default_assumptions
+
+# Load assumptions on module import
+assumptions = load_assumptions()
+appreciation_rate = assumptions["appreciation_rate"]
+rent_appreciation_rate = assumptions["rent_appreciation_rate"]
+property_tax_rate = assumptions["property_tax_rate"]
+home_insurance_rate = assumptions["home_insurance_rate"]
+vacancy_rate = assumptions["vacancy_rate"]
+repair_savings_rate = assumptions["repair_savings_rate"]
+closing_costs_rate = assumptions["closing_costs_rate"]
+live_in_unit_setting = assumptions["unit_living_in"]
+
+# Load loan details with fallbacks
+def load_loan_details():
+    """Load FHA loan details from Supabase with fallback defaults"""
+    default_loan = {
+        'interest_rate': 0.065,  # 6.5%
+        'down_payment_rate': 0.035,  # 3.5%
+        'years': 30,
+        'mip_upfront_rate': 0.0175,
+        'mip_annual_rate': 0.0055
+    }
+    
+    try:
+        fha_loan_get_response = supabase.table('loans').select("*").eq("id", 1).limit(1).single().execute()
+        loan_data = fha_loan_get_response.data
+        print("✅ Loaded loan details from database")
+        return {
+            'interest_rate': float(loan_data['interest_rate']),
+            'down_payment_rate': float(loan_data['down_payment_rate']),
+            'years': float(loan_data['years']),
+            'mip_upfront_rate': float(loan_data['mip_upfront_rate']),
+            'mip_annual_rate': float(loan_data['mip_annual_rate'])
+        }
+    except Exception as e:
+        print(f"⚠️ Failed to load loan details from database: {str(e)}")
+        print("🔧 Using default loan settings")
+        return default_loan
+
+# Load loan details on module import
+loan_details = load_loan_details()
+interest_rate = loan_details['interest_rate']
+down_payment_rate = loan_details['down_payment_rate']
+loan_length_years = loan_details['years']
+mip_upfront_rate = loan_details['mip_upfront_rate']
+mip_annual_rate = loan_details['mip_annual_rate']
 
 def reload_dataframe_logic():
     """Reload and recalculate property data (adapted from run.py)"""
     global df, rents
     
-    # This will use the existing reload_dataframe function
-    # We need to import the global variables from run.py
-    from run import df as run_df, rents as run_rents
-    
-    # Force reload of data
-    reload_dataframe()
-    
-    # Update our global variables
-    df = run_df.copy()
-    rents = run_rents.copy() if run_rents is not None else None
+    try:
+        # Try to use the existing reload_dataframe function from run.py
+        reload_dataframe()
+        
+        # Import the updated dataframes from run.py
+        from run import df as run_df, rents as run_rents
+        
+        # Update our global variables
+        df = run_df.copy()
+        rents = run_rents.copy() if run_rents is not None else None
+        
+    except Exception as e:
+        print(f"⚠️ Failed to use run.py reload logic: {str(e)}")
+        print("🔧 Using basic property data loading")
+        
+        # Fallback: just load properties without full calculations
+        properties_get_response = supabase.table('properties').select('*').execute()
+        df = pd.DataFrame(properties_get_response.data)
+        rents = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -47,16 +130,25 @@ async def lifespan(app: FastAPI):
     global df, rents
     
     # Startup
-    print("🔄 Loading property data...")
+    print("🔄 Starting PropDeals API...")
     
-    # Load data using the same logic as run.py
-    properties_get_response = supabase.table('properties').select('*').execute()
-    df = pd.DataFrame(properties_get_response.data)
-    
-    # Apply all calculations (simplified version of reload_dataframe)
-    reload_dataframe_logic()
-    
-    print(f"✅ Loaded {len(df) if df is not None else 0} properties")
+    try:
+        print("📊 Loading property data...")
+        
+        # Load data using the same logic as run.py
+        properties_get_response = supabase.table('properties').select('*').execute()
+        df = pd.DataFrame(properties_get_response.data)
+        
+        # Apply all calculations (simplified version of reload_dataframe)
+        reload_dataframe_logic()
+        
+        print(f"✅ Loaded {len(df) if df is not None else 0} properties")
+        
+    except Exception as e:
+        print(f"⚠️ Failed to load property data during startup: {str(e)}")
+        print("🚀 API will start without data - data will be loaded on first request")
+        df = None
+        rents = None
     
     yield
     
@@ -78,13 +170,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Supabase client
-supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
 @app.get("/")
 async def root():
     """API health check"""
-    return {"message": "PropDeals API is running", "version": "1.0.0"}
+    global df, rents
+    
+    # Check data status
+    data_status = {
+        "properties_loaded": df is not None and not df.empty,
+        "property_count": len(df) if df is not None else 0,
+        "rents_loaded": rents is not None and not rents.empty if rents is not None else False
+    }
+    
+    return {
+        "message": "PropDeals API is running", 
+        "version": "1.0.0",
+        "status": "healthy",
+        "data": data_status
+    }
 
 @app.get("/properties", response_model=List[Dict[str, Any]])
 async def get_all_properties(
@@ -94,7 +198,17 @@ async def get_all_properties(
     global df
     
     if df is None or df.empty:
-        raise HTTPException(status_code=404, detail="No properties found")
+        # Try to load data if not available
+        try:
+            print("🔄 Loading data on demand...")
+            properties_get_response = supabase.table('properties').select('*').execute()
+            df = pd.DataFrame(properties_get_response.data)
+            
+            if df.empty:
+                raise HTTPException(status_code=404, detail="No properties found in database")
+                
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"Unable to load property data: {str(e)}")
     
     filtered_df = df.copy()
     
