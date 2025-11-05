@@ -399,6 +399,8 @@ def display_all_phase1_qualifying_properties():
       - 50% rule (operating expenses must be 50% or lower than gross rent)
       - Cash needed must be below $25,000
       - Debt Service Coverage Ratio should be above 1.25
+      - Monthly Cashflow with cheapest unit not rented above -400 (house hacking)
+      - Fully rented monthly cashflow above 400
     """
     critera = "status == 'active' & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400"
 
@@ -521,8 +523,8 @@ def fit_purchase_price_to_phase_1():
 def get_reduced_pp_df(reduction_factor):
   dataframe = df.copy()
 
-  # multiply purchase price by the reduction_factor, then recalculate all values based on that
-  dataframe["purchase_price"] = dataframe["purchase_price"] * (1 - reduction_factor)
+  dataframe["original_price"] = dataframe["purchase_price"]
+  dataframe["purchase_price"] = dataframe["purchase_price"] * (1 - reduction_factor) # new purchase price
   
   # Recalculate all price-dependent variables
   dataframe["cost_per_sqrft"] = dataframe["purchase_price"] / dataframe["square_ft"]
