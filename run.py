@@ -1279,6 +1279,24 @@ def handle_rent_research_after_add(property_id):
     except Exception as e:
         console.print(f"[red]Error generating estimates: {str(e)}[/red]")
 
+def handle_changing_loan():
+  loan_provider = LoansProvider(supabase_client=supabase, console=console)
+  loans = loan_provider.get_loans() 
+  loan_choices = []
+
+  for loan in loans:
+    loan_choices.append(f"{loan.id} - {loan.name}")
+
+  selected_loan = questionary.select("Select a loan", choices=loan_choices).ask()
+  selected_loan_id = None
+
+  for loan in loans:
+    if f"{loan.id} - {loan.name}" == selected_loan:
+      selected_loan_id = loan.id
+
+  load_loan(selected_loan_id)
+  reload_dataframe()
+
 using_application = True
 
 def run_all_properties_options():
@@ -1338,7 +1356,6 @@ def run_loans_options():
     elif option == "Add new loan":
       console.print("Let's add a new loan", style="bold blue")
       proceed = False
-      
       while not proceed:
         loan_details = loans_provider.collect_loan_details()
         console.print(Panel(f"Loan Name: {loan_details.name}\n"
@@ -1355,7 +1372,6 @@ def run_loans_options():
         
         if not proceed:
           console.print("Please enter the loan details again", style="bold blue")
-      
       success = loans_provider.add_loan(loan_details)
       if success:
         console.print("[green]Loan added successfully![/green]")
@@ -1364,11 +1380,7 @@ def run_loans_options():
     elif option == "View loans":
       loans_provider.display_loans()
     elif option == "Change loans for session":
-      # get all loans as a list
-      # ask the user to select one using InquirerPy autocomplete
-      # run load_loan with that id
-      # run reload_dataframe with that id
-      pass
+      handle_changing_loan()
 
 if __name__ == "__main__":
   while using_application:
