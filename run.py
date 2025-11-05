@@ -120,6 +120,11 @@ def update_footer():
         last_updated = datetime.now()
         app_layout["footer"].update(create_footer())
 
+def show_footer():
+    """Display footer information before prompts"""
+    footer_panel = create_footer()
+    console.print(footer_panel)
+
 def load_assumptions():
   global appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting
 
@@ -485,7 +490,7 @@ def display_all_properties(properties_df, title, show_status=False):
             
         table.add_row(*row_args)
 
-    update_main_content(table)
+    console.print(table)
 
 # displays all properties that match our dealflow analysis strict criteria
 def get_all_phase1_qualifying_properties():
@@ -801,7 +806,7 @@ def display_all_properties_info(properties_df):
             f"[{elec_style}]{format_currency(row['annual_electricity_cost_est'])}[/{elec_style}]",
         )
 
-    update_main_content(table)
+    console.print(table)
 
 def analyze_property(property_id):
     """Display detailed analysis for a single property"""
@@ -1390,9 +1395,9 @@ def run_all_properties_options():
     ]
 
     while using_all_properties:
-        option = questionary.select(
-            "What would you like to display?", choices=choices
-        ).ask()
+        show_footer()
+        console.print()  # Add spacing
+        option = questionary.select("What would you like to display?", choices=choices).ask()
 
         if option == "Go back":
             using_all_properties = False
@@ -1404,9 +1409,7 @@ def run_all_properties_options():
         elif option == "Phase 1 Qualifiers":
             display_all_phase1_qualifying_properties()
         elif option == "Reduce price and recalculate":
-            percent = questionary.text(
-                "Enter a percent to reduce purchase price by"
-            ).ask()
+            percent = questionary.text("Enter a percent to reduce purchase price by").ask()
             converted = float(int(percent)) / 100.0
             reduced_df = get_reduced_pp_df(reduction_factor=converted)
             display_all_properties(properties_df=reduced_df, title=f"{converted}% Price Reduction")
@@ -1428,6 +1431,8 @@ def run_loans_options():
   loans_provider = LoansProvider(supabase, console)
 
   while using_loans:
+    show_footer()
+    console.print()  # Add spacing
     option = questionary.select("Select an option", choices=choices).ask()
     if option == "Go back":
       using_loans = False
@@ -1461,46 +1466,46 @@ def run_loans_options():
       handle_changing_loan()
 
 def run_application():
-    """Main application function with persistent layout"""
-    global app_layout, live_display, using_application
+    """Main application function with footer display"""
+    global using_application
     
-    # Create the layout
-    app_layout = create_layout()
+    # Display welcome message
+    console.print(Panel("[bold green]Property Deal Analyzer[/bold green]\n\nWelcome to the Property Deal Analyzer!", title="Welcome"))
     
-    # Start the persistent Live display
-    with Live(app_layout, screen=True, refresh_per_second=4) as live:
-        live_display = live
+    while using_application:
+        # Show footer before each menu
+        show_footer()
+        console.print()  # Add spacing
         
-        while using_application:
-            choices = ['All properties', 'One property', "Add new property", "Loans", "Refresh data", "Quit"]
-            option = questionary.select("What would you like to analyze?", choices=choices).ask()
+        choices = ['All properties', 'One property', "Add new property", "Loans", "Refresh data", "Quit"]
+        option = questionary.select("What would you like to analyze?", choices=choices).ask()
 
-            if option == "Quit":
-                using_application = False
-            elif option == "All properties":
-                run_all_properties_options()
-            elif option == "One property":
-                property_ids = []
-                properties_get_response = supabase.table('properties').select('address1').execute()
-                for row in properties_get_response.data:
-                    property_ids.append(row['address1'])
-                property_id = inquirer.fuzzy(
-                    message="Type to search properties",
-                    choices=property_ids,
-                    default="",
-                    multiselect=False,
-                    validate=None,
-                    invalid_message="Invalid input"
-                ).execute()
-                analyze_property(property_id)
-            elif option == "Add new property":
-                property_details = run_add_property(supabase_client=supabase)
-                handle_rent_research_after_add(property_details['address1'])
-                reload_dataframe()
-            elif option == "Loans":
-                run_loans_options()
-            elif option == "Refresh data":
-                reload_dataframe()
+        if option == "Quit":
+            using_application = False
+        elif option == "All properties":
+            run_all_properties_options()
+        elif option == "One property":
+            property_ids = []
+            properties_get_response = supabase.table('properties').select('address1').execute()
+            for row in properties_get_response.data:
+                property_ids.append(row['address1'])
+            property_id = inquirer.fuzzy(
+                message="Type to search properties",
+                choices=property_ids,
+                default="",
+                multiselect=False,
+                validate=None,
+                invalid_message="Invalid input"
+            ).execute()
+            analyze_property(property_id)
+        elif option == "Add new property":
+            property_details = run_add_property(supabase_client=supabase)
+            handle_rent_research_after_add(property_details['address1'])
+            reload_dataframe()
+        elif option == "Loans":
+            run_loans_options()
+        elif option == "Refresh data":
+            reload_dataframe()
 
 if __name__ == "__main__":
     run_application()
