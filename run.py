@@ -68,18 +68,19 @@ def load_assumptions():
 
   console.print(f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]")
 
-def load_loan():
+def load_loan(loan_id):
   global interest_rate, down_payment_rate, loan_length_years, mip_upfront_rate, mip_annual_rate
 
   console.print("[yellow]Reloading FHA loan data...[/yellow]")
 
-  fha_loan_get_response = supabase.table('loans').select("*").eq("id", 1).limit(1).single().execute()
-
-  interest_rate = float(fha_loan_get_response.data['interest_rate'])
-  down_payment_rate = float(fha_loan_get_response.data['down_payment_rate'])
-  loan_length_years = float(fha_loan_get_response.data['years'])
-  mip_upfront_rate = float(fha_loan_get_response.data['mip_upfront_rate'])
-  mip_annual_rate = float(fha_loan_get_response.data['mip_annual_rate'])
+  loan_provider = LoansProvider(supabase_client=supabase, console=console)
+  loan = loan_provider.get_loan_by_id(loan_id)
+  
+  interest_rate = loan.interest_rate
+  down_payment_rate = loan.down_payment_rate
+  loan_length_years = loan.years
+  mip_upfront_rate = loan.mip_upfront_rate
+  mip_annual_rate = loan.mip_annual_rate
 
   console.print("[green]FHA loan data reloaded successfully![/green]")
 
@@ -262,8 +263,8 @@ def reload_dataframe():
 # Initialize assumptions at startup
 load_assumptions()
 
-# Initialize loan data at startup
-load_loan()
+# Initialize loan data at startup - loads FHA loan (default)
+load_loan(1)
 
 # Initialize dataframe at startup
 reload_dataframe()
@@ -408,7 +409,7 @@ def display_all_properties(properties_df, title, show_status=False):
     console.print(table)
 
 # displays all properties that match our dealflow analysis strict criteria
-def display_all_phase1_qualifying_properties():
+def get_all_phase1_qualifying_properties():
     """
     This method filters all properties based on our criteria for what is a financially viable property
     Current criteria:
@@ -425,25 +426,41 @@ def display_all_phase1_qualifying_properties():
     filtered_df = df.copy()
     filtered_df = filtered_df.query(critera)
 
-    display_all_properties(
-        properties_df=filtered_df, title="Phase 1 Criteria Qualifiers - Current Prices"
-    )
-
     # create a list of address1's from the qualifiers to remove from the reduced price dataframe
     qualifier_address1s = []
 
     for _, row in filtered_df.iterrows():
       qualifier_address1s.append(row["address1"])
 
-    # Reduce price and recalculate
+    # Reduce price and recalculate - contingent on price qualifiers
     reduced_df = get_reduced_pp_df(0.10)
     reduced_df = reduced_df.query(critera)
 
     for address1 in qualifier_address1s:
       reduced_df = reduced_df.drop(reduced_df[reduced_df['address1'] == address1].index)
+
+    # Calculate possible rent configurations using a "Creative" approach
+    # 1 - find all properties that don't qualify AND where the unit I am living in has 2 or more bedrooms
+    # 2 - recalculate Y1 monthly cashflow assuming each additional room can be rented out for $400-500
+    # 3 - re-evaluate if any of those properties fit the criteria (only thing this should affect is 'monthly_cash_flow_y1 >= -400')
     
+    return filtered_df, reduced_df, None
+
+def display_all_phase1_qualifying_properties():
+    current, contingent, creative = get_all_phase1_qualifying_properties()
+
     display_all_properties(
-      properties_df=reduced_df, title="Phase 1 Criteria Qualifiers - Contingent on 10% Price Reduction"
+        properties_df=current, title="Phase 1 Criteria Qualifiers - Current Prices"
+    )
+
+    display_all_properties(
+        properties_df=contingent,
+        title="Phase 1 Criteria Qualifiers - Contingent on 10% Price Reduction",
+    )
+
+    display_all_properties(
+      properties_df=creative,
+      title="Phase 1 Criteria Qualifiers - If we rent out additional rooms in our unit"
     )
 
 # determines what price each property would have to be to qualify for phase 1 criteria 
@@ -1311,7 +1328,7 @@ def run_all_properties_options():
 
 def run_loans_options():
   using_loans = True
-  choices = ["Go back", "Add new loan", "View loans"]
+  choices = ["Go back", "Add new loan", "View loans", "Change loans for session"]
   loans_provider = LoansProvider(supabase, console)
 
   while using_loans:
@@ -1344,9 +1361,14 @@ def run_loans_options():
         console.print("[green]Loan added successfully![/green]")
       else:
         console.print("[red]Failed to add loan[/red]")
-        
     elif option == "View loans":
       loans_provider.display_loans()
+    elif option == "Change loans for session":
+      # get all loans as a list
+      # ask the user to select one using InquirerPy autocomplete
+      # run load_loan with that id
+      # run reload_dataframe with that id
+      pass
 
 if __name__ == "__main__":
   while using_application:

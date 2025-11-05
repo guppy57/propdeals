@@ -8,7 +8,7 @@ from supabase import create_client, Client
 from typing import List, Dict, Any, Optional
 
 # Import shared functions from run.py
-from run import reload_dataframe, get_reduced_pp_df
+from run import reload_dataframe, get_reduced_pp_df, get_all_phase1_qualifying_properties
 
 load_dotenv()
 
@@ -222,28 +222,18 @@ async def get_phase1_qualifiers():
     assumptions_response = supabase.table('assumptions').select("*").eq("id", 1).limit(1).single().execute()
     
     try:
-        filtered_df = df.query(criteria)
-        current_price_properties = filtered_df.fillna(0).to_dict('records')
-
-        reduced_df = get_reduced_pp_df(0.10)
-        reduced_df = reduced_df.query(criteria)
-
-        qualifier_address1s = []
-
-        for _, row in filtered_df.iterrows():
-            qualifier_address1s.append(row['address1'])
-
-        for address1 in qualifier_address1s:
-            reduced_df = reduced_df.drop(reduced_df[reduced_df['address1'] == address1].index)
-        
-        contingent_price_properties = reduced_df.fillna(0).to_dict('records')
+        current, contingent, creative = get_all_phase1_qualifying_properties()
+        current = current.fillna(0).to_dict('records')
+        contingent = contingent.fillna(0).to_dict('records')
+        # creative = creative.fillna(0).to_dict('records')
 
         return {
             "criteria": criteria,
             "assumptions": assumptions_response.data,
             "properties": {
-                "current_prices": current_price_properties,
-                "contingent_10prcnt_price_reduction": contingent_price_properties,
+                "current_prices": current,
+                "contingent_10prcnt_price_reduction": contingent,
+                "creative_pricing": creative,
             }
         }
     except Exception as e:
