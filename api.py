@@ -218,6 +218,8 @@ async def get_phase1_qualifiers():
         raise HTTPException(status_code=404, detail="No properties found")
     
     criteria = "status == 'active' & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400"
+
+    assumptions_response = supabase.table('assumptions').select("*").eq("id", 1).limit(1).single().execute()
     
     try:
         filtered_df = df.query(criteria)
@@ -238,6 +240,7 @@ async def get_phase1_qualifiers():
 
         return {
             "criteria": criteria,
+            "assumptions": assumptions_response.data,
             "properties": {
                 "current_prices": current_price_properties,
                 "contingent_10prcnt_price_reduction": contingent_price_properties,
