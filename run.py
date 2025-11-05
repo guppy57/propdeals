@@ -4,10 +4,13 @@ import questionary
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.layout import Layout
+from rich.live import Live
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from prompt_toolkit.styles import Style
 from InquirerPy import inquirer
+from datetime import datetime
 
 from add_property import run_add_property
 from rent_research import RentResearcher
@@ -17,6 +20,12 @@ load_dotenv()
 
 console = Console() 
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+
+# Global variables for persistent layout
+current_loan_name = "FHA Default"
+last_updated = datetime.now()
+app_layout = None
+live_display = None
 
 # Create white style for questionary prompts
 white_style = Style([
@@ -50,6 +59,67 @@ def format_number(value):
         return "N/A"
     return f"{value:.2f}"
 
+def create_footer():
+    """Create footer panel with current loan and assumptions info"""
+    global current_loan_name, last_updated
+    
+    # Format current assumptions for display
+    assumption_text = (
+        f"Property Tax: {property_tax_rate:.1%} | "
+        f"Home Insurance: {home_insurance_rate:.1%} | "
+        f"Vacancy: {vacancy_rate:.1%} | "
+        f"Repair Reserve: {repair_savings_rate:.1%}"
+    )
+    
+    loan_text = (
+        f"Loan: [bold cyan]{current_loan_name}[/bold cyan] | "
+        f"Rate: [bold yellow]{interest_rate:.2%}[/bold yellow] | "
+        f"Down Payment: [bold green]{down_payment_rate:.1%}[/bold green] | "
+        f"Term: [bold blue]{loan_length_years}yr[/bold blue]"
+    )
+    
+    footer_content = (
+        f"{loan_text}\n"
+        f"{assumption_text}\n"
+        f"Last Updated: [dim]{last_updated.strftime('%H:%M:%S')}[/dim]"
+    )
+    
+    return Panel(
+        footer_content,
+        title="[bold magenta]Current Settings[/bold magenta]",
+        border_style="cyan",
+        height=5
+    )
+
+def create_layout():
+    """Create the main application layout"""
+    layout = Layout(name="root")
+    layout.split_column(
+        Layout(name="header", size=3),
+        Layout(name="main", ratio=1),
+        Layout(name="footer", size=5)
+    )
+    
+    # Initialize with welcome content
+    layout["header"].update(Panel("[bold green]Property Deal Analyzer[/bold green]", title="App"))
+    layout["main"].update(Panel("Welcome! Use the menu to navigate.", title="Main"))
+    layout["footer"].update(create_footer())
+    
+    return layout
+
+def update_main_content(content):
+    """Update the main content area"""
+    global app_layout
+    if app_layout:
+        app_layout["main"].update(content)
+
+def update_footer():
+    """Update the footer with current information"""
+    global app_layout, last_updated
+    if app_layout:
+        last_updated = datetime.now()
+        app_layout["footer"].update(create_footer())
+
 def load_assumptions():
   global appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting
 
@@ -67,11 +137,14 @@ def load_assumptions():
   live_in_unit_setting = assumptions_get_response.data["live_in_unit_setting"]
 
   console.print(f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]")
+  
+  # Update footer if layout is initialized
+  update_footer()
 
 def load_loan(loan_id):
-  global interest_rate, down_payment_rate, loan_length_years, mip_upfront_rate, mip_annual_rate
+  global interest_rate, down_payment_rate, loan_length_years, mip_upfront_rate, mip_annual_rate, current_loan_name
 
-  console.print("[yellow]Reloading FHA loan data...[/yellow]")
+  console.print("[yellow]Reloading loan data...[/yellow]")
 
   loan_provider = LoansProvider(supabase_client=supabase, console=console)
   loan = loan_provider.get_loan_by_id(loan_id)
@@ -81,8 +154,12 @@ def load_loan(loan_id):
   loan_length_years = loan.years
   mip_upfront_rate = loan.mip_upfront_rate
   mip_annual_rate = loan.mip_annual_rate
+  current_loan_name = loan.name
 
-  console.print("[green]FHA loan data reloaded successfully![/green]")
+  console.print("[green]Loan data reloaded successfully![/green]")
+  
+  # Update footer if layout is initialized
+  update_footer()
 
 def calculate_mortgage(principal, annual_rate, years):
   monthly_rate = annual_rate / 12
@@ -269,6 +346,8 @@ load_loan(1)
 # Initialize dataframe at startup
 reload_dataframe()
 
+# Initialize layout will be done in main section
+
 def display_all_properties(properties_df, title, show_status=False):
     dataframe = df if properties_df is None else properties_df
     table = Table(title=title, show_header=True, header_style="bold magenta")
@@ -406,7 +485,7 @@ def display_all_properties(properties_df, title, show_status=False):
             
         table.add_row(*row_args)
 
-    console.print(table)
+    update_main_content(table)
 
 # displays all properties that match our dealflow analysis strict criteria
 def get_all_phase1_qualifying_properties():
@@ -722,7 +801,7 @@ def display_all_properties_info(properties_df):
             f"[{elec_style}]{format_currency(row['annual_electricity_cost_est'])}[/{elec_style}]",
         )
 
-    console.print(table)
+    update_main_content(table)
 
 def analyze_property(property_id):
     """Display detailed analysis for a single property"""
@@ -1248,7 +1327,6 @@ def handle_generate_rent_estimates(property_id: str):
 
 def handle_rent_research_after_add(property_id):
     researcher = RentResearcher(supabase, console)
-    property_id = property_details['address1']
     report_id = researcher.generate_rent_research(property_id)
 
     try:
@@ -1382,34 +1460,47 @@ def run_loans_options():
     elif option == "Change loans for session":
       handle_changing_loan()
 
-if __name__ == "__main__":
-  while using_application:
-    choices = ['All properties', 'One property', "Add new property", "Loans", "Refresh data", "Quit"]
-    option = questionary.select("What would you like to analyze?", choices=choices).ask()
+def run_application():
+    """Main application function with persistent layout"""
+    global app_layout, live_display, using_application
+    
+    # Create the layout
+    app_layout = create_layout()
+    
+    # Start the persistent Live display
+    with Live(app_layout, screen=True, refresh_per_second=4) as live:
+        live_display = live
+        
+        while using_application:
+            choices = ['All properties', 'One property', "Add new property", "Loans", "Refresh data", "Quit"]
+            option = questionary.select("What would you like to analyze?", choices=choices).ask()
 
-    if option == "Quit":
-      using_application = False
-    elif option == "All properties":
-      run_all_properties_options()
-    elif option == "One property":
-      property_ids = []
-      properties_get_response = supabase.table('properties').select('address1').execute()
-      for row in properties_get_response.data:
-        property_ids.append(row['address1'])
-      property_id = inquirer.fuzzy(
-          message="Type to search properties",
-          choices=property_ids,
-          default="",
-          multiselect=False,
-          validate=None,
-          invalid_message="Invalid input"
-      ).execute()
-      analyze_property(property_id)
-    elif option == "Add new property":
-      property_details = run_add_property(supabase_client=supabase)
-      handle_rent_research_after_add(property_details['address1'])
-      reload_dataframe()
-    elif option == "Loans":
-      run_loans_options()
-    elif option == "Refresh data":
-      reload_dataframe()
+            if option == "Quit":
+                using_application = False
+            elif option == "All properties":
+                run_all_properties_options()
+            elif option == "One property":
+                property_ids = []
+                properties_get_response = supabase.table('properties').select('address1').execute()
+                for row in properties_get_response.data:
+                    property_ids.append(row['address1'])
+                property_id = inquirer.fuzzy(
+                    message="Type to search properties",
+                    choices=property_ids,
+                    default="",
+                    multiselect=False,
+                    validate=None,
+                    invalid_message="Invalid input"
+                ).execute()
+                analyze_property(property_id)
+            elif option == "Add new property":
+                property_details = run_add_property(supabase_client=supabase)
+                handle_rent_research_after_add(property_details['address1'])
+                reload_dataframe()
+            elif option == "Loans":
+                run_loans_options()
+            elif option == "Refresh data":
+                reload_dataframe()
+
+if __name__ == "__main__":
+    run_application()
