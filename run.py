@@ -1,7 +1,6 @@
 import os
 import pandas as pd
 import questionary
-import yaml
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -51,25 +50,38 @@ def format_number(value):
         return "N/A"
     return f"{value:.2f}"
 
-with open('assumptions.yaml', 'r') as file:
-  assumptions = yaml.safe_load(file)
-  appreciation_rate = assumptions["appreciation_rate"]
-  rent_appreciation_rate = assumptions["rent_appreciation_rate"]
-  property_tax_rate = assumptions["property_tax_rate"]
-  home_insurance_rate = assumptions["home_insurance_rate"]
-  vacancy_rate = assumptions["vacancy_rate"]
-  repair_savings_rate = assumptions["repair_savings_rate"]
-  closing_costs_rate = assumptions["closing_costs_rate"]
-  live_in_unit_setting = assumptions["unit_living_in"]
+def load_assumptions():
+  global appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting
 
-## LOAN DETAILS - load FHA loan details from Supabase and setup global variables
-fha_loan_get_response = supabase.table('loans').select("*").eq("id", 1).limit(1).single().execute()
+  console.print("[yellow]Reloading assumptions...[/yellow]")
 
-interest_rate = float(fha_loan_get_response.data['interest_rate'])
-down_payment_rate = float(fha_loan_get_response.data['down_payment_rate'])
-loan_length_years = float(fha_loan_get_response.data['years'])
-mip_upfront_rate = float(fha_loan_get_response.data['mip_upfront_rate'])
-mip_annual_rate = float(fha_loan_get_response.data['mip_annual_rate'])
+  assumptions_get_response = supabase.table('assumptions').select('*').eq('id', 1).limit(1).single().execute()
+
+  appreciation_rate = float(assumptions_get_response.data["appreciation_rate"])
+  rent_appreciation_rate = float(assumptions_get_response.data["rent_appreciation_rate"])
+  property_tax_rate = float(assumptions_get_response.data["property_tax_rate"])
+  home_insurance_rate = float(assumptions_get_response.data["home_insurance_rate"])
+  vacancy_rate = float(assumptions_get_response.data["vacancy_rate"])
+  repair_savings_rate = float(assumptions_get_response.data["repair_savings_rate"])
+  closing_costs_rate = float(assumptions_get_response.data["closing_costs_rate"])
+  live_in_unit_setting = assumptions_get_response.data["live_in_unit_setting"]
+
+  console.print(f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]")
+
+def load_loan():
+  global interest_rate, down_payment_rate, loan_length_years, mip_upfront_rate, mip_annual_rate
+
+  console.print("[yellow]Reloading FHA loan data...[/yellow]")
+
+  fha_loan_get_response = supabase.table('loans').select("*").eq("id", 1).limit(1).single().execute()
+
+  interest_rate = float(fha_loan_get_response.data['interest_rate'])
+  down_payment_rate = float(fha_loan_get_response.data['down_payment_rate'])
+  loan_length_years = float(fha_loan_get_response.data['years'])
+  mip_upfront_rate = float(fha_loan_get_response.data['mip_upfront_rate'])
+  mip_annual_rate = float(fha_loan_get_response.data['mip_annual_rate'])
+
+  console.print("[green]FHA loan data reloaded successfully![/green]")
 
 def calculate_mortgage(principal, annual_rate, years):
   monthly_rate = annual_rate / 12
@@ -246,6 +258,12 @@ def reload_dataframe():
     df["mobility_score"] = df.apply(mobility_score, axis=1)
   
     console.print("[green]Property data reloaded successfully![/green]")
+
+# Initialize assumptions at startup
+load_assumptions()
+
+# Initialize loan data at startup
+load_loan()
 
 # Initialize dataframe at startup
 reload_dataframe()
