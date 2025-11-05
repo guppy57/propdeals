@@ -1,6 +1,5 @@
 import os
 import pandas as pd
-import yaml
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,16 +8,7 @@ from supabase import create_client, Client
 from typing import List, Dict, Any, Optional
 
 # Import shared functions from run.py
-from run import (
-    reload_dataframe, 
-    get_reduced_pp_df,
-    deal_score_property,
-    mobility_score,
-    get_expected_gains,
-    format_currency,
-    format_percentage,
-    format_number
-)
+from run import reload_dataframe, get_reduced_pp_df
 
 load_dotenv()
 
@@ -222,7 +212,6 @@ async def get_all_properties(
 
 @app.get("/properties/phase1")
 async def get_phase1_qualifiers():
-    """Get properties that meet Phase 1 investment criteria"""
     global df
     
     if df is None or df.empty:
@@ -232,14 +221,30 @@ async def get_phase1_qualifiers():
     
     try:
         filtered_df = df.query(criteria)
-        properties = filtered_df.fillna(0).to_dict('records')
+        current_price_properties = filtered_df.fillna(0).to_dict('records')
+
+        reduced_df = get_reduced_pp_df(0.10)
+        reduced_df = reduced_df.query(criteria)
+
+        qualifier_address1s = []
+
+        for _, row in filtered_df.iterrows():
+            qualifier_address1s.append(row['address1'])
+
+        for address1 in qualifier_address1s:
+            reduced_df = reduced_df.drop(reduced_df[reduced_df['address1'] == address1].index)
         
+        contingent_price_properties = reduced_df.fillna(0).to_dict('records')
+
         return {
-            "count": len(properties),
             "criteria": criteria,
-            "properties": properties
+            "properties": {
+                "current_prices": current_price_properties,
+                "contingent_10prcnt_price_reduction": contingent_price_properties,
+            }
         }
     except Exception as e:
+        print(e)
         raise HTTPException(status_code=500, detail=f"Error filtering properties: {str(e)}")
 
 @app.get("/properties/{property_id}")
@@ -349,55 +354,6 @@ async def get_property_analysis(property_id: str):
             "mobility_score": float(row['mobility_score'])
         }
     }
-
-@app.get("/properties/reduced-price/{reduction_percent}")
-async def get_properties_with_reduced_price(reduction_percent: float):
-    """Get all properties with reduced purchase price and recalculated metrics"""
-    if reduction_percent < 0 or reduction_percent > 50:
-        raise HTTPException(status_code=400, detail="Reduction percent must be between 0 and 50")
-    
-    try:
-        reduction_factor = reduction_percent / 100.0
-        reduced_df = get_reduced_pp_df(reduction_factor)
-        properties = reduced_df.fillna(0).to_dict('records')
-        
-        return {
-            "reduction_percent": reduction_percent,
-            "reduction_factor": reduction_factor,
-            "count": len(properties),
-            "properties": properties
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error calculating reduced prices: {str(e)}")
-
-@app.get("/stats/summary")
-async def get_summary_stats():
-    """Get summary statistics for all properties"""
-    global df
-    
-    if df is None or df.empty:
-        raise HTTPException(status_code=404, detail="No properties found")
-    
-    active_properties = df[df['status'] == 'active']
-    
-    # Phase 1 qualifiers
-    phase1_criteria = "status == 'active' & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400"
-    phase1_count = len(df.query(phase1_criteria))
-    
-    return {
-        "total_properties": len(df),
-        "active_properties": len(active_properties),
-        "phase1_qualifiers": phase1_count,
-        "avg_purchase_price": float(active_properties['purchase_price'].mean()) if not active_properties.empty else 0,
-        "avg_cash_needed": float(active_properties['cash_needed'].mean()) if not active_properties.empty else 0,
-        "avg_deal_score": float(active_properties['deal_score'].mean()) if not active_properties.empty else 0,
-        "avg_mobility_score": float(active_properties['mobility_score'].mean()) if not active_properties.empty else 0,
-        "price_range": {
-            "min": float(active_properties['purchase_price'].min()) if not active_properties.empty else 0,
-            "max": float(active_properties['purchase_price'].max()) if not active_properties.empty else 0
-        }
-    }
-
 
 
 if __name__ == "__main__":
