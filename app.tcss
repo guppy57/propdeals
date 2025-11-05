@@ -1,0 +1,85 @@
+/* Property Deal Analyzer - Textual CSS Styles */
+
+/* Main layout container */
+#body {
+    layout: vertical;
+    height: 100%;
+}
+
+#main-container {
+    layout: horizontal;
+    height: 100%;
+}
+
+/* Main content panel */
+#main-panel {
+    width: 70%;
+    border: solid $primary;
+    border-title-align: center;
+    border-title-color: $text;
+    padding: 1;
+}
+
+#main-content {
+    height: 100%;
+    width: 100%;
+    content-align: left top;
+    color: $text;
+}
+
+/* Settings sidebar */
+#settings-panel {
+    width: 30%;
+    border: solid $secondary;
+    border-title-align: center;
+    border-title-color: $accent;
+    padding: 1;
+    background: $surface;
+}
+
+#settings-title {
+    text-align: center;
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+#loan-info {
+    margin-bottom: 1;
+    padding: 1;
+    border: solid $primary;
+    background: $panel;
+}
+
+#assumptions-info {
+    margin-bottom: 1;
+    padding: 1;
+    border: solid $secondary;
+    background: $panel;
+}
+
+/* Header and Footer styling */
+Header {
+    background: $primary;
+    color: $text;
+    text-style: bold;
+}
+
+Footer {
+    background: $secondary;
+    color: $text;
+}
+
+/* General app styling */
+App {
+    background: $background;
+}
+
+/* Color theme */
+App.-light-mode {
+    background: white;
+}
+
+App.-dark-mode {
+    background: #1e1e1e;
+}
