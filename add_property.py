@@ -222,26 +222,11 @@ def collect_property_details():
         "purchase_price": int(purchase_price),
         "address1": address1.strip(),
         "beds": int(beds),
-        "baths": int(baths),
+        "baths": float(baths),
         "square_ft": int(square_ft),
         "built_in": int(built_in),
         "units": units,
     }
-
-
-def get_test_data():
-    return {
-        "full_address": "224 Ash Ave, Ames, IA 50014",
-        "zillow_link": "https://zillow.com/something-here",
-        "purchase_price": int("269000"),
-        "address1": "224 Ash Ave",
-        "beds": int("3"),
-        "baths": int("2"),
-        "square_ft": int("2450"),
-        "built_in": int("1909"),
-        "units": 3,
-    }
-
 
 def display_property_details(property_details):
     text = ""

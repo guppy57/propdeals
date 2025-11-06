@@ -230,6 +230,8 @@ async def get_all_properties(
 @app.get("/properties/phase1")
 async def get_phase1_qualifiers():
     global df
+
+    reload_dataframe_logic()
     
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail="No properties found")
