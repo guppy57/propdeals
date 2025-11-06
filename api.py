@@ -90,6 +90,23 @@ loan_length_years = loan_details['years']
 mip_upfront_rate = loan_details['mip_upfront_rate']
 mip_annual_rate = loan_details['mip_annual_rate']
 
+def convert_numpy_types(obj):
+    """Convert numpy types to native Python types for JSON serialization"""
+    import numpy as np
+    
+    if isinstance(obj, dict):
+        return {k: convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    else:
+        return obj
+
 def reload_dataframe_logic():
     """Reload and recalculate property data (adapted from run.py)"""
     global df, rents
@@ -225,9 +242,9 @@ async def get_phase1_qualifiers():
     
     try:
         current, contingent, creative = get_all_phase1_qualifying_properties()
-        current = current.fillna(0).to_dict('records')
-        contingent = contingent.fillna(0).to_dict('records')
-        # creative = creative.fillna(0).to_dict('records')
+        current = convert_numpy_types(current.fillna(0).to_dict('records'))
+        contingent = convert_numpy_types(contingent.fillna(0).to_dict('records'))
+        creative = convert_numpy_types(creative.fillna(0).to_dict('records'))
 
         return {
             "criteria": criteria,
