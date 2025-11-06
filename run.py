@@ -195,7 +195,7 @@ def reload_dataframe():
     df["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
     df["home_age"] = 2025 - df["built_in"]
 
-    # second, calculate financials (ONLY DOING FHA NOW)
+    # second, calculate financials
     df["closing_costs"] = df["purchase_price"] * closing_costs_rate
     df["down_payment"] = df["purchase_price"] * down_payment_rate
     df["loan_amount"] = df["purchase_price"] - df["down_payment"] + (df["purchase_price"] * mip_upfront_rate)
@@ -216,6 +216,14 @@ def reload_dataframe():
     # Aggregate: sum all rents and find minimum rent per property
     rent_summary = rents.groupby("address1")["rent_estimate"].agg(["sum", "min"]).reset_index()
     rent_summary.columns = ["address1", "total_rent", "min_rent"]
+    
+    # Get the unit number for the minimum rent per property
+    min_rent_indices = rents.groupby("address1")["rent_estimate"].idxmin()
+    min_rent_units = rents.loc[min_rent_indices, ["address1", "unit_num", "beds"]].reset_index(drop=True)
+    min_rent_units.columns = ["address1", "min_rent_unit", "min_rent_unit_beds"]
+    
+    # Merge the unit information into rent_summary
+    rent_summary = rent_summary.merge(min_rent_units, on="address1", how="left")
 
     # Calculate net rental income (total - cheapest unit you'll live in)
     rent_summary["net_rent_y1"] = rent_summary["total_rent"] - rent_summary["min_rent"]
@@ -269,7 +277,7 @@ load_loan(1)
 # Initialize dataframe at startup
 reload_dataframe()
 
-def display_all_properties(properties_df, title, show_status=False):
+def display_all_properties(properties_df, title, show_status=False, show_min_rent_data=False):
     dataframe = df if properties_df is None else properties_df
     table = Table(title=title, show_header=True, header_style="bold magenta")
 
@@ -328,6 +336,11 @@ def display_all_properties(properties_df, title, show_status=False):
 
     if show_status:
         table.add_column("Status", justify="right", style="bold white")
+
+    if show_min_rent_data:
+        table.add_column("MinR Unit Beds", justify="right", style="bold white")
+        table.add_column("Add. Beds", justify="right", style="bold white")
+        table.add_column("Add. Rent", justify="right", style="bold white")
 
     # Add rows for each property
     for _, row in dataframe.iterrows():
@@ -403,6 +416,11 @@ def display_all_properties(properties_df, title, show_status=False):
         
         if show_status:
             row_args.append(row["status"])
+        
+        if show_min_rent_data:
+            row_args.append(str(row["min_rent_unit_beds"]))
+            row_args.append(str(int(row["min_rent_unit_beds"] - 1)))
+            row_args.append(str(calculate_additional_room_rent(row)))
             
         table.add_row(*row_args)
 
@@ -421,10 +439,10 @@ def get_all_phase1_qualifying_properties():
       - Monthly Cashflow with cheapest unit not rented above -400 (house hacking)
       - Fully rented monthly cashflow above 400
     """
-    critera = "status == 'active' & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400"
+    criteria = "status == 'active' & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400"
 
     filtered_df = df.copy()
-    filtered_df = filtered_df.query(critera)
+    filtered_df = filtered_df.query(criteria)
 
     # create a list of address1's from the qualifiers to remove from the reduced price dataframe
     qualifier_address1s = []
@@ -434,7 +452,7 @@ def get_all_phase1_qualifying_properties():
 
     # Reduce price and recalculate - contingent on price qualifiers
     reduced_df = get_reduced_pp_df(0.10)
-    reduced_df = reduced_df.query(critera)
+    reduced_df = reduced_df.query(criteria)
 
     for address1 in qualifier_address1s:
       reduced_df = reduced_df.drop(reduced_df[reduced_df['address1'] == address1].index)
@@ -443,8 +461,10 @@ def get_all_phase1_qualifying_properties():
     # 1 - find all properties that don't qualify AND where the unit I am living in has 2 or more bedrooms
     # 2 - recalculate Y1 monthly cashflow assuming each additional room can be rented out for $400-500
     # 3 - re-evaluate if any of those properties fit the criteria (only thing this should affect is 'monthly_cash_flow_y1 >= -400')
+    creative_df = get_additional_room_rental_df()
+    creative_df = creative_df.query(criteria)
     
-    return filtered_df, reduced_df, None
+    return filtered_df, reduced_df, creative_df 
 
 def display_all_phase1_qualifying_properties():
     current, contingent, creative = get_all_phase1_qualifying_properties()
@@ -460,100 +480,31 @@ def display_all_phase1_qualifying_properties():
 
     display_all_properties(
       properties_df=creative,
-      title="Phase 1 Criteria Qualifiers - If we rent out additional rooms in our unit"
+      title="Phase 1 Criteria Qualifiers - If we rent out additional rooms in our unit",
+      show_min_rent_data=True
     )
 
-# determines what price each property would have to be to qualify for phase 1 criteria 
-def fit_purchase_price_to_phase_1():
-  """
-  Method determines what percentage to decrease purchase price to fix all of our phase 1 criteria
-  This factor would then answer the question: "At what price does this property qualify for Phase 1"
+def calculate_additional_room_rent(row):
+  return int(row['min_rent_unit_beds'] - 1) * 400
 
-  We will *not* apply this to properties that *already qualify for Phase 1*
-  """
-  # Get properties that DON'T qualify for Phase 1 (use OR logic to catch any failing criteria)
-  filtered_df = df.copy()
-  filtered_df = filtered_df.query(
-      "MGR_PP < 0.01 | OpEx_Rent > 0.5 | DSCR < 1.25 | cash_needed > 25000 | monthly_cash_flow_y1 < -400 | monthly_cash_flow_y2 < 400"
-  )
-  
-  console.print(f"[yellow]Found {len(filtered_df)} properties that don't meet Phase 1 criteria[/yellow]")
+def get_additional_room_rental_df():
+    dataframe = df.copy()
 
-  for _, row in filtered_df.iterrows():
-    # find x for MGR_PP (1% rule)
-    x_1 = row["total_rent"] / (row["purchase_price"] * 0.01) 
-    
-    # find x for OpEx_rent (50% rule)
-    fixed_costs = row["monthly_repair_costs"] + row["monthly_vacancy_costs"]
-    variable_costs = property_tax_rate + home_insurance_rate
-    x_2 = (0.5 * row["total_rent"] - fixed_costs) / (variable_costs * row["purchase_price"])
-    
-    # find x for cash_needed
-    x_3 = 25000 / (row["purchase_price"] * (down_payment_rate + closing_costs_rate))
-    
-    # find x for DSCR (debt service coverage ratio >= 1.25)
-    x_4 = row["DSCR"] / 1.25 if row["DSCR"] < 1.25 else 1.0
-    
-    # find x for monthly_cash_flow_y1 >= -400
-    # Cash flow Y1 = net_rent_y1 - total_monthly_cost >= -400
-    # Solve: net_rent_y1 - (target_mortgage + mip + taxes + insurance + fixed_costs) = -400
-    x_5 = 1.0  # Default to no reduction needed
-    if row["monthly_cash_flow_y1"] < -400:
-      fixed_costs = row["monthly_repair_costs"] + row["monthly_vacancy_costs"]
-      target_mortgage_plus_variable = row["net_rent_y1"] + 400 - fixed_costs
-      
-      # Estimate target mortgage (assume mip + taxes + insurance = 25% of mortgage roughly)
-      target_mortgage = target_mortgage_plus_variable / 1.25
-      
-      if target_mortgage > 0:
-        # Find required loan amount using our new function
-        required_loan_amount = calculate_principal_from_payment(target_mortgage, interest_rate, loan_length_years)
-        
-        # Work backwards to purchase price: loan = purchase_price * (1 - down_payment_rate) + upfront_mip
-        # Solving: required_loan_amount = new_price * (1 - down_payment_rate + mip_upfront_rate)
-        required_purchase_price = required_loan_amount / (1 - down_payment_rate + mip_upfront_rate)
-        x_5 = required_purchase_price / row["purchase_price"]
-      else:
-        x_5 = 0.1
-    
-    # find x for monthly_cash_flow_y2 >= 400
-    # Cash flow Y2 = total_rent - total_monthly_cost >= 400
-    x_6 = 1.0  # Default to no reduction needed
-    if row["monthly_cash_flow_y2"] < 400:
-      fixed_costs = row["monthly_repair_costs"] + row["monthly_vacancy_costs"]
-      target_mortgage_plus_variable = row["total_rent"] - 400 - fixed_costs
-      
-      # Estimate target mortgage (assume mip + taxes + insurance = 25% of mortgage roughly)
-      target_mortgage = target_mortgage_plus_variable / 1.25
-      
-      if target_mortgage > 0:
-        # Find required loan amount using our new function
-        required_loan_amount = calculate_principal_from_payment(target_mortgage, interest_rate, loan_length_years)
-        
-        # Work backwards to purchase price
-        required_purchase_price = required_loan_amount / (1 - down_payment_rate + mip_upfront_rate)
-        x_6 = required_purchase_price / row["purchase_price"]
-      else:
-        x_6 = 0.1
-    
-    # Find the most restrictive factor (smallest value less than 1)
-    factors = [x_1, x_2, x_3, x_4, x_5, x_6]
-    valid_factors = [x for x in factors if 0 < x < 1]
-    
-    if valid_factors:
-      price_reduction_factor = min(valid_factors)
-      new_purchase_price = row["purchase_price"] * price_reduction_factor
-      price_reduction_amount = row["purchase_price"] - new_purchase_price
-      price_reduction_percentage = (1 - price_reduction_factor) * 100
-      
-      console.print(f"[cyan]{row['address1']}:[/cyan]")
-      console.print(f"  Current price: {format_currency(row['purchase_price'])}")
-      console.print(f"  Required price: {format_currency(new_purchase_price)}")
-      console.print(f"  Reduction: {format_currency(price_reduction_amount)} ({price_reduction_percentage:.1f}%)")
-      console.print(f"  Factors: MGR={x_1:.3f}, OpEx={x_2:.3f}, Cash={x_3:.3f}, DSCR={x_4:.3f}, CF1={x_5:.3f}, CF2={x_6:.3f}")
-      console.print("")
-    else:
-      console.print(f"[yellow]{row['address1']}: No valid price reduction factor found[/yellow]")
+    df2 = dataframe.query('min_rent_unit_beds > 1').copy()
+
+    df2["additional_room_rent"] = df2.apply(calculate_additional_room_rent, axis=1)
+
+    df2["net_rent_y1"] = df2["net_rent_y1"] + df2["additional_room_rent"]
+
+    df2["monthly_cash_flow_y1"] = df2["net_rent_y1"] - df2["total_monthly_cost"]
+    df2["annual_cash_flow_y1"] = df2["monthly_cash_flow_y1"] * 12
+    df2["annual_NOI_y1"] = (df2["net_rent_y1"] - df2["operating_expenses"]) * 12
+    df2["cap_rate_y1"] = df2["annual_NOI_y1"] / df2["purchase_price"]
+    df2["CoC_y1"] = df2["annual_cash_flow_y1"] / df2["cash_needed"]
+    df2["GRM_y1"] = df2["purchase_price"] / df2["annual_rent_y1"]
+    df2["deal_score"] = df2.apply(deal_score_property, axis=1)
+
+    return df2
 
 def get_reduced_pp_df(reduction_factor):
   dataframe = df.copy()
@@ -1306,7 +1257,6 @@ def run_all_properties_options():
         "All properties - Active (FHA)",
         "Phase 1 Qualifiers",
         "Reduce price and recalculate",
-        "Phase 1 Disqualifiers Fit",
         "Property Info",
         "All properties - Sold / Passed (FHA)",
     ]
@@ -1332,8 +1282,6 @@ def run_all_properties_options():
             converted = float(int(percent)) / 100.0
             reduced_df = get_reduced_pp_df(reduction_factor=converted)
             display_all_properties(properties_df=reduced_df, title=f"{converted}% Price Reduction")
-        elif option == "Phase 1 Disqualifiers Fit":
-            fit_purchase_price_to_phase_1()
         elif option == "Property Info":
             display_all_properties_info(properties_df=df)
         elif option == "All properties - Sold / Passed (FHA)":
