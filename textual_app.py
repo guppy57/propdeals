@@ -7,11 +7,10 @@ A modern terminal user interface for analyzing property investment deals.
 import os
 import pandas as pd
 from datetime import datetime
-from typing import Optional, Dict, Any
 
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer, Static, DataTable, Button
+from textual.widgets import Header, Footer, Static
 from textual.reactive import reactive
 
 # Import existing business logic
@@ -197,11 +196,16 @@ class PropertyAnalyzerApp(App):
             self.last_updated = datetime.now()
             self.update_loading_status("Data loaded successfully!")
             
+            # Update settings display with loaded data
+            self.update_settings_display()
+            
         except Exception as e:
             self.loading_data = False
             self.update_loading_status(f"Data loading failed: {str(e)[:50]}...")
             # Use sample data as fallback
             self.setup_sample_data()
+            # Update settings display with sample data
+            self.update_settings_display()
     
     def update_loading_status(self, message: str):
         """Update main content with loading status"""
@@ -368,17 +372,8 @@ class PropertyAnalyzerApp(App):
             df["MGR_PP"] = df["total_rent"] / df["purchase_price"]
             df["OpEx_Rent"] = df["operating_expenses"] / df["total_rent"]
             df["DSCR"] = df["total_rent"] / df["monthly_mortgage"]
-            
-            # Calculate scores with error handling
-            try:
-                df["deal_score"] = df.apply(deal_score_property, axis=1)
-            except Exception:
-                df["deal_score"] = 0  # Default score if calculation fails
-            
-            try:
-                df["mobility_score"] = df.apply(mobility_score, axis=1)
-            except Exception:
-                df["mobility_score"] = 0  # Default score if calculation fails
+            df["deal_score"] = df.apply(deal_score_property, axis=1)
+            df["mobility_score"] = df.apply(mobility_score, axis=1)
         
         return df
     
@@ -580,18 +575,19 @@ class PropertyAnalyzerApp(App):
         """Create the app layout"""
         yield Header()
         yield Container(
-            Horizontal(
-                Vertical(
-                    Static("Welcome to Property Deal Analyzer!", id="main-content"),
-                    id="main-panel"
+            Vertical(
+                # Main content area
+                Static("Welcome to Property Deal Analyzer!", id="main-content"),
+                # Bottom area with main content and compact settings
+                Horizontal(
+                    Static("", id="spacer"),  # Takes up most space
+                    Container(
+                        Static("Loading...", id="compact-settings"),
+                        id="settings-container"
+                    ),
+                    id="bottom-bar"
                 ),
-                Vertical(
-                    Static("Settings Panel", id="settings-title"),
-                    Static("Loading...", id="loan-info"),
-                    Static("Loading...", id="assumptions-info"),
-                    id="settings-panel"
-                ),
-                id="main-container"
+                id="main-area"
             ),
             id="body"
         )
@@ -601,41 +597,37 @@ class PropertyAnalyzerApp(App):
         """Called when app starts"""
         self.title = "Property Deal Analyzer"
         self.sub_title = "Real Estate Investment Analysis Tool"
-        self.update_settings_display()
+        
+        # Update settings display after widgets are ready
+        self.set_timer(0.1, self.update_settings_display)
+        
         
         # Start data loading after UI is ready
         self.set_timer(1.0, self.load_all_data)
     
     def update_settings_display(self):
-        """Update the settings panel with current information"""
+        """Update the compact settings panel with current information"""
         try:
-            # Update loan information
-            loan_widget = self.query_one("#loan-info", Static)
+            # Create compact settings display
+            compact_widget = self.query_one("#compact-settings", Static)
             loan_data = self.current_loan_data
-            loan_info = f"""[bold cyan]Current Loan[/bold cyan]
-Loan: {self.current_loan}
-Rate: {format_percentage(loan_data.get('interest_rate', 0))}
-Down Payment: {format_percentage(loan_data.get('down_payment_rate', 0))}
-Term: {loan_data.get('loan_length_years', 30)}yr"""
-            loan_widget.update(loan_info)
-            
-            # Update assumptions information  
-            assumptions_widget = self.query_one("#assumptions-info", Static)
             assumptions = self.assumptions_data
-            assumptions_info = f"""[bold magenta]Assumptions[/bold magenta]
-Property Tax: {format_percentage(assumptions.get('property_tax_rate', 0))}
-Home Insurance: {format_percentage(assumptions.get('home_insurance_rate', 0))}
-Vacancy: {format_percentage(assumptions.get('vacancy_rate', 0))}
-Repair Reserve: {format_percentage(assumptions.get('repair_savings_rate', 0))}
-
-[bold cyan]Data Status[/bold cyan]
-Properties: {self.properties_count}
-Last Updated: {self.last_updated.strftime('%H:%M:%S')}"""
-            assumptions_widget.update(assumptions_info)
             
-        except Exception:
-            # Handle case where widgets aren't ready yet
-            pass
+            # Ultra-compact format: everything in 2-3 lines
+            compact_info = f"""[bold cyan]{self.current_loan}[/bold cyan] | Rate: {format_percentage(loan_data.get('interest_rate', 0))} | Down: {format_percentage(loan_data.get('down_payment_rate', 0))} | {loan_data.get('loan_length_years', 30)}yr
+[bold magenta]Tax: {format_percentage(assumptions.get('property_tax_rate', 0))} | Ins: {format_percentage(assumptions.get('home_insurance_rate', 0))} | Vac: {format_percentage(assumptions.get('vacancy_rate', 0))} | Repair: {format_percentage(assumptions.get('repair_savings_rate', 0))}[/bold magenta]
+[dim]Props: {self.properties_count} | Updated: {self.last_updated.strftime('%H:%M:%S')}[/dim]"""
+            
+            compact_widget.update(compact_info)
+            
+        except Exception as e:
+            # Handle case where widgets aren't ready yet - show debug info in main content
+            try:
+                main_content = self.query_one("#main-content", Static)
+                main_content.update(f"[red]Settings display error: {str(e)}[/red]\n\nTrying to update settings but widget not ready yet...")
+            except Exception:
+                pass
+    
     
     def watch_current_loan(self, old_loan: str, new_loan: str) -> None:
         """React to loan changes"""

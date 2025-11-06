@@ -6,56 +6,56 @@
     height: 100%;
 }
 
-#main-container {
-    layout: horizontal;
+#main-area {
+    layout: vertical;
     height: 100%;
 }
 
-/* Main content panel */
-#main-panel {
-    width: 70%;
+/* Main content panel - now takes most of the space */
+#main-content {
+    height: 1fr;
+    width: 100%;
+    content-align: left top;
+    color: $text;
     border: solid $primary;
     border-title-align: center;
     border-title-color: $text;
     padding: 1;
+    margin-bottom: 1;
 }
 
-#main-content {
-    height: 100%;
+/* Bottom bar for compact settings */
+#bottom-bar {
+    layout: horizontal;
+    height: 4;
     width: 100%;
-    content-align: left top;
-    color: $text;
+    padding: 0;
 }
 
-/* Settings sidebar */
-#settings-panel {
-    width: 30%;
+#spacer {
+    width: 1fr;
+    height: 100%;
+}
+
+/* Compact settings container */
+#settings-container {
+    width: auto;
+    min-width: 50;
+    height: 100%;
     border: solid $secondary;
     border-title-align: center;
     border-title-color: $accent;
-    padding: 1;
     background: $surface;
+    padding: 1;
 }
 
-#settings-title {
-    text-align: center;
+#compact-settings {
+    height: 100%;
+    width: 100%;
+    content-align: left top;
+    color: white;
     text-style: bold;
-    color: $accent;
-    margin-bottom: 1;
-}
-
-#loan-info {
-    margin-bottom: 1;
-    padding: 1;
-    border: solid $primary;
-    background: $panel;
-}
-
-#assumptions-info {
-    margin-bottom: 1;
-    padding: 1;
-    border: solid $secondary;
-    background: $panel;
+    padding: 0 1;
 }
 
 /* Header and Footer styling */
