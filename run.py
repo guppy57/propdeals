@@ -1,20 +1,26 @@
 import os
-import pandas as pd
-import questionary
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from rich.layout import Layout
-from rich.live import Live
-from dotenv import load_dotenv
-from supabase import create_client, Client
-from prompt_toolkit.styles import Style
-from InquirerPy import inquirer
 from datetime import datetime
 
+import pandas as pd
+import questionary
+from dotenv import load_dotenv
+from InquirerPy import inquirer
+from prompt_toolkit.styles import Style
+from rich.console import Console, Group 
+from rich.layout import Layout
+from rich.panel import Panel
+from rich.table import Table
+from supabase import Client, create_client
+from textual.app import App, ComposeResult
+from textual.containers import Container, Horizontal, Vertical
+from textual.widgets import Footer, Header, Static, Button
+from textual.containers import ScrollableContainer, Center
+from textual.screen import ModalScreen
+
 from add_property import run_add_property
-from rent_research import RentResearcher
 from loans import LoansProvider
+from rent_research import RentResearcher
+from utils import format_currency, format_number, format_percentage, calculate_mortgage, calculate_principal_from_payment
 
 load_dotenv()
 
@@ -39,91 +45,6 @@ white_style = Style([
     ('', 'fg:white')                      # fallback
 ])
 
-def format_currency(value):
-    """Format currency values with $ sign, commas, and 2 decimal places"""
-    if pd.isna(value) or value is None:
-        return "N/A"
-    if value < 0:
-        return f"(${abs(value):,.2f})"
-    return f"${value:,.2f}"
-
-def format_percentage(value):
-    """Format percentage values with % sign and 2 decimal places"""
-    if pd.isna(value) or value is None:
-        return "N/A"
-    return f"{value * 100:.2f}%"
-
-def format_number(value):
-    """Format regular numbers to 2 decimal places"""
-    if pd.isna(value) or value is None:
-        return "N/A"
-    return f"{value:.2f}"
-
-def create_footer():
-    """Create footer panel with current loan and assumptions info"""
-    global current_loan_name, last_updated
-    
-    # Format current assumptions for display
-    assumption_text = (
-        f"Property Tax: {property_tax_rate:.1%} | "
-        f"Home Insurance: {home_insurance_rate:.1%} | "
-        f"Vacancy: {vacancy_rate:.1%} | "
-        f"Repair Reserve: {repair_savings_rate:.1%}"
-    )
-    
-    loan_text = (
-        f"Loan: [bold cyan]{current_loan_name}[/bold cyan] | "
-        f"Rate: [bold yellow]{interest_rate:.2%}[/bold yellow] | "
-        f"Down Payment: [bold green]{down_payment_rate:.1%}[/bold green] | "
-        f"Term: [bold blue]{loan_length_years}yr[/bold blue]"
-    )
-    
-    footer_content = (
-        f"{loan_text}\n"
-        f"{assumption_text}\n"
-        f"Last Updated: [dim]{last_updated.strftime('%H:%M:%S')}[/dim]"
-    )
-    
-    return Panel(
-        footer_content,
-        title="[bold magenta]Current Settings[/bold magenta]",
-        border_style="cyan",
-        height=5
-    )
-
-def create_layout():
-    """Create the main application layout"""
-    layout = Layout(name="root")
-    layout.split_column(
-        Layout(name="header", size=3),
-        Layout(name="main", ratio=1),
-        Layout(name="footer", size=5)
-    )
-    
-    # Initialize with welcome content
-    layout["header"].update(Panel("[bold green]Property Deal Analyzer[/bold green]", title="App"))
-    layout["main"].update(Panel("Welcome! Use the menu to navigate.", title="Main"))
-    layout["footer"].update(create_footer())
-    
-    return layout
-
-def update_main_content(content):
-    """Update the main content area"""
-    global app_layout
-    if app_layout:
-        app_layout["main"].update(content)
-
-def update_footer():
-    """Update the footer with current information"""
-    global app_layout, last_updated
-    if app_layout:
-        last_updated = datetime.now()
-        app_layout["footer"].update(create_footer())
-
-def show_footer():
-    """Display footer information before prompts"""
-    footer_panel = create_footer()
-    console.print(footer_panel)
 
 def load_assumptions():
   global appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting
@@ -143,8 +64,6 @@ def load_assumptions():
 
   console.print(f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]")
   
-  # Update footer if layout is initialized
-  update_footer()
 
 def load_loan(loan_id):
   global interest_rate, down_payment_rate, loan_length_years, mip_upfront_rate, mip_annual_rate, current_loan_name
@@ -162,34 +81,6 @@ def load_loan(loan_id):
   current_loan_name = loan.name
 
   console.print("[green]Loan data reloaded successfully![/green]")
-  
-  # Update footer if layout is initialized
-  update_footer()
-
-def calculate_mortgage(principal, annual_rate, years):
-  monthly_rate = annual_rate / 12
-  num_payments = years * 12
-
-  monthly_payment = (
-      principal
-      * (monthly_rate * (1 + monthly_rate) ** num_payments)
-      / ((1 + monthly_rate) ** num_payments - 1)
-  )
-
-  return monthly_payment
-
-def calculate_principal_from_payment(monthly_payment, annual_rate, years):
-  """Calculate loan principal given desired monthly payment"""
-  monthly_rate = annual_rate / 12
-  num_payments = years * 12
-  
-  principal = (
-      monthly_payment
-      * ((1 + monthly_rate) ** num_payments - 1)
-      / (monthly_rate * (1 + monthly_rate) ** num_payments)
-  )
-  
-  return principal
 
 def deal_score_property(row):
     score = 0
@@ -490,7 +381,8 @@ def display_all_properties(properties_df, title, show_status=False):
             
         table.add_row(*row_args)
 
-    console.print(table)
+    # console.print(table)
+    return table
 
 # displays all properties that match our dealflow analysis strict criteria
 def get_all_phase1_qualifying_properties():
@@ -1507,5 +1399,116 @@ def run_application():
         elif option == "Refresh data":
             reload_dataframe()
 
+
+class PropertiesMenu(ModalScreen[str]):
+    BINDINGS = [
+        ("1", "choose('opt1')", "Overview"),
+        ("2", "choose('opt2')", "Cash Flow"),
+        ("3", "choose('opt3')", "Comps"),
+        ("escape", "dismiss()", "Cancel"),
+    ]
+
+    CSS = """
+    PropertiesMenu {
+        layer: overlay;               /* ensure it overlays the app */
+        background: rgba(0,0,0,0.5);  /* dim the backdrop */
+    }
+    #dialog {
+        width: 60;
+        padding: 1 2;
+        border: round white;
+        background: $surface;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        # Center a small dialog panel instead of full-screen content
+        with Center():
+            with Vertical(id="dialog"):
+                yield Static(
+                    "Select: [1] Overview  [2] Cash Flow  [3] Comps\nEsc to cancel"
+                )
+                with Vertical(id="menu-buttons"):
+                    yield Button("1 – Overview", id="btn1")
+                    yield Button("2 – Cash Flow", id="btn2")
+                    yield Button("3 – Comps", id="btn3")
+
+    def action_choose(self, which: str) -> None:
+        self.dismiss(which)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        mapping = {"btn1": "opt1", "btn2": "opt2", "btn3": "opt3"}
+        self.dismiss(mapping[event.button.id])
+
+
+class DealAnalyzerApp(App):
+    CSS_PATH = "app.tcss" 
+
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("1", "show_menu", "All Properties"),
+        ("2", "show_property_search", "Single Property"),
+        ("3", "add_property", "Add Property"),
+        ("4", "manage_loans", "Loans"),
+        ("5", "refresh_data", "Refresh"),
+        ("?", "show_help", "Help"),
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self.supbase = None # initialize supabase client
+
+    def on_mount(self):
+        self.title = "Deal Analyzer"
+        self.sub_title = "Real Estate Investment Analysis Tool"
+
+    def compose(self):
+        yield Header()
+        yield Container(
+            Vertical(
+                # Main content area
+                ScrollableContainer(
+                    Static("Welcome to Property Deal Analyzer!", id="main-content-static"),
+                    id="main-content"
+                ),
+                # Bottom area with main content and compact settings
+                Horizontal(
+                    Container(
+                        Static("Loading...", id="compact-settings"),
+                        id="settings-container",
+                    ),
+                    id="bottom-bar",
+                ),
+                id="main-area",
+            ),
+            id="body",
+        )
+        yield Footer()
+    
+    def action_show_menu(self):
+        self.push_screen(PropertiesMenu(), self._handle_menu_choice)
+
+    def _handle_menu_choice(self, choice: str | None):
+        if not choice:
+            return
+        
+        static = self.query_one("#main-content").query_one(Static)
+        static.update(choice)
+
+
+    def action_show_all_properties(self):
+        main_content = self.query_one('#main-content-static', Static)
+
+        table1 = display_all_properties(properties_df=None, title="Table 1")
+        table2 = display_all_properties(properties_df=None, title="Table 2")
+        table3 = display_all_properties(properties_df=None, title="Table 3")
+
+        # RenderGroup renders children one after another vertically
+        main_content.update(Group(table1, table2, table3))
+
+
+
 if __name__ == "__main__":
-    run_application()
+    # run_application()
+    app = DealAnalyzerApp()
+    app.run()

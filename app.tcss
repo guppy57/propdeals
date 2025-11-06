@@ -21,25 +21,18 @@
     border-title-align: center;
     border-title-color: $text;
     padding: 1;
-    margin-bottom: 1;
 }
 
 /* Bottom bar for compact settings */
 #bottom-bar {
     layout: horizontal;
-    height: 4;
+    height: 3;
     width: 100%;
     padding: 0;
 }
 
-#spacer {
-    width: 1fr;
-    height: 100%;
-}
-
-/* Compact settings container */
 #settings-container {
-    width: auto;
+    width: 100%;
     min-width: 50;
     height: 100%;
     border: solid $secondary;

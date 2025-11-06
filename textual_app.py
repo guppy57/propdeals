@@ -580,7 +580,6 @@ class PropertyAnalyzerApp(App):
                 Static("Welcome to Property Deal Analyzer!", id="main-content"),
                 # Bottom area with main content and compact settings
                 Horizontal(
-                    Static("", id="spacer"),  # Takes up most space
                     Container(
                         Static("Loading...", id="compact-settings"),
                         id="settings-container"
