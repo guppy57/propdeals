@@ -324,7 +324,6 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
     table.add_column("CapR Y1", justify="right", style="blue")
     table.add_column("CapR Y2", justify="right", style="blue")
     table.add_column("CoC Y2", justify="right", style="purple")
-    # table.add_column("GRM Y1", justify="right", style="orange3")
     table.add_column("1% Rule", justify="right", style="cyan")
     table.add_column("50% Rule", justify="right", style="magenta")
     table.add_column("DSCR", justify="right", style="blue")
@@ -359,6 +358,7 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             else ("yellow" if 0.35 <= row["OpEx_Rent"] <= 0.65 else "red")
         )
         dscr_style = "green" if row["DSCR"] >= 1.25 else "red"
+        mgr_pp_style = "green" if row["MGR_PP"] >= 0.01 else "red"
 
         # Deal score color coding (24-point scale)
         deal_score_style = (
@@ -405,8 +405,7 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             format_percentage(row["cap_rate_y1"]),
             format_percentage(row["cap_rate_y2"]),
             format_percentage(row["CoC_y2"]),
-            format_number(row["GRM_y1"]),
-            # f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
+            f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
             f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
             f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
             f"[{deal_score_style}]{int(row['deal_score'])}/24[/{deal_score_style}]",
@@ -444,23 +443,17 @@ def get_all_phase1_qualifying_properties():
     filtered_df = df.copy()
     filtered_df = filtered_df.query(criteria)
 
-    # create a list of address1's from the qualifiers to remove from the reduced price dataframe
     qualifier_address1s = []
 
     for _, row in filtered_df.iterrows():
       qualifier_address1s.append(row["address1"])
 
-    # Reduce price and recalculate - contingent on price qualifiers
     reduced_df = get_reduced_pp_df(0.10)
     reduced_df = reduced_df.query(criteria)
 
     for address1 in qualifier_address1s:
       reduced_df = reduced_df.drop(reduced_df[reduced_df['address1'] == address1].index)
 
-    # Calculate possible rent configurations using a "Creative" approach
-    # 1 - find all properties that don't qualify AND where the unit I am living in has 2 or more bedrooms
-    # 2 - recalculate Y1 monthly cashflow assuming each additional room can be rented out for $400-500
-    # 3 - re-evaluate if any of those properties fit the criteria (only thing this should affect is 'monthly_cash_flow_y1 >= -400')
     creative_df = get_additional_room_rental_df()
     creative_df = creative_df.query(criteria)
     
