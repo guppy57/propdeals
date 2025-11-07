@@ -426,7 +426,7 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
     console.print(table)
 
 # displays all properties that match our dealflow analysis strict criteria
-def get_all_phase1_qualifying_properties():
+def get_all_phase1_qualifying_properties(active=True):
     """
     This method filters all properties based on our criteria for what is a financially viable property
     Current criteria:
@@ -438,7 +438,8 @@ def get_all_phase1_qualifying_properties():
       - Monthly Cashflow with cheapest unit not rented above -400 (house hacking)
       - Fully rented monthly cashflow above 400
     """
-    criteria = "status == 'active' & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400"
+    status_criteria = "status == 'active'" if active else "status != 'active'"
+    criteria = f"{status_criteria} & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400"
 
     filtered_df = df.copy()
     filtered_df = filtered_df.query(criteria)
@@ -476,6 +477,14 @@ def display_all_phase1_qualifying_properties():
       title="Phase 1 Criteria Qualifiers - If we rent out additional rooms in our unit",
       show_min_rent_data=True
     )
+  
+def display_creative_pricing_all_properties():
+  creative_df = get_additional_room_rental_df()
+  display_all_properties(
+    properties_df=creative_df,
+    title="All properties with additional rooms rented",
+    show_min_rent_data=True
+  )
 
 def calculate_additional_room_rent(row):
   return int(row['min_rent_unit_beds'] - 1) * 400
@@ -1251,6 +1260,7 @@ def run_all_properties_options():
         "Phase 1 Qualifiers",
         "Reduce price and recalculate",
         "Property Info",
+        "All properties - Creative Pricing",
         "All properties - Sold / Passed (FHA)",
     ]
 
@@ -1277,6 +1287,8 @@ def run_all_properties_options():
             display_all_properties(properties_df=reduced_df, title=f"{converted}% Price Reduction")
         elif option == "Property Info":
             display_all_properties_info(properties_df=df)
+        elif option == "All properties - Creative Pricing":
+            display_creative_pricing_all_properties()
         elif option == "All properties - Sold / Passed (FHA)":
             dataframe = df.query("status != 'active'")
             display_all_properties(

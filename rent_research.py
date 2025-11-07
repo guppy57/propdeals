@@ -130,7 +130,6 @@ class RentResearcher:
                     search_depth="advanced",
                     max_results=5,
                     include_raw_content="markdown",
-                    chunks_per_source=5,
                 )
 
                 if response and "results" in response:
