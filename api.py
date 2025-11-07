@@ -237,9 +237,7 @@ async def get_phase1_qualifiers():
         raise HTTPException(status_code=404, detail="No properties found")
     
     criteria = "status == 'active' & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400"
-
     assumptions_response = supabase.table('assumptions').select("*").eq("id", 1).limit(1).single().execute()
-
     deal_score_total = 24
     
     try:
@@ -247,6 +245,11 @@ async def get_phase1_qualifiers():
         current = convert_numpy_types(current.fillna(0).to_dict('records'))
         contingent = convert_numpy_types(contingent.fillna(0).to_dict('records'))
         creative = convert_numpy_types(creative.fillna(0).to_dict('records'))
+
+        ia_current, ia_contingent, ia_creative = get_all_phase1_qualifying_properties(False)
+        ia_current = convert_numpy_types(ia_current.fillna(0).to_dict('records'))
+        ia_contingent = convert_numpy_types(ia_contingent.fillna(0).to_dict('records'))
+        ia_creative = convert_numpy_types(ia_creative.fillna(0).to_dict('records'))
 
         return {
             "criteria": criteria,
@@ -256,6 +259,11 @@ async def get_phase1_qualifiers():
                 "current_prices": current,
                 "contingent_10prcnt_price_reduction": contingent,
                 "creative_pricing": creative,
+            },
+            "inactive_properties": {
+                "current_prices": ia_current,
+                "contingent_10prcnt_price_reduction": ia_contingent,
+                "creative_pricing": ia_creative,
             }
         }
     except Exception as e:
