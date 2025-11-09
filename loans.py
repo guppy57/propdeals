@@ -12,6 +12,7 @@ class Loan:
   id: int
   name: str
   interest_rate: float
+  apr_rate: float
   down_payment_rate: float
   years: int
   mip_upfront_rate: float
@@ -69,7 +70,8 @@ class LoansProvider:
 
         # Add columns (excluding id, preapproval_link, issued_date as requested)
         table.add_column("Name", style="cyan", no_wrap=True)
-        table.add_column("Interest Rate", justify="right", style="green")
+        table.add_column("interest Rate", justify="right", style="green")
+        table.add_column("APR Rate", justify="right", style="green")
         table.add_column("Down Payment", justify="right", style="yellow")
         table.add_column("Term (Years)", justify="right", style="blue")
         table.add_column("MIP Upfront", justify="right", style="orange3")
@@ -85,6 +87,7 @@ class LoansProvider:
             table.add_row(
                 str(loan.name),
                 f"{loan.interest_rate * 100:.2f}%",
+                f"{loan.apr_rate * 100:.2f}%",
                 f"{loan.down_payment_rate * 100:.1f}%",
                 str(loan.years),
                 f"{loan.mip_upfront_rate * 100:.2f}%",
@@ -105,6 +108,11 @@ class LoansProvider:
             "Interest rate (%)", validate=lambda x: x.replace(".", "").isdigit()
         ).ask()
         interest_rate = float(interest_rate_pct) / 100
+
+        apr_rate_pct = questionary.text(
+            "APR rate(%)", validate=lambda x: x.replace(".", "").isdigit()
+        ).ask()
+        apr_rate = float(apr_rate_pct) / 100
 
         down_payment_pct = questionary.text(
             "Down payment rate (%)", validate=lambda x: x.replace(".", "").isdigit()
@@ -146,6 +154,7 @@ class LoansProvider:
             id=0,  # Will be set by database
             name=name.strip(),
             interest_rate=interest_rate,
+            apr_rate=apr_rate,
             down_payment_rate=down_payment_rate,
             years=int(years),
             mip_upfront_rate=mip_upfront_rate,
@@ -162,6 +171,7 @@ class LoansProvider:
             loan_dict = {
                 "name": loan_data.name,
                 "interest_rate": loan_data.interest_rate,
+                "apr_rate": loan_data.apr_rate,
                 "down_payment_rate": loan_data.down_payment_rate,
                 "years": loan_data.years,
                 "mip_upfront_rate": loan_data.mip_upfront_rate,

@@ -8,7 +8,7 @@ from supabase import create_client, Client
 from typing import List, Dict, Any, Optional
 
 # Import shared functions from run.py
-from run import reload_dataframe, get_reduced_pp_df, get_all_phase1_qualifying_properties
+from run import reload_dataframe, get_all_phase1_qualifying_properties
 
 load_dotenv()
 
@@ -72,6 +72,7 @@ def load_loan_details():
         print("✅ Loaded loan details from database")
         return {
             'interest_rate': float(loan_data['interest_rate']),
+            'apr_rate': float(loan_data['apr_rate']),
             'down_payment_rate': float(loan_data['down_payment_rate']),
             'years': float(loan_data['years']),
             'mip_upfront_rate': float(loan_data['mip_upfront_rate']),
@@ -85,6 +86,7 @@ def load_loan_details():
 # Load loan details on module import
 loan_details = load_loan_details()
 interest_rate = loan_details['interest_rate']
+apr_rate = loan_details['apr_rate']
 down_payment_rate = loan_details['down_payment_rate']
 loan_length_years = loan_details['years']
 mip_upfront_rate = loan_details['mip_upfront_rate']
@@ -108,17 +110,11 @@ def convert_numpy_types(obj):
         return obj
 
 def reload_dataframe_logic():
-    """Reload and recalculate property data (adapted from run.py)"""
     global df, rents
     
     try:
-        # Try to use the existing reload_dataframe function from run.py
         reload_dataframe()
-        
-        # Import the updated dataframes from run.py
         from run import df as run_df, rents as run_rents
-        
-        # Update our global variables
         df = run_df.copy()
         rents = run_rents.copy() if run_rents is not None else None
         
@@ -133,24 +129,15 @@ def reload_dataframe_logic():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize data on startup and cleanup on shutdown"""
     global df, rents
-    
-    # Startup
     print("🔄 Starting PropDeals API...")
     
     try:
         print("📊 Loading property data...")
-        
-        # Load data using the same logic as run.py
         properties_get_response = supabase.table('properties').select('*').execute()
         df = pd.DataFrame(properties_get_response.data)
-        
-        # Apply all calculations (simplified version of reload_dataframe)
         reload_dataframe_logic()
-        
         print(f"✅ Loaded {len(df) if df is not None else 0} properties")
-        
     except Exception as e:
         print(f"⚠️ Failed to load property data during startup: {str(e)}")
         print("🚀 API will start without data - data will be loaded on first request")
@@ -158,8 +145,6 @@ async def lifespan(app: FastAPI):
         rents = None
     
     yield
-    
-    # Shutdown
     print("🛑 Shutting down PropDeals API")
 
 app = FastAPI(
@@ -177,13 +162,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 @app.get("/")
 async def root():
-    """API health check"""
     global df, rents
     
-    # Check data status
     data_status = {
         "properties_loaded": df is not None and not df.empty,
         "property_count": len(df) if df is not None else 0,
@@ -201,11 +183,9 @@ async def root():
 async def get_all_properties(
     status: Optional[str] = Query(None, description="Filter by property status (active, sold, passed)")
 ):
-    """Get all properties with optional status filter"""
     global df
     
     if df is None or df.empty:
-        # Try to load data if not available
         try:
             print("🔄 Loading data on demand...")
             properties_get_response = supabase.table('properties').select('*').execute()

@@ -69,7 +69,7 @@ def load_assumptions():
   console.print(f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]")
 
 def load_loan(loan_id):
-  global interest_rate, down_payment_rate, loan_length_years, mip_upfront_rate, mip_annual_rate
+  global interest_rate, apr_rate, down_payment_rate, loan_length_years, mip_upfront_rate, mip_annual_rate
 
   console.print("[yellow]Reloading FHA loan data...[/yellow]")
 
@@ -77,6 +77,7 @@ def load_loan(loan_id):
   loan = loan_provider.get_loan_by_id(loan_id)
   
   interest_rate = loan.interest_rate
+  apr_rate = loan.apr_rate
   down_payment_rate = loan.down_payment_rate
   loan_length_years = loan.years
   mip_upfront_rate = loan.mip_upfront_rate
@@ -160,7 +161,7 @@ def get_expected_gains(row, length_years):
   appreciation_gains = current_home_value * ((1 + appreciation_rate) ** length_years - 1)
   
   # Principal paydown using amortization formula
-  monthly_rate = interest_rate / 12
+  monthly_rate = apr_rate / 12
   num_payments = loan_length_years * 12
   total_payments_in_period = length_years * 12
   
@@ -200,7 +201,7 @@ def reload_dataframe():
     df["down_payment"] = df["purchase_price"] * down_payment_rate
     df["loan_amount"] = df["purchase_price"] - df["down_payment"] + (df["purchase_price"] * mip_upfront_rate)
 
-    df["monthly_mortgage"] = df["loan_amount"].apply(lambda x: calculate_mortgage(x, interest_rate, loan_length_years))
+    df["monthly_mortgage"] = df["loan_amount"].apply(lambda x: calculate_mortgage(x, apr_rate, loan_length_years))
     df["monthly_mip"] = (df["loan_amount"] * mip_annual_rate) / 12
     df["monthly_taxes"] = (df["purchase_price"] * property_tax_rate) / 12
     df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
@@ -522,7 +523,7 @@ def get_reduced_pp_df(reduction_factor):
   dataframe["down_payment"] = dataframe["purchase_price"] * down_payment_rate
   dataframe["loan_amount"] = dataframe["purchase_price"] - dataframe["down_payment"] + (dataframe["purchase_price"] * mip_upfront_rate)
   
-  dataframe["monthly_mortgage"] = dataframe["loan_amount"].apply(lambda x: calculate_mortgage(x, interest_rate, loan_length_years))
+  dataframe["monthly_mortgage"] = dataframe["loan_amount"].apply(lambda x: calculate_mortgage(x, apr_rate, loan_length_years))
   dataframe["monthly_mip"] = (dataframe["loan_amount"] * mip_annual_rate) / 12
   dataframe["monthly_taxes"] = (dataframe["purchase_price"] * property_tax_rate) / 12
   dataframe["monthly_insurance"] = (dataframe["purchase_price"] * home_insurance_rate) / 12
@@ -1313,6 +1314,7 @@ def run_loans_options():
         loan_details = loans_provider.collect_loan_details()
         console.print(Panel(f"Loan Name: {loan_details.name}\n"
                           f"Interest Rate: {loan_details.interest_rate * 100:.2f}%\n"
+                          f"APR Rate: {loan_details.apr_rate * 100:.2f}%\n"
                           f"Down Payment: {loan_details.down_payment_rate * 100:.1f}%\n"
                           f"Term: {loan_details.years} years\n"
                           f"MIP Upfront: {loan_details.mip_upfront_rate * 100:.2f}%\n"
