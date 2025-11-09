@@ -179,7 +179,7 @@ async def root():
         "data": data_status
     }
 
-@app.get("/properties", response_model=List[Dict[str, Any]])
+@app.get("/properties")
 async def get_all_properties(
     status: Optional[str] = Query(None, description="Filter by property status (active, sold, passed)")
 ):
@@ -205,7 +205,10 @@ async def get_all_properties(
     # Convert to records and handle NaN values
     properties = filtered_df.fillna(0).to_dict('records')
     
-    return properties
+    return {
+        "count": len(filtered_df),
+        "properties": properties,
+    }
 
 @app.get("/properties/phase1")
 async def get_phase1_qualifiers():
