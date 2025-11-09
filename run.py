@@ -1,17 +1,24 @@
 import os
+
 import pandas as pd
 import questionary
+from dotenv import load_dotenv
+from InquirerPy import inquirer
+from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from dotenv import load_dotenv
-from supabase import create_client, Client
-from prompt_toolkit.styles import Style
-from InquirerPy import inquirer
+from supabase import Client, create_client
 
 from add_property import run_add_property
-from rent_research import RentResearcher
+from helpers import (
+  calculate_mortgage,
+  format_currency,
+  format_number,
+  format_percentage,
+)
 from loans import LoansProvider
+from rent_research import RentResearcher
 
 load_dotenv()
 
@@ -29,26 +36,6 @@ white_style = Style([
     ('completion-menu.completion.current', 'fg:white bg:blue'),  # selected item
     ('', 'fg:white')                      # fallback
 ])
-
-def format_currency(value):
-    """Format currency values with $ sign, commas, and 2 decimal places"""
-    if pd.isna(value) or value is None:
-        return "N/A"
-    if value < 0:
-        return f"(${abs(value):,.2f})"
-    return f"${value:,.2f}"
-
-def format_percentage(value):
-    """Format percentage values with % sign and 2 decimal places"""
-    if pd.isna(value) or value is None:
-        return "N/A"
-    return f"{value * 100:.2f}%"
-
-def format_number(value):
-    """Format regular numbers to 2 decimal places"""
-    if pd.isna(value) or value is None:
-        return "N/A"
-    return f"{value:.2f}"
 
 def load_assumptions():
   global appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting
@@ -69,7 +56,7 @@ def load_assumptions():
   console.print(f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]")
 
 def load_loan(loan_id):
-  global interest_rate, apr_rate, down_payment_rate, loan_length_years, mip_upfront_rate, mip_annual_rate
+  global interest_rate, apr_rate, down_payment_rate, loan_length_years, mip_upfront_rate, mip_annual_rate, lender_fees
 
   console.print("[yellow]Reloading FHA loan data...[/yellow]")
 
@@ -82,33 +69,9 @@ def load_loan(loan_id):
   loan_length_years = loan.years
   mip_upfront_rate = loan.mip_upfront_rate
   mip_annual_rate = loan.mip_annual_rate
+  lender_fees = loan.lender_fees
 
   console.print("[green]FHA loan data reloaded successfully![/green]")
-
-def calculate_mortgage(principal, annual_rate, years):
-  monthly_rate = annual_rate / 12
-  num_payments = years * 12
-
-  monthly_payment = (
-      principal
-      * (monthly_rate * (1 + monthly_rate) ** num_payments)
-      / ((1 + monthly_rate) ** num_payments - 1)
-  )
-
-  return monthly_payment
-
-def calculate_principal_from_payment(monthly_payment, annual_rate, years):
-  """Calculate loan principal given desired monthly payment"""
-  monthly_rate = annual_rate / 12
-  num_payments = years * 12
-  
-  principal = (
-      monthly_payment
-      * ((1 + monthly_rate) ** num_payments - 1)
-      / (monthly_rate * (1 + monthly_rate) ** num_payments)
-  )
-  
-  return principal
 
 def deal_score_property(row):
     score = 0
@@ -197,7 +160,7 @@ def reload_dataframe():
     df["home_age"] = 2025 - df["built_in"]
 
     # second, calculate financials
-    df["closing_costs"] = df["purchase_price"] * closing_costs_rate
+    df["closing_costs"] = (df["purchase_price"] * closing_costs_rate) + lender_fees
     df["down_payment"] = df["purchase_price"] * down_payment_rate
     df["loan_amount"] = df["purchase_price"] - df["down_payment"] + (df["purchase_price"] * mip_upfront_rate)
 

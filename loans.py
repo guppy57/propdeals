@@ -1,11 +1,12 @@
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, List
+from typing import Optional, List
 
 from supabase import Client
 from rich.console import Console
 from rich.table import Table
-from rich.panel import Panel
 import questionary
+
+from helpers import format_currency
 
 @dataclass
 class Loan:
@@ -22,6 +23,7 @@ class Loan:
   preapproved_amount: int
   issued_date: str
   expiration_date: str
+  lender_fees: float
 
 class LoansProvider:
     def __init__(self, supabase_client: Client, console: Console):
@@ -76,6 +78,7 @@ class LoansProvider:
         table.add_column("Term (Years)", justify="right", style="blue")
         table.add_column("MIP Upfront", justify="right", style="orange3")
         table.add_column("MIP Annual", justify="right", style="orange3")
+        table.add_column("Fees", justify="right", style="red")
         table.add_column("Upfront Discounts", justify="right", style="red")
         table.add_column("Preapproved Amount", justify="right", style="purple")
         table.add_column("Expiration Date", style="white")
@@ -92,6 +95,7 @@ class LoansProvider:
                 str(loan.years),
                 f"{loan.mip_upfront_rate * 100:.2f}%",
                 f"{loan.mip_annual_rate * 100:.2f}%",
+                format_currency(loan.lender_fees),
                 f"${loan.upfront_discounts:,.2f}",
                 f"${preapproved_amount:,}",
                 str(loan.expiration_date),
@@ -140,6 +144,11 @@ class LoansProvider:
             validate=lambda x: x.replace(".", "").isdigit(),
         ).ask()
 
+        lender_fees = questionary.text(
+            "Lender fees ($) - enter 0 if none",
+            validate=lambda x: x.replace(".", "").isdigit(),
+        ).ask()
+
         preapproval_link = questionary.text("Preapproval link (URL) - optional").ask()
 
         preapproved_amount = questionary.text(
@@ -159,6 +168,7 @@ class LoansProvider:
             years=int(years),
             mip_upfront_rate=mip_upfront_rate,
             mip_annual_rate=mip_annual_rate,
+            lender_fees=lender_fees,
             upfront_discounts=float(upfront_discounts),
             preapproval_link=preapproval_link.strip(),
             preapproved_amount=int(preapproved_amount.replace(",", "")),
@@ -176,6 +186,7 @@ class LoansProvider:
                 "years": loan_data.years,
                 "mip_upfront_rate": loan_data.mip_upfront_rate,
                 "mip_annual_rate": loan_data.mip_annual_rate,
+                "lender_fees": loan_data.lender_fees,
                 "upfront_discounts": loan_data.upfront_discounts,
                 "preapproval_link": loan_data.preapproval_link,
                 "preapproved_amount": loan_data.preapproved_amount,
