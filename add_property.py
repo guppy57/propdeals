@@ -2,6 +2,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from dotenv import load_dotenv
+from datetime import date, timedelta
 import os
 import questionary
 import requests
@@ -210,11 +211,17 @@ def collect_property_details():
     baths = questionary.text("Bathrooms").ask()
     square_ft = questionary.text("Square footage").ask()
     built_in = questionary.text("Year built").ask()
+    days_listed = questionary.text("Current days on market").ask()
+
     address1 = full_address.split(",")[0]
 
     unit_conversion = {"Duplex": 2, "Triplex": 3, "Fourplex": 4}
 
     units = unit_conversion[property_type]
+
+    days_on_market = int(days_listed)
+
+    listed_date = (date.today() - timedelta(days=days_on_market)).isoformat() 
 
     return {
         "full_address": full_address.strip(),
@@ -226,6 +233,7 @@ def collect_property_details():
         "square_ft": int(square_ft),
         "built_in": int(built_in),
         "units": units,
+        "listed_date": listed_date,
     }
 
 def display_property_details(property_details):
