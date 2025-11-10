@@ -468,23 +468,23 @@ async def get_inspection(address1: str):
         )
 
 @app.post("/inspections")
-async def create_inspection(inspection: InspectionCreate):
-    """Create a new inspection record for a property"""
+async def upsert_inspection(inspection: InspectionCreate):
+    """Create or update inspection record for a property (upsert)"""
     try:
         # Convert the Pydantic model to a dict, excluding None values
         inspection_data = inspection.model_dump(exclude_none=True)
 
-        # Insert the inspection data
-        response = supabase.table('inspections').insert(inspection_data).execute()
+        # Upsert the inspection data (insert or update based on address1 unique constraint)
+        response = supabase.table('inspections').upsert(inspection_data).execute()
 
         if not response.data:
             raise HTTPException(
                 status_code=500,
-                detail="Failed to create inspection record"
+                detail="Failed to upsert inspection record"
             )
 
         return {
-            "message": "Inspection created successfully",
+            "message": "Inspection saved successfully",
             "inspection": response.data[0]
         }
 
@@ -493,7 +493,7 @@ async def create_inspection(inspection: InspectionCreate):
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Error creating inspection: {str(e)}"
+            detail=f"Error saving inspection: {str(e)}"
         )
 
 
