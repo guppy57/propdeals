@@ -137,6 +137,12 @@ def get_expected_gains(row, length_years):
 
   return cumulative_cashflow + appreciation_gains + equity_gains
 
+def set_monthly_taxes(row):
+    annual_tax = row.get('annual_tax_amount')
+    if pd.notna(annual_tax) and annual_tax is not None:
+        return annual_tax / 12
+    return (row["purchase_price"] * property_tax_rate) / 12
+
 def reload_dataframe():
     """Reload and recalculate all property data from supabase"""
     global df, rents
@@ -166,7 +172,7 @@ def reload_dataframe():
 
     df["monthly_mortgage"] = df["loan_amount"].apply(lambda x: calculate_mortgage(x, apr_rate, loan_length_years))
     df["monthly_mip"] = (df["loan_amount"] * mip_annual_rate) / 12
-    df["monthly_taxes"] = (df["purchase_price"] * property_tax_rate) / 12
+    df["monthly_taxes"] = df.apply(set_monthly_taxes, axis=1)
     df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
     df["cash_needed"] = df["closing_costs"] + df["down_payment"]
 
@@ -552,6 +558,8 @@ def display_all_properties_info(properties_df):
 
     # Add columns with proper alignment
     table.add_column("Address", style="cyan", no_wrap=True)
+    table.add_column("County", style="cyan", no_wrap=True)
+    table.add_column("Schl Dst", style="cyan", no_wrap=True)
     table.add_column("Sqrft", justify="right", style="green")
     table.add_column("Built", justify="right", style="yellow")
     table.add_column("Units", justify="center", style="blue")
@@ -559,6 +567,9 @@ def display_all_properties_info(properties_df):
     table.add_column("Transit", justify="right", style="orange3")
     table.add_column("Bike", justify="right", style="orange3")
     table.add_column("Elec.", justify="right", style="red")
+    table.add_column("Listed", justify="right", style="white")
+    table.add_column("Reduced Price?", justify="right", style="white")
+    table.add_column("Has tenants?", justify="right", style="white")
 
     # Add rows for each property
     for _, row in dataframe.iterrows():
@@ -630,6 +641,8 @@ def display_all_properties_info(properties_df):
 
         table.add_row(
             str(row["address1"]),
+            row["county"],
+            row["school_district"],
             f"[{sqft_style}]{int(row['square_ft']):,}[/{sqft_style}]",
             f"[{built_in_style}]{int(row['built_in'])}[/{built_in_style}]",
             units_display,
@@ -637,6 +650,9 @@ def display_all_properties_info(properties_df):
             f"[{transit_style}]{int(row['transit_score'])}[/{transit_style}]",
             f"[{bike_style}]{int(row['bike_score'])}[/{bike_style}]",
             f"[{elec_style}]{format_currency(row['annual_electricity_cost_est'])}[/{elec_style}]",
+            row['listed_date'],
+            str(row["has_reduced_price"]),
+            str(row["has_tenants"]),
         )
 
     console.print(table)

@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from supabase import create_client, Client
-from typing import List, Dict, Any, Optional
+from typing import Optional
 from datetime import date
 
 # Import shared functions from run.py

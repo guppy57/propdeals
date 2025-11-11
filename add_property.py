@@ -9,16 +9,12 @@ import requests
 
 load_dotenv()
 
-EXCEL_FILE_PATH = "./Real Estate Investing.xlsx"
-PROPERTIES_CSV_PATH = "./properties.csv"
-
 RENTCAST_HEADERS = {
     "accept": "application/json",
     "X-Api-Key": os.getenv("RENTCAST_KEY"),
 }
 
 console = Console()
-
 
 def get_rental_estimations(property_details, unit_configs):
     total_beds = property_details["beds"]
@@ -62,8 +58,10 @@ def get_rental_estimations(property_details, unit_configs):
 
     return unit_configs, comparables
 
+def get_political_districts(address):
+    pass
 
-def get_geocode(address):
+def get_geocode_data(address):
     print(f"Getting geocode for: {address}")
     response = requests.get(
         "https://maps.googleapis.com/maps/api/geocode/json",
@@ -74,18 +72,33 @@ def get_geocode(address):
     )
 
     data = response.json()
-    location = data["results"][0]["geometry"]["location"]
-    return location["lng"], location["lat"]
+    address_components = data["results"][0]["address_components"]
+    county = ""
+    neighborhood = ""
 
+    for component in address_components:
+        if "administrative_area_level_2" in component["types"]:
+            county = component["long_name"]
+        elif "neighborhood" in component["types"]:
+            neighborhood = component["long_name"]
+
+    location = data["results"][0]["geometry"]["location"]
+
+    return {
+        "lon": location["lng"],
+        "lat": location["lat"],
+        "county": county,
+        "neighborhood": neighborhood,
+    }
 
 def get_solar_potential_data(address):
-    lng, lat = get_geocode(address)
+    geocode = get_geocode_data(address)
     print(f"Getting solar potential data for: {address}")
     response = requests.get(
         "https://solar.googleapis.com/v1/buildingInsights:findClosest",
         params={
-            "location.latitude": lat,
-            "location.longitude": lng,
+            "location.latitude": geocode["lon"],
+            "location.longitude": geocode["lat"],
             "requiredQuality": "HIGH",
             "key": os.getenv("GOOGLE_KEY"),
         },
@@ -212,16 +225,12 @@ def collect_property_details():
     square_ft = questionary.text("Square footage").ask()
     built_in = questionary.text("Year built").ask()
     days_listed = questionary.text("Current days on market").ask()
-
+    has_reduced_price = questionary.confirm("Has had price reductions?").ask()
+    has_tenants = questionary.confirm("Are there current tenants?").ask()
     address1 = full_address.split(",")[0]
-
     unit_conversion = {"Duplex": 2, "Triplex": 3, "Fourplex": 4}
-
     units = unit_conversion[property_type]
-
-    days_on_market = int(days_listed)
-
-    listed_date = (date.today() - timedelta(days=days_on_market)).isoformat() 
+    listed_date = (date.today() - timedelta(days=int(days_listed))).isoformat() 
 
     return {
         "full_address": full_address.strip(),
@@ -234,6 +243,8 @@ def collect_property_details():
         "built_in": int(built_in),
         "units": units,
         "listed_date": listed_date,
+        "has_reduced_price": has_reduced_price,
+        "has_tenants": has_tenants,
     }
 
 def display_property_details(property_details):
@@ -249,7 +260,7 @@ def display_property_details(property_details):
 
 def add_property_to_supabase(property_details, supabase) -> bool:
     try:
-        lon, lat = get_geocode(property_details["full_address"])
+        geocode = get_geocode_data(property_details["full_address"])
         console.print(f"Found long: {lon} and lat: {lat}", style="green bold")
         walk, transit, bike = get_walkscore_data(
             lon, lat, property_details["full_address"]
@@ -270,9 +281,11 @@ def add_property_to_supabase(property_details, supabase) -> bool:
     property_details["walk_score"] = walk if walk != "NA" else 0
     property_details["bike_score"] = bike if bike != "NA" else 0
     property_details["transit_score"] = transit if transit != "NA" else 0
-    property_details["lat"] = lat
-    property_details["lon"] = lon
+    property_details["lat"] = geocode["lat"] 
+    property_details["lon"] = geocode["lon"] 
     property_details["annual_electricity_cost_est"] = electricity_costs
+    property_details["neighborhood"] = geocode["neighborhood"]
+    property_details["county"] = geocode["county"]
 
     try:
         query = supabase.table("properties").insert(property_details)
@@ -461,10 +474,6 @@ def add_rent_to_supabase(rent_comps, comparables, supabase) -> int:
             save_comps_to_db(unit_comparables, rent_estimate_id, supabase)
 
     return True
-
-
-# --------------------------------------------------------
-
 
 def run_add_property(supabase_client) -> dict:
     console.print("Let's add a new property to analyze", style="bold red")
