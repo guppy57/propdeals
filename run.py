@@ -25,7 +25,6 @@ load_dotenv()
 console = Console() 
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
-# Create white style for questionary prompts
 white_style = Style([
     ('qmark', 'fg:white bold'),           # question mark
     ('question', 'fg:white'),             # question text
@@ -39,11 +38,8 @@ white_style = Style([
 
 def load_assumptions():
   global appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting
-
   console.print("[yellow]Reloading assumptions...[/yellow]")
-
   assumptions_get_response = supabase.table('assumptions').select('*').eq('id', 1).limit(1).single().execute()
-
   appreciation_rate = float(assumptions_get_response.data["appreciation_rate"])
   rent_appreciation_rate = float(assumptions_get_response.data["rent_appreciation_rate"])
   property_tax_rate = float(assumptions_get_response.data["property_tax_rate"])
@@ -52,17 +48,13 @@ def load_assumptions():
   repair_savings_rate = float(assumptions_get_response.data["repair_savings_rate"])
   closing_costs_rate = float(assumptions_get_response.data["closing_costs_rate"])
   live_in_unit_setting = assumptions_get_response.data["live_in_unit_setting"]
-
   console.print(f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]")
 
 def load_loan(loan_id):
   global interest_rate, apr_rate, down_payment_rate, loan_length_years, mip_upfront_rate, mip_annual_rate, lender_fees
-
   console.print("[yellow]Reloading FHA loan data...[/yellow]")
-
   loan_provider = LoansProvider(supabase_client=supabase, console=console)
   loan = loan_provider.get_loan_by_id(loan_id)
-  
   interest_rate = loan.interest_rate
   apr_rate = loan.apr_rate
   down_payment_rate = loan.down_payment_rate
@@ -70,72 +62,53 @@ def load_loan(loan_id):
   mip_upfront_rate = loan.mip_upfront_rate
   mip_annual_rate = loan.mip_annual_rate
   lender_fees = loan.lender_fees
-
   console.print("[green]FHA loan data reloaded successfully![/green]")
 
 def deal_score_property(row):
     score = 0
-    
-    # 1. Cash Flow Performance (0-6 points)
     score += (3 if row["monthly_cash_flow_y2"] > 500 else 
               2 if row["monthly_cash_flow_y2"] > 400 else 
               1 if row["monthly_cash_flow_y2"] > 200 else 0)
     score += (3 if row["monthly_cash_flow_y1"] > 0 else 2 if row["monthly_cash_flow_y1"] > -350 else 0)  # House-hacking bonus
-    
-    # 2. Return Metrics (0-4 points)  
     score += (3 if row["CoC_y2"] > 0.15 else 
               2 if row["CoC_y2"] > 0.12 else 
               1 if row["CoC_y2"] > 0.08 else 0)
     score += (1 if row["cap_rate_y2"] > 0.06 else 0)
-    
-    # 3. Key Investment Rules (0-6 points)
     score += (2 if row["MGR_PP"] >= 0.01 else 1 if row["MGR_PP"] >= 0.008 else 0)  # 1% rule
     score += (2 if 0.4 <= row["OpEx_Rent"] <= 0.6 else 1 if 0.3 <= row["OpEx_Rent"] <= 0.7 else 0)  # 50% rule  
     score += (2 if row["DSCR"] >= 1.25 else 1 if row["DSCR"] >= 1.1 else 0)
-    
-    # 4. Affordability & Risk (0-3 points)
     score += (2 if row["cash_needed"] < 20000 else 1 if row["cash_needed"] < 30000 else 0)
     score += (1 if row["GRM_y2"] < 12 else 0)  # Lower GRM is better
-    
-    # 5. Property Quality (0-4 points)
     score += (2 if row["cost_per_sqrft"] < 100 else 1 if row["cost_per_sqrft"] < 150 else 0)
     score += (2 if row["home_age"] < 20 else 0)
-    
     return score
 
 def mobility_score(row):
-  score = (row["walk_score"] * 0.6) + (row["transit_score"] * 0.30) + (row["bike_score"] * 0.10)
-  return score
+    score = (row["walk_score"] * 0.6) + (row["transit_score"] * 0.30) + (row["bike_score"] * 0.10)
+    return score
 
 def get_expected_gains(row, length_years):
-  current_home_value = row["purchase_price"]
-  loan_amount = row["loan_amount"]
-  y1_cashflow = row["annual_cash_flow_y1"]
-  y2_cashflow = row["annual_cash_flow_y2"]
+    current_home_value = row["purchase_price"]
+    loan_amount = row["loan_amount"]
+    y1_cashflow = row["annual_cash_flow_y1"]
+    y2_cashflow = row["annual_cash_flow_y2"]
 
-  # Calculate cumulative cashflows with compound growth
-  y1_cashflow_grown = y1_cashflow * (1 + rent_appreciation_rate)
-  cumulative_cashflow = y1_cashflow_grown
-  for year in range(2, length_years + 1):
-    yearly_cashflow = y2_cashflow * ((1 + rent_appreciation_rate) ** (year - 1))
-    cumulative_cashflow += yearly_cashflow
+    y1_cashflow_grown = y1_cashflow * (1 + rent_appreciation_rate)
+    cumulative_cashflow = y1_cashflow_grown
+    for year in range(2, length_years + 1):
+        yearly_cashflow = y2_cashflow * ((1 + rent_appreciation_rate) ** (year - 1))
+        cumulative_cashflow += yearly_cashflow
 
-  # Property appreciation gains
-  appreciation_gains = current_home_value * ((1 + appreciation_rate) ** length_years - 1)
-  
-  # Principal paydown using amortization formula
-  monthly_rate = apr_rate / 12
-  num_payments = loan_length_years * 12
-  total_payments_in_period = length_years * 12
-  
-  # Calculate remaining balance after length_years
-  remaining_balance = loan_amount * (
-    ((1 + monthly_rate) ** num_payments - (1 + monthly_rate) ** total_payments_in_period) /
-    ((1 + monthly_rate) ** num_payments - 1)
-  )
-  equity_gains = loan_amount - remaining_balance
-
-  return cumulative_cashflow + appreciation_gains + equity_gains
+    appreciation_gains = current_home_value * ((1 + appreciation_rate) ** length_years - 1)
+    monthly_rate = apr_rate / 12
+    num_payments = loan_length_years * 12
+    total_payments_in_period = length_years * 12
+    remaining_balance = loan_amount * (
+        ((1 + monthly_rate) ** num_payments - (1 + monthly_rate) ** total_payments_in_period) /
+        ((1 + monthly_rate) ** num_payments - 1)
+    )
+    equity_gains = loan_amount - remaining_balance
+    return cumulative_cashflow + appreciation_gains + equity_gains
 
 def set_monthly_taxes(row):
     annual_tax = row.get('annual_tax_amount')
@@ -146,80 +119,50 @@ def set_monthly_taxes(row):
 def reload_dataframe():
     """Reload and recalculate all property data from supabase"""
     global df, rents
-    
     console.print("[yellow]Reloading property data...[/yellow]")
-
-    # Load fresh data from Supabase query
     properties_get_response = supabase.table('properties').select('*').execute()
     df = pd.DataFrame(properties_get_response.data)
-
     df = df.drop(["zillow_link", "full_address"], axis=1)
     
-    # replace all WalkScore scoring values that are NA with 0
     cols = ["walk_score", "transit_score", "bike_score"]
     df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
     df[cols] = df[cols].fillna(0)
-
-    # get all per_property calculations completed 
-    # first, property-only calculations
     df["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
     df["home_age"] = 2025 - df["built_in"]
-
-    # second, calculate financials
     df["closing_costs"] = (df["purchase_price"] * closing_costs_rate) + lender_fees
     df["down_payment"] = df["purchase_price"] * down_payment_rate
     df["loan_amount"] = df["purchase_price"] - df["down_payment"] + (df["purchase_price"] * mip_upfront_rate)
-
     df["monthly_mortgage"] = df["loan_amount"].apply(lambda x: calculate_mortgage(x, apr_rate, loan_length_years))
     df["monthly_mip"] = (df["loan_amount"] * mip_annual_rate) / 12
     df["monthly_taxes"] = df.apply(set_monthly_taxes, axis=1)
     df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
     df["cash_needed"] = df["closing_costs"] + df["down_payment"]
 
-    # third, calculate cash flow variables for analysis
-    # need to use rent estimates data for each property
-
     rents_get_response = supabase.table('rent_estimates').select('*').execute()
     rents = pd.DataFrame(rents_get_response.data)
     rents = rents.drop(['id'], axis=1)
-
-    # Aggregate: sum all rents and find minimum rent per property
     rent_summary = rents.groupby("address1")["rent_estimate"].agg(["sum", "min"]).reset_index()
     rent_summary.columns = ["address1", "total_rent", "min_rent"]
-    
-    # Get the unit number for the minimum rent per property
     min_rent_indices = rents.groupby("address1")["rent_estimate"].idxmin()
     min_rent_units = rents.loc[min_rent_indices, ["address1", "unit_num", "beds"]].reset_index(drop=True)
     min_rent_units.columns = ["address1", "min_rent_unit", "min_rent_unit_beds"]
-    
-    # Merge the unit information into rent_summary
     rent_summary = rent_summary.merge(min_rent_units, on="address1", how="left")
-
-    # Calculate net rental income (total - cheapest unit you'll live in)
     rent_summary["net_rent_y1"] = rent_summary["total_rent"] - rent_summary["min_rent"]
 
-    # Merge with properties
     df = df.merge(rent_summary, on="address1", how="left")
-
     df["annual_rent_y1"] = df["net_rent_y1"] * 12
     df["annual_rent_y2"] = df["total_rent"] * 12
-
     df["monthly_vacancy_costs"] = df["total_rent"] * vacancy_rate
     df["monthly_repair_costs"] = df["total_rent"] * repair_savings_rate
     df["operating_expenses"] = df["monthly_vacancy_costs"] + df["monthly_repair_costs"] + df["monthly_taxes"] + df["monthly_insurance"]
     df["total_monthly_cost"] = df["monthly_mortgage"] + df["monthly_mip"] + df["operating_expenses"]
-
-    # Net Operating Income (NOI) - this is what you use for cap rate
     df["monthly_NOI"] = df["total_rent"] - df["operating_expenses"]
     df["annual_NOI_y1"] = (df["net_rent_y1"] - df["operating_expenses"]) * 12
     df["annual_NOI_y2"] = df["monthly_NOI"] * 12
-
     df["monthly_cash_flow_y1"] = df["net_rent_y1"] - df["total_monthly_cost"]
     df["monthly_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost"]
     df["annual_cash_flow_y1"] = df["monthly_cash_flow_y1"] * 12
     df["annual_cash_flow_y2"] = df["monthly_cash_flow_y2"] * 12
-
-    # fourth, calculate investment metrics
     df["cap_rate_y1"] = df["annual_NOI_y1"] / df["purchase_price"]
     df["cap_rate_y2"] = df["annual_NOI_y2"] / df["purchase_price"]
     df["CoC_y1"] = df["annual_cash_flow_y1"] / df["cash_needed"]
@@ -231,40 +174,26 @@ def reload_dataframe():
     df["DSCR"] = df["total_rent"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
     df["5y_forecast"] = df.apply(get_expected_gains, axis=1, args=(5,))
     df["10y_forecast"] = df.apply(get_expected_gains, axis=1, args=(10,))
-
-    # fifth, calculate property scores
     df["deal_score"] = df.apply(deal_score_property, axis=1)
     df["mobility_score"] = df.apply(mobility_score, axis=1)
   
     console.print("[green]Property data reloaded successfully![/green]")
 
-# Initialize assumptions at startup
 load_assumptions()
-
-# Initialize loan data at startup - loads FHA loan (default)
 load_loan(1)
-
-# Initialize dataframe at startup
 reload_dataframe()
 
 def display_all_properties(properties_df, title, show_status=False, show_min_rent_data=False):
     dataframe = df if properties_df is None else properties_df
     table = Table(title=title, show_header=True, header_style="bold magenta")
-
-    # Calculate mobility score percentiles for color coding
     mobility_75th_percentile = df["mobility_score"].quantile(0.75)
     mobility_25th_percentile = df["mobility_score"].quantile(0.25)
-
-    # Calculate investment growth percentiles for color coding
     forecast_10y_75th_percentile = df["10y_forecast"].quantile(0.75)
     forecast_10y_25th_percentile = df["10y_forecast"].quantile(0.25)
-
-    # Calculate quintile percentiles for price and cash needed (lower is better)
     price_20th = dataframe["purchase_price"].quantile(0.20)
     price_40th = dataframe["purchase_price"].quantile(0.40)
     price_60th = dataframe["purchase_price"].quantile(0.60)
     price_80th = dataframe["purchase_price"].quantile(0.80)
-
     cash_20th = dataframe["cash_needed"].quantile(0.20)
     cash_40th = dataframe["cash_needed"].quantile(0.40)
     cash_60th = dataframe["cash_needed"].quantile(0.60)
@@ -283,7 +212,6 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
         else:
             return "red"
 
-    # Add columns with proper alignment
     table.add_column("Address", style="cyan", no_wrap=True)
     table.add_column("Price", justify="right", no_wrap=True)
     table.add_column("Cash Needed", justify="right")
@@ -311,17 +239,12 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
         table.add_column("Add. Beds", justify="right", style="bold white")
         table.add_column("Add. Rent", justify="right", style="bold white")
 
-    # Add rows for each property
     for _, row in dataframe.iterrows():
-        # Determine cash flow colors
         cf_y1_style = "red" if row["monthly_cash_flow_y1"] < 0 else "green"
         cf_y2_style = "red" if row["monthly_cash_flow_y2"] < 0 else "green"
 
-        # net operating income color
         noi_style = "red" if row["monthly_NOI"] < 0 else "green"
 
-        # Determine metric colors based on goals
-        # mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
         opex_rent_style = (
             "green"
             if 0.45 <= row["OpEx_Rent"] <= 0.55
@@ -330,33 +253,24 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
         dscr_style = "green" if row["DSCR"] >= 1.25 else "red"
         mgr_pp_style = "green" if row["MGR_PP"] >= 0.01 else "red"
 
-        # Deal score color coding (24-point scale)
         deal_score_style = (
             "green"
             if row["deal_score"] >= 15
-            else "yellow"
-            if row["deal_score"] >= 12
-            else "red"
+            else ("yellow" if row["deal_score"] >= 12 else "red")
         )
 
         mobility_score_style = (
             "green"
             if row["mobility_score"] >= mobility_75th_percentile
-            else "yellow"
-            if row["mobility_score"] >= mobility_25th_percentile
-            else "red"
+            else ("yellow" if row["mobility_score"] >= mobility_25th_percentile else "red")
         )
 
-        # Forecast color coding based on percentiles
         forecast_10y_style = (
             "green"
             if row["10y_forecast"] >= forecast_10y_75th_percentile
-            else "yellow"
-            if row["10y_forecast"] >= forecast_10y_25th_percentile
-            else "red"
+            else ("yellow" if row["10y_forecast"] >= forecast_10y_25th_percentile else "red")
         )
 
-        # Price and cash needed quintile color coding (lower values = better)
         price_style = get_quintile_color(
             row["purchase_price"], price_20th, price_40th, price_60th, price_80th
         )
@@ -395,7 +309,6 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
 
     console.print(table)
 
-# displays all properties that match our dealflow analysis strict criteria
 def get_all_phase1_qualifying_properties(active=True):
     """
     This method filters all properties based on our criteria for what is a financially viable property
@@ -449,25 +362,21 @@ def display_all_phase1_qualifying_properties():
     )
   
 def display_creative_pricing_all_properties():
-  creative_df = get_additional_room_rental_df()
-  display_all_properties(
-    properties_df=creative_df,
-    title="All properties with additional rooms rented",
-    show_min_rent_data=True
-  )
+    creative_df = get_additional_room_rental_df()
+    display_all_properties(
+      properties_df=creative_df,
+      title="All properties with additional rooms rented",
+      show_min_rent_data=True
+    )
 
 def calculate_additional_room_rent(row):
-  return int(row['min_rent_unit_beds'] - 1) * 400
+    return int(row['min_rent_unit_beds'] - 1) * 400
 
 def get_additional_room_rental_df():
     dataframe = df.copy()
-
     df2 = dataframe.query('min_rent_unit_beds > 1').copy()
-
     df2["additional_room_rent"] = df2.apply(calculate_additional_room_rent, axis=1)
-
     df2["net_rent_y1"] = df2["net_rent_y1"] + df2["additional_room_rent"]
-
     df2["monthly_cash_flow_y1"] = df2["net_rent_y1"] - df2["total_monthly_cost"]
     df2["annual_cash_flow_y1"] = df2["monthly_cash_flow_y1"] * 12
     df2["annual_NOI_y1"] = (df2["net_rent_y1"] - df2["operating_expenses"]) * 12
@@ -475,63 +384,43 @@ def get_additional_room_rental_df():
     df2["CoC_y1"] = df2["annual_cash_flow_y1"] / df2["cash_needed"]
     df2["GRM_y1"] = df2["purchase_price"] / df2["annual_rent_y1"]
     df2["deal_score"] = df2.apply(deal_score_property, axis=1)
-
     return df2
 
 def get_reduced_pp_df(reduction_factor):
-  dataframe = df.copy()
-
-  dataframe["original_price"] = dataframe["purchase_price"]
-  dataframe["purchase_price"] = dataframe["purchase_price"] * (1 - reduction_factor) # new purchase price
-  
-  # Recalculate all price-dependent variables
-  dataframe["cost_per_sqrft"] = dataframe["purchase_price"] / dataframe["square_ft"]
-  
-  # Financial calculations
-  dataframe["closing_costs"] = dataframe["purchase_price"] * closing_costs_rate
-  dataframe["down_payment"] = dataframe["purchase_price"] * down_payment_rate
-  dataframe["loan_amount"] = dataframe["purchase_price"] - dataframe["down_payment"] + (dataframe["purchase_price"] * mip_upfront_rate)
-  
-  dataframe["monthly_mortgage"] = dataframe["loan_amount"].apply(lambda x: calculate_mortgage(x, apr_rate, loan_length_years))
-  dataframe["monthly_mip"] = (dataframe["loan_amount"] * mip_annual_rate) / 12
-  dataframe["monthly_taxes"] = (dataframe["purchase_price"] * property_tax_rate) / 12
-  dataframe["monthly_insurance"] = (dataframe["purchase_price"] * home_insurance_rate) / 12
-  dataframe["cash_needed"] = dataframe["closing_costs"] + dataframe["down_payment"]
-  
-  # Recalculate operating expenses and costs
-  dataframe["operating_expenses"] = dataframe["monthly_vacancy_costs"] + dataframe["monthly_repair_costs"] + dataframe["monthly_taxes"] + dataframe["monthly_insurance"]
-  dataframe["total_monthly_cost"] = dataframe["monthly_mortgage"] + dataframe["monthly_mip"] + dataframe["operating_expenses"]
-  
-  # Recalculate cash flows
-  dataframe["monthly_cash_flow_y1"] = dataframe["net_rent_y1"] - dataframe["total_monthly_cost"]
-  dataframe["monthly_cash_flow_y2"] = dataframe["total_rent"] - dataframe["total_monthly_cost"]
-  dataframe["annual_cash_flow_y1"] = dataframe["monthly_cash_flow_y1"] * 12
-  dataframe["annual_cash_flow_y2"] = dataframe["monthly_cash_flow_y2"] * 12
-  
-  # Recalculate NOI
-  dataframe["monthly_NOI"] = dataframe["total_rent"] - dataframe["operating_expenses"]
-  dataframe["annual_NOI_y1"] = (dataframe["net_rent_y1"] - dataframe["operating_expenses"]) * 12
-  dataframe["annual_NOI_y2"] = dataframe["monthly_NOI"] * 12
-  
-  # Recalculate investment metrics
-  dataframe["cap_rate_y1"] = dataframe["annual_NOI_y1"] / dataframe["purchase_price"]
-  dataframe["cap_rate_y2"] = dataframe["annual_NOI_y2"] / dataframe["purchase_price"]
-  dataframe["CoC_y1"] = dataframe["annual_cash_flow_y1"] / dataframe["cash_needed"]
-  dataframe["CoC_y2"] = dataframe["annual_cash_flow_y2"] / dataframe["cash_needed"]
-  dataframe["GRM_y1"] = dataframe["purchase_price"] / dataframe["annual_rent_y1"]
-  dataframe["GRM_y2"] = dataframe["purchase_price"] / dataframe["annual_rent_y2"]
-  dataframe["MGR_PP"] = dataframe["total_rent"] / dataframe["purchase_price"]
-  dataframe["OpEx_Rent"] = dataframe["operating_expenses"] / dataframe["total_rent"]
-  dataframe["DSCR"] = dataframe["total_rent"] / dataframe["monthly_mortgage"]
-  
-  # Recalculate forecasts
-  dataframe["5y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(5,))
-  dataframe["10y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(10,))
-  
-  # Recalculate scores
-  dataframe["deal_score"] = dataframe.apply(deal_score_property, axis=1)
-
-  return dataframe
+    dataframe = df.copy()
+    dataframe["original_price"] = dataframe["purchase_price"]
+    dataframe["purchase_price"] = dataframe["purchase_price"] * (1 - reduction_factor) # new purchase price
+    dataframe["cost_per_sqrft"] = dataframe["purchase_price"] / dataframe["square_ft"]
+    dataframe["closing_costs"] = dataframe["purchase_price"] * closing_costs_rate
+    dataframe["down_payment"] = dataframe["purchase_price"] * down_payment_rate
+    dataframe["loan_amount"] = dataframe["purchase_price"] - dataframe["down_payment"] + (dataframe["purchase_price"] * mip_upfront_rate)
+    dataframe["monthly_mortgage"] = dataframe["loan_amount"].apply(lambda x: calculate_mortgage(x, apr_rate, loan_length_years))
+    dataframe["monthly_mip"] = (dataframe["loan_amount"] * mip_annual_rate) / 12
+    dataframe["monthly_taxes"] = (dataframe["purchase_price"] * property_tax_rate) / 12
+    dataframe["monthly_insurance"] = (dataframe["purchase_price"] * home_insurance_rate) / 12
+    dataframe["cash_needed"] = dataframe["closing_costs"] + dataframe["down_payment"]
+    dataframe["operating_expenses"] = dataframe["monthly_vacancy_costs"] + dataframe["monthly_repair_costs"] + dataframe["monthly_taxes"] + dataframe["monthly_insurance"]
+    dataframe["total_monthly_cost"] = dataframe["monthly_mortgage"] + dataframe["monthly_mip"] + dataframe["operating_expenses"]
+    dataframe["monthly_cash_flow_y1"] = dataframe["net_rent_y1"] - dataframe["total_monthly_cost"]
+    dataframe["monthly_cash_flow_y2"] = dataframe["total_rent"] - dataframe["total_monthly_cost"]
+    dataframe["annual_cash_flow_y1"] = dataframe["monthly_cash_flow_y1"] * 12
+    dataframe["annual_cash_flow_y2"] = dataframe["monthly_cash_flow_y2"] * 12
+    dataframe["monthly_NOI"] = dataframe["total_rent"] - dataframe["operating_expenses"]
+    dataframe["annual_NOI_y1"] = (dataframe["net_rent_y1"] - dataframe["operating_expenses"]) * 12
+    dataframe["annual_NOI_y2"] = dataframe["monthly_NOI"] * 12
+    dataframe["cap_rate_y1"] = dataframe["annual_NOI_y1"] / dataframe["purchase_price"]
+    dataframe["cap_rate_y2"] = dataframe["annual_NOI_y2"] / dataframe["purchase_price"]
+    dataframe["CoC_y1"] = dataframe["annual_cash_flow_y1"] / dataframe["cash_needed"]
+    dataframe["CoC_y2"] = dataframe["annual_cash_flow_y2"] / dataframe["cash_needed"]
+    dataframe["GRM_y1"] = dataframe["purchase_price"] / dataframe["annual_rent_y1"]
+    dataframe["GRM_y2"] = dataframe["purchase_price"] / dataframe["annual_rent_y2"]
+    dataframe["MGR_PP"] = dataframe["total_rent"] / dataframe["purchase_price"]
+    dataframe["OpEx_Rent"] = dataframe["operating_expenses"] / dataframe["total_rent"]
+    dataframe["DSCR"] = dataframe["total_rent"] / dataframe["monthly_mortgage"]
+    dataframe["5y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(5,))
+    dataframe["10y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(10,))
+    dataframe["deal_score"] = dataframe.apply(deal_score_property, axis=1)
+    return dataframe
 
 def display_all_properties_info(properties_df):
     """Display all properties with basic info: address, sqft, age, units, mobility scores, and electricity cost"""
@@ -542,7 +431,6 @@ def display_all_properties_info(properties_df):
         header_style="bold magenta",
     )
 
-    # Calculate percentiles for color coding from the dataframe being displayed
     built_75th_percentile = dataframe["built_in"].quantile(0.75)
     built_25th_percentile = dataframe["built_in"].quantile(0.25)
     sqft_75th_percentile = dataframe["square_ft"].quantile(0.75)
@@ -556,7 +444,6 @@ def display_all_properties_info(properties_df):
     elec_75th_percentile = dataframe["annual_electricity_cost_est"].quantile(0.75)
     elec_25th_percentile = dataframe["annual_electricity_cost_est"].quantile(0.25)
 
-    # Add columns with proper alignment
     table.add_column("Address", style="cyan", no_wrap=True)
     table.add_column("County", style="cyan", no_wrap=True)
     table.add_column("Schl Dst", style="cyan", no_wrap=True)
@@ -571,9 +458,7 @@ def display_all_properties_info(properties_df):
     table.add_column("Reduced Price?", justify="right", style="white")
     table.add_column("Has tenants?", justify="right", style="white")
 
-    # Add rows for each property
     for _, row in dataframe.iterrows():
-        # Convert units to descriptive text
         units_value = int(row["units"])
         if units_value == 2:
             units_display = "duplex"
@@ -584,59 +469,36 @@ def display_all_properties_info(properties_df):
         else:
             units_display = str(units_value)
 
-        # Color coding for metrics based on percentiles
-        # Square footage: higher is better
-        sqft_style = (
-            "green"
-            if row["square_ft"] >= sqft_75th_percentile
-            else "yellow"
-            if row["square_ft"] >= sqft_25th_percentile
-            else "red"
-        )
+        sqft_style = ("green" if row["square_ft"] >= sqft_75th_percentile else "yellow" if row["square_ft"] >= sqft_25th_percentile else "red")
 
-        # Age: lower is better (younger houses are green)
         built_in_style = (
             "green"
             if row["home_age"] <= built_25th_percentile
-            else "yellow"
-            if row["home_age"] <= built_75th_percentile
-            else "red"
+            else ("yellow" if row["home_age"] <= built_75th_percentile else "red")
         )
 
-        # Walk score: higher is better
         walk_style = (
             "green"
             if row["walk_score"] >= walk_75th_percentile
-            else "yellow"
-            if row["walk_score"] >= walk_25th_percentile
-            else "red"
+            else ("yellow" if row["walk_score"] >= walk_25th_percentile else "red")
         )
 
-        # Transit score: higher is better
         transit_style = (
             "green"
             if row["transit_score"] >= transit_75th_percentile
-            else "yellow"
-            if row["transit_score"] >= transit_25th_percentile
-            else "red"
+            else ("yellow" if row["transit_score"] >= transit_25th_percentile else "red")
         )
 
-        # Bike score: higher is better
         bike_style = (
             "green"
             if row["bike_score"] >= bike_75th_percentile
-            else "yellow"
-            if row["bike_score"] >= bike_25th_percentile
-            else "red"
+            else ("yellow" if row["bike_score"] >= bike_25th_percentile else "red")
         )
 
-        # Electricity cost: lower is better (reverse logic)
         elec_style = (
             "green"
             if row["annual_electricity_cost_est"] <= elec_25th_percentile
-            else "yellow"
-            if row["annual_electricity_cost_est"] <= elec_75th_percentile
-            else "red"
+            else ("yellow" if row["annual_electricity_cost_est"] <= elec_75th_percentile else "red")
         )
 
         table.add_row(
@@ -661,13 +523,11 @@ def analyze_property(property_id):
     """Display detailed analysis for a single property"""
     row = df[df['address1'] == property_id].iloc[0]
     
-    # Create property details table
     table = Table(title=f"Property Details: {property_id}", show_header=True, header_style="bold cyan")
     table.add_column("Metric", style="yellow", no_wrap=True)
     table.add_column("Year 1 (Live-in)", justify="right", style="green")
     table.add_column("Year 2 (All Rent)", justify="right", style="blue")
     
-    # Property basics
     console.print(Panel(f"[bold cyan]Property Overview[/bold cyan]\n"
                       f"Address: {row['address1']}\n"
                       f"Purchase Price: {format_currency(row['purchase_price'])}\n"
@@ -677,12 +537,8 @@ def analyze_property(property_id):
                       f"Cost per Sq Ft: {format_currency(row['cost_per_sqrft'])}", 
                       title="Basic Info"))
     
-    # Rent estimates table
     property_rents = rents[rents['address1'] == property_id]
-    
-    # Find the first unit with minimum rent to be marked as "Your Unit"
     your_unit_index = property_rents['rent_estimate'].idxmin()
-    
     rent_table = Table(title="Unit Rent Estimates", show_header=True, header_style="bold green")
     rent_table.add_column("Unit", style="cyan", justify="center")
     rent_table.add_column("Configuration", style="yellow")
@@ -704,7 +560,6 @@ def analyze_property(property_id):
         )
         total_monthly_rent += rent_row['rent_estimate']
     
-    # Add summary row
     rent_table.add_row(
         "[bold]Total[/bold]",
         "",
@@ -714,7 +569,6 @@ def analyze_property(property_id):
     
     console.print(rent_table)
     
-    # Rental income summary
     console.print(Panel(f"[bold blue]Rental Income Summary[/bold blue]\n"
                       f"Total Monthly Rent (All Units): {format_currency(row['total_rent'])}\n"
                       f"Your Unit Rent (Not Collected): {format_currency(row['min_rent'])}\n"
@@ -727,7 +581,6 @@ def analyze_property(property_id):
                       f"NOI Year 2 (All Rent): {format_currency(row['monthly_NOI'])} ({format_currency(row['annual_NOI_y2'])} annually)", 
                       title="Income Breakdown"))
     
-    # Financial metrics table
     table.add_row("Monthly Cash Flow", 
                   f"[{'red' if row['monthly_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['monthly_cash_flow_y1'])}[/]",
                   f"[{'red' if row['monthly_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['monthly_cash_flow_y2'])}[/]")
@@ -753,7 +606,6 @@ def analyze_property(property_id):
                   format_currency(row['10y_forecast']),
                   format_currency(row['10y_forecast']))
     
-    # Add new metrics with color coding
     mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
     opex_rent_style = "green" if 0.45 <= row['OpEx_Rent'] <= 0.55 else ("yellow" if 0.35 <= row['OpEx_Rent'] <= 0.65 else "red")
     dscr_style = "green" if row['DSCR'] >= 1.25 else "red"
@@ -770,14 +622,12 @@ def analyze_property(property_id):
     
     console.print(table)
     
-    # Investment Criteria Scoring Table
     criteria_table = Table(title="Investment Criteria Breakdown", show_header=True, header_style="bold magenta")
     criteria_table.add_column("Criteria", style="yellow", width=25)
     criteria_table.add_column("Score", justify="right", style="white", width=8)
     criteria_table.add_column("Max", justify="right", style="dim white", width=5)
     criteria_table.add_column("Details", style="dim cyan")
     
-    # Calculate individual component scores for display (match the actual scoring function)
     cf_y2_score = (3 if row["monthly_cash_flow_y2"] > 500 else 2 if row["monthly_cash_flow_y2"] > 400 else 1 if row["monthly_cash_flow_y2"] > 200 else 0)
     cf_y1_bonus = (3 if row["monthly_cash_flow_y1"] > 0 else 2 if row["monthly_cash_flow_y1"] > -350 else 0)
     coc_score = (3 if row["CoC_y2"] > 0.15 else 2 if row["CoC_y2"] > 0.12 else 1 if row["CoC_y2"] > 0.08 else 0)
@@ -790,7 +640,6 @@ def analyze_property(property_id):
     sqft_score = (2 if row["cost_per_sqrft"] < 100 else 1 if row["cost_per_sqrft"] < 150 else 0)
     age_score = (2 if row["home_age"] < 20 else 0)
     
-    # Deal score color
     deal_score_style = ("green" if row['deal_score'] >= 15 else "yellow" if row['deal_score'] >= 12 else "red")
     
     criteria_table.add_row("Cash Flow Y2", f"[white]{cf_y2_score}[/white]", "3", f"${row['monthly_cash_flow_y2']:.0f}/month")
@@ -809,7 +658,6 @@ def analyze_property(property_id):
     
     console.print(criteria_table)
 
-    # Mobility Score Breakdown Table
     mobility_table = Table(title="Mobility Score Breakdown", show_header=True, header_style="bold magenta")
     mobility_table.add_column("Metric", style="yellow", width=25)
     mobility_table.add_column("Score", justify="right", style="white", width=8)
@@ -839,7 +687,6 @@ def analyze_property(property_id):
 
     console.print(mobility_table)
     
-    # Cost breakdown
     cost_table = Table(title="Cost Breakdown", show_header=True, header_style="bold red")
     cost_table.add_column("Cost Type", style="yellow")
     cost_table.add_column("Monthly Amount", justify="right", style="red")
@@ -856,7 +703,6 @@ def analyze_property(property_id):
     
     console.print(cost_table)
     
-    # Investment summary
     console.print(Panel(f"[bold green]Investment Summary[/bold green]\n"
                       f"Down Payment: {format_currency(row['down_payment'])}\n"
                       f"Closing Costs: {format_currency(row['closing_costs'])}\n"
@@ -864,7 +710,6 @@ def analyze_property(property_id):
                       f"Loan Amount: {format_currency(row['loan_amount'])}", 
                       title="Investment Requirements"))
     
-    # Rent research options
     console.print("\n")
     research_choice = questionary.select(
         "Would you like to generate or view rental market research for this property?",
@@ -892,7 +737,6 @@ def handle_rent_research_generation(property_id: str):
         if report_id:
             console.print(f"[green]✅ Research completed! Report ID: {report_id}[/green]")
             
-            # Ask if user wants to view the report immediately
             view_now = questionary.confirm("Would you like to view the report now?").ask()
             
             if view_now:
@@ -913,9 +757,7 @@ def handle_view_research_reports(property_id: str):
         console.print("[yellow]No research reports found for this property.[/yellow]")
         return
     
-    # Loop to keep showing the report selection menu after viewing reports
     while True:
-        # Create report selection list
         report_choices = []
         for report in reports:
             created_date = report['created_at'][:10]  # Extract date part
@@ -933,7 +775,6 @@ def handle_view_research_reports(property_id: str):
         if selected == "← Go back":
             return
         
-        # Extract report ID from selection
         selected_id = None
         for report in reports:
             if report['id'][:8] in selected:
@@ -944,7 +785,6 @@ def handle_view_research_reports(property_id: str):
             report_data = researcher.get_report_by_id(selected_id)
             if report_data:
                 researcher.display_report(report_data['report_content'])
-                # After viewing the report, continue the loop to show the selection menu again
             else:
                 console.print("[red]Error loading report.[/red]")
 
@@ -955,7 +795,6 @@ def display_rent_estimates_comparison(property_id: str, estimates: dict, existin
     
     Returns True if user wants to update database, False otherwise.
     """
-    # Display per-unit comparison table
     estimates_table = Table(title=f"Rent Estimate Comparison for {property_id}", 
                           show_header=True, header_style="bold green")
     estimates_table.add_column("Unit", style="cyan", width=6)
@@ -971,36 +810,26 @@ def display_rent_estimates_comparison(property_id: str, estimates: dict, existin
     total_new_primary = 0
     total_new_high = 0
     
-    # Process each unit configuration
     for config in unit_configs:
         for unit in config['units']:
             unit_num = unit['unit_num']
             config_key = config['config_key']
             base_name = f"unit_{unit_num}_{config_key}"
             
-            # Get new estimates for this unit
             new_low = estimates.get(f"{base_name}_rent_estimate_low", 0)
             new_primary = estimates.get(f"{base_name}_rent_estimate", 0)
             new_high = estimates.get(f"{base_name}_rent_estimate_high", 0)
-            
-            # Get existing estimates for this unit
             existing_data = existing_estimates.get(base_name, {})
             current_primary = existing_data.get('rent_estimate', 0)
-            
-            # Calculate differences
             difference = new_primary - current_primary
             change_percent = (difference / current_primary * 100) if current_primary > 0 else 0
-            
-            # Add to totals
             total_current_primary += current_primary
             total_new_low += new_low
             total_new_primary += new_primary
             total_new_high += new_high
             
-            # Format configuration display
             config_display = f"{config['beds']}b{config['baths']}b"
             
-            # Style difference based on increase/decrease
             if difference > 0:
                 diff_style = "green"
                 diff_symbol = "+"
@@ -1017,7 +846,6 @@ def display_rent_estimates_comparison(property_id: str, estimates: dict, existin
                 change_style = "white"
                 change_percent_formatted = f"{change_percent:.1f}%"
             
-            # Add row to table
             estimates_table.add_row(
                 f"Unit {unit_num}",
                 config_display,
@@ -1028,11 +856,9 @@ def display_rent_estimates_comparison(property_id: str, estimates: dict, existin
                 f"[{change_style}]{change_percent_formatted}[/{change_style}]"
             )
     
-    # Calculate total differences
     total_difference = total_new_primary - total_current_primary
     total_change_percent = (total_difference / total_current_primary * 100) if total_current_primary > 0 else 0
     
-    # Style total difference
     if total_difference > 0:
         total_diff_style = "green"
         total_diff_symbol = "+"
@@ -1049,7 +875,6 @@ def display_rent_estimates_comparison(property_id: str, estimates: dict, existin
         total_change_style = "white"
         total_change_percent_formatted = f"{total_change_percent:.1f}%"
     
-    # Add totals row
     estimates_table.add_section()
     estimates_table.add_row(
         "[bold]TOTAL[/bold]",
@@ -1064,7 +889,6 @@ def display_rent_estimates_comparison(property_id: str, estimates: dict, existin
     console.print("\n")
     console.print(estimates_table)
     
-    # Show summary panel
     range_amount = total_new_high - total_new_low
     range_percent = (range_amount / total_new_primary * 100) if total_new_primary > 0 else 0
     unit_count = sum(len(config['units']) for config in unit_configs)
@@ -1083,7 +907,6 @@ def display_rent_estimates_comparison(property_id: str, estimates: dict, existin
         border_style="cyan"
     ))
     
-    # Ask user if they want to update the database
     console.print("\n")
     update_database = questionary.confirm(
         "Would you like to update the database with these new rent estimates?",
@@ -1102,7 +925,6 @@ def handle_generate_rent_estimates(property_id: str):
         console.print("[dim]Generate a research report first to use this feature.[/dim]")
         return
     
-    # Create choices for InquirerPy fuzzy search
     report_choices = []
     for report in reports:
         created_date = report['created_at'][:10]  # Extract date part
@@ -1111,7 +933,6 @@ def handle_generate_rent_estimates(property_id: str):
         choice_label = f"{created_date} - {status} (${cost:.4f}) - ID: {report['id'][:8]}"
         report_choices.append(choice_label)
     
-    # Use InquirerPy fuzzy search to select a report
     selected = inquirer.fuzzy(
         message="Type to search and select a research report:",
         choices=report_choices,
@@ -1124,7 +945,6 @@ def handle_generate_rent_estimates(property_id: str):
     if not selected:
         return
     
-    # Extract report ID from selection
     selected_id = None
     for report in reports:
         if report['id'][:8] in selected:
@@ -1135,7 +955,6 @@ def handle_generate_rent_estimates(property_id: str):
         console.print("[red]Error: Could not identify selected report.[/red]")
         return
     
-    # Generate rent estimates from the selected report
     try:
         result = researcher.generate_rent_estimates_from_report(selected_id)
         
@@ -1144,7 +963,6 @@ def handle_generate_rent_estimates(property_id: str):
             existing_estimates = result.get("existing_estimates", {})
             unit_configs = result.get("unit_configs", [])
             
-            # Use the shared comparison display function
             update_database = display_rent_estimates_comparison(
                 property_id, estimates, existing_estimates, unit_configs, 
                 result['cost'], selected
@@ -1158,7 +976,6 @@ def handle_generate_rent_estimates(property_id: str):
                 ).ask()
                 
                 if final_confirm:
-                    # Perform the database update
                     update_success = researcher._update_rent_estimates_in_db(
                         property_id, unit_configs, estimates
                     )
@@ -1192,7 +1009,6 @@ def handle_rent_research_after_add(property_id):
             existing_estimates = result.get("existing_estimates", {})
             unit_configs = result.get("unit_configs", [])
             
-            # Use the shared comparison display function
             display_rent_estimates_comparison(
                 property_id, estimates, existing_estimates, unit_configs, 
                 result['cost'], "Report we just made" 
