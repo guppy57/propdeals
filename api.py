@@ -17,40 +17,6 @@ inspections_client = InspectionsClient(supabase)
 df = None
 rents = None
 
-def load_assumptions():
-    """Load assumptions from YAML file with fallback defaults"""
-    default_assumptions = {
-        'appreciation_rate': 0.02,
-        'rent_appreciation_rate': 0.01,
-        'property_tax_rate': 0.01565,
-        'home_insurance_rate': 0.02,
-        'vacancy_rate': 0.0833,
-        'repair_savings_rate': 0.05,
-        'closing_costs_rate': 0.04,
-        'unit_living_in': 'cheapest'
-    }
-    
-    try:
-        import yaml
-        with open('assumptions.yaml', 'r') as file:
-            assumptions = yaml.safe_load(file)
-        print("✅ Loaded assumptions from assumptions.yaml")
-        return assumptions
-    except Exception as e:
-        print(f"⚠️ Failed to load assumptions.yaml: {str(e)}")
-        print("🔧 Using default assumptions")
-        return default_assumptions
-
-assumptions = load_assumptions()
-appreciation_rate = assumptions["appreciation_rate"]
-rent_appreciation_rate = assumptions["rent_appreciation_rate"]
-property_tax_rate = assumptions["property_tax_rate"]
-home_insurance_rate = assumptions["home_insurance_rate"]
-vacancy_rate = assumptions["vacancy_rate"]
-repair_savings_rate = assumptions["repair_savings_rate"]
-closing_costs_rate = assumptions["closing_costs_rate"]
-live_in_unit_setting = assumptions["unit_living_in"]
-
 def load_loan_details():
     """Load FHA loan details from Supabase with fallback defaults"""
     default_loan = {
