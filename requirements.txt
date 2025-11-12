@@ -3,9 +3,8 @@ aiohttp==3.13.2
 aiosignal==1.4.0
 annotated-types==0.7.0
 anthropic==0.72.0
-anyio==4.11.0
+anyio==3.7.1
 attrs==25.4.0
-browserbase==1.4.0
 cachetools==6.2.1
 certifi==2025.10.5
 charset-normalizer==3.4.4
