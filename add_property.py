@@ -6,6 +6,7 @@ from datetime import date, timedelta
 import os
 import questionary
 import requests
+import time
 
 load_dotenv()
 
@@ -60,6 +61,85 @@ def get_rental_estimations(property_details, unit_configs):
 
 def get_political_districts(address):
     pass
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """
+    Calculate the great circle distance between two points
+    on the earth (specified in decimal degrees)
+    Returns distance in miles
+    """
+    from math import radians, cos, sin, asin, sqrt
+
+    # Convert decimal degrees to radians
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+
+    # Haversine formula
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
+
+    # Radius of earth in miles
+    r = 3956
+
+    return c * r
+
+def make_places_request_with_retry(url, params, max_retries=3):
+    """
+    Make Places API request with exponential backoff retry logic
+
+    Args:
+        url: API endpoint URL
+        params: Request parameters
+        max_retries: Maximum number of retry attempts
+
+    Returns:
+        API response data (JSON)
+    """
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, params=params)
+            data = response.json()
+            status = data.get('status')
+
+            # Success cases - return immediately
+            if status in ['OK', 'ZERO_RESULTS']:
+                return data
+
+            # REQUEST_DENIED - don't retry, it's a configuration issue
+            if status == 'REQUEST_DENIED':
+                error_message = data.get('error_message', 'No error message provided')
+                console.print(f"  REQUEST_DENIED: {error_message}", style="bold red")
+                console.print("  [yellow]Troubleshooting tips:[/yellow]")
+                console.print("    • Check API key restrictions (Android/iOS keys not supported)", style="dim")
+                console.print("    • Verify 'Places API Web Service' is enabled in Google Cloud Console", style="dim")
+                console.print("    • Ensure API key has no IP restrictions or correct IP is whitelisted", style="dim")
+                return data  # Return without retry
+
+            # Transient errors - retry with exponential backoff
+            if status in ['UNKNOWN_ERROR', 'INVALID_REQUEST'] and attempt < max_retries - 1:
+                wait_time = (2 ** attempt) * 0.1  # 100ms, 200ms, 400ms
+                print(f"    Retrying in {wait_time*1000:.0f}ms... (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+                continue
+
+            # Other errors or final attempt - return data
+            if status and status != 'OK':
+                error_message = data.get('error_message', 'No error message provided')
+                console.print(f"  API Error ({status}): {error_message}", style="yellow")
+
+            return data
+
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait_time = (2 ** attempt) * 0.1
+                print(f"    Request exception: {str(e)}. Retrying in {wait_time*1000:.0f}ms...")
+                time.sleep(wait_time)
+            else:
+                console.print(f"  Request failed after {max_retries} attempts: {str(e)}", style="bold red")
+                return {'status': 'ERROR', 'error_message': str(e)}
+
+    return {'status': 'ERROR', 'error_message': 'Max retries exceeded'}
 
 def get_geocode_data(address):
     print(f"Getting geocode for: {address}")
@@ -194,6 +274,166 @@ def get_walkscore_data(lng, lat, address):
     return data["walkscore"], transit, bike
 
 
+def get_poi_proximity_data(lat, lon, radius_miles=5):
+    """
+    Get proximity to important points of interest using Google Places API
+    Returns distances in miles to the nearest POI of each type within the radius
+
+    Args:
+        lat: Latitude coordinate
+        lon: Longitude coordinate
+        radius_miles: Search radius in miles (default 5 miles for Des Moines area)
+    """
+    print(f"Getting POI proximity data for coordinates: ({lat}, {lon})")
+
+    # Convert miles to meters for Google API
+    radius_meters = int(radius_miles * 1609.34)
+
+    poi_types = [
+        ('gas_station', 'gas station'),
+        ('school', 'school'),
+        ('university', 'university'),
+        ('grocery_or_supermarket', 'grocery store'),
+        ('hospital', 'hospital'),
+        ('park', 'park'),
+        ('transit_station', 'transit station')
+    ]
+
+    results = {}
+
+    for poi_type, poi_name in poi_types:
+        try:
+            # Use retry helper for robust API calls
+            data = make_places_request_with_retry(
+                "https://maps.googleapis.com/maps/api/place/nearbysearch/json",
+                params={
+                    "location": f"{lat},{lon}",
+                    "radius": radius_meters,
+                    "type": poi_type,
+                    "key": os.getenv("GOOGLE_KEY"),
+                }
+            )
+
+            status = data.get('status')
+
+            # Handle ZERO_RESULTS separately (not an error)
+            if status == 'ZERO_RESULTS':
+                print(f"  No {poi_name} found within {radius_miles} miles")
+                results[f'{poi_type}_distance_miles'] = None
+                continue
+
+            if status == 'OK' and data.get('results'):
+                # Find closest result by calculating distances
+                closest_distance = float('inf')
+                closest_poi = None
+
+                for result in data['results']:
+                    poi_lat = result['geometry']['location']['lat']
+                    poi_lon = result['geometry']['location']['lng']
+                    distance = haversine_distance(lat, lon, poi_lat, poi_lon)
+                    if distance < closest_distance:
+                        closest_distance = distance
+                        closest_poi = result
+
+                results[f'{poi_type}_distance_miles'] = round(closest_distance, 2)
+                print(f"  Found nearest {poi_name}: {closest_distance:.2f} miles")
+            else:
+                results[f'{poi_type}_distance_miles'] = None
+
+        except Exception as e:
+            console.print(f"Error fetching {poi_name} data: {str(e)}", style="bold red")
+            results[f'{poi_type}_distance_miles'] = None
+
+    return results
+
+
+def get_poi_count_data(lat, lon, radius_miles=5):
+    """
+    Count number of POIs within a radius using Google Places API
+    Returns counts of each POI type within the specified radius
+    Filters by review count to focus on established/major locations
+
+    Args:
+        lat: Latitude coordinate
+        lon: Longitude coordinate
+        radius_miles: Search radius in miles (default 5 miles for Des Moines area)
+    """
+    print(f"Counting POIs within {radius_miles} miles for coordinates: ({lat}, {lon})")
+
+    # Convert miles to meters for Google API
+    radius_meters = int(radius_miles * 1609.34)
+
+    poi_types = [
+        ('gas_station', 'gas station'),
+        ('school', 'school'),
+        ('university', 'university'),
+        ('grocery_or_supermarket', 'grocery store'),
+        ('hospital', 'hospital'),
+        ('park', 'park'),
+        ('transit_station', 'transit station')
+    ]
+
+    # Review thresholds to filter out minor/obscure locations
+    review_thresholds = {
+        'gas_station': 20,
+        'school': 25,
+        'university': 75,
+        'grocery_or_supermarket': 65,
+        'hospital': 100,
+        'park': 5,
+        'transit_station': 1
+    }
+
+    results = {}
+
+    for poi_type, poi_name in poi_types:
+        try:
+            # Use retry helper for robust API calls
+            data = make_places_request_with_retry(
+                "https://maps.googleapis.com/maps/api/place/nearbysearch/json",
+                params={
+                    "location": f"{lat},{lon}",
+                    "radius": radius_meters,
+                    "type": poi_type,
+                    "key": os.getenv("GOOGLE_KEY"),
+                }
+            )
+
+            status = data.get('status')
+            count = 0
+
+            if status == 'OK' and data.get('results'):
+                total_results = len(data['results'])
+                min_reviews = review_thresholds.get(poi_type, 0)
+
+                # Filter by review count
+                filtered_results = [
+                    place for place in data['results']
+                    if place.get('user_ratings_total', 0) >= min_reviews
+                ]
+                count = len(filtered_results)
+
+                # Log filtering stats
+                if total_results > 0:
+                    if count < total_results:
+                        print(f"  Found {count} {poi_name}(s) (filtered from {total_results} with ≥{min_reviews} reviews)")
+                    else:
+                        print(f"  Found {count} {poi_name}(s)")
+                else:
+                    print(f"  Found {count} {poi_name}(s)")
+            elif status == 'ZERO_RESULTS':
+                print(f"  Found 0 {poi_name}s within {radius_miles} miles")
+            # Error messages already handled by retry helper
+
+            results[f'{poi_type}_count_{int(radius_miles)}mi'] = count
+
+        except Exception as e:
+            console.print(f"Error counting {poi_name}s: {str(e)}", style="bold red")
+            results[f'{poi_type}_count_{int(radius_miles)}mi'] = 0
+
+    return results
+
+
 def get_value_estimate(property_details):
     response = requests.get(
         "https://api.rentcast.io/v1/avm/value",
@@ -261,6 +501,8 @@ def display_property_details(property_details):
 def add_property_to_supabase(property_details, supabase) -> bool:
     try:
         geocode = get_geocode_data(property_details["full_address"])
+        lon = geocode["lon"]
+        lat = geocode["lat"]
         console.print(f"Found long: {lon} and lat: {lat}", style="green bold")
         walk, transit, bike = get_walkscore_data(
             lon, lat, property_details["full_address"]
@@ -269,6 +511,10 @@ def add_property_to_supabase(property_details, supabase) -> bool:
             f"Found walk score: {walk}, transit: {transit}, bike: {bike}",
             style="green bold",
         )
+        poi_distance_data = get_poi_proximity_data(lat, lon, radius_miles=5)
+        poi_count_data = get_poi_count_data(lat, lon, radius_miles=5)
+        poi_data = {**poi_distance_data, **poi_count_data}
+        console.print("Found POI proximity and count data", style="green bold")
         solar_data = get_solar_potential_data(property_details["full_address"])
         console.print("Found solar potential data", style="green bold")
         electricity_costs = solar_data["cost_electricity_without_solar"]
@@ -281,11 +527,14 @@ def add_property_to_supabase(property_details, supabase) -> bool:
     property_details["walk_score"] = walk if walk != "NA" else 0
     property_details["bike_score"] = bike if bike != "NA" else 0
     property_details["transit_score"] = transit if transit != "NA" else 0
-    property_details["lat"] = geocode["lat"] 
-    property_details["lon"] = geocode["lon"] 
+    property_details["lat"] = geocode["lat"]
+    property_details["lon"] = geocode["lon"]
     property_details["annual_electricity_cost_est"] = electricity_costs
     property_details["neighborhood"] = geocode["neighborhood"]
     property_details["county"] = geocode["county"]
+
+    # Add POI proximity data
+    property_details.update(poi_data)
 
     try:
         query = supabase.table("properties").insert(property_details)

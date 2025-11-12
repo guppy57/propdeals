@@ -3,106 +3,20 @@ import pandas as pd
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from typing import Optional
-from datetime import date
-
-# Import shared functions from run.py
 from run import reload_dataframe, get_all_phase1_qualifying_properties
+from inspections import InspectionCreate, InspectionsClient
+from helpers import convert_numpy_types
 
 load_dotenv()
 
-# Pydantic models
-class InspectionCreate(BaseModel):
-    address1: str
-    inspection_date: Optional[date] = None
-
-    # FOUNDATION & STRUCTURE
-    foundation_type: Optional[str] = None
-    foundation_condition: Optional[str] = None
-    foundation_crack_size_inches: Optional[float] = None
-    floor_condition: Optional[str] = None
-    structural_issues: Optional[str] = None
-    structural_repair_cost_est: Optional[int] = None
-
-    # ROOF & DRAINAGE
-    roof_age_years: Optional[int] = None
-    roof_type: Optional[str] = None
-    roof_condition: Optional[str] = None
-    roof_has_visible_damage: Optional[bool] = False
-    roof_replacement_cost_est: Optional[int] = None
-    gutters_condition: Optional[str] = None
-    drainage_adequate: Optional[bool] = True
-    roof_notes: Optional[str] = None
-
-    # BASEMENT/CRAWLSPACE
-    basement_type: Optional[str] = None
-    basement_water_issues: Optional[str] = None
-    has_sump_pump: Optional[bool] = False
-    sump_pump_condition: Optional[str] = None
-    basement_has_mold: Optional[bool] = False
-    basement_waterproofed: Optional[bool] = False
-    basement_notes: Optional[str] = None
-
-    # ELECTRICAL SYSTEM
-    electrical_panel_type: Optional[str] = None
-    electrical_amp_service: Optional[int] = None
-    electrical_wiring_type: Optional[str] = None
-    has_separate_meters: Optional[bool] = False
-    electrical_issues: Optional[str] = None
-    rewiring_cost_est: Optional[int] = None
-    electrical_notes: Optional[str] = None
-
-    # PLUMBING SYSTEM
-    plumbing_pipe_material: Optional[str] = None
-    plumbing_water_pressure: Optional[str] = None
-    plumbing_sewer_line_type: Optional[str] = None
-    plumbing_has_issues: Optional[bool] = False
-    replumbing_cost_est: Optional[int] = None
-    plumbing_notes: Optional[str] = None
-
-    # EXTERIOR & COMMON AREAS
-    exterior_siding_condition: Optional[str] = None
-    exterior_paint_condition: Optional[str] = None
-    exterior_trim_condition: Optional[str] = None
-    parking_type: Optional[str] = None
-    parking_spaces_count: Optional[int] = None
-    has_shared_laundry: Optional[bool] = False
-    laundry_condition: Optional[str] = None
-    laundry_coin_revenue_monthly: Optional[int] = None
-    yard_condition: Optional[str] = None
-
-    # UTILITIES & OPERATIONS
-    tenant_pays_electric: Optional[bool] = True
-    tenant_pays_gas: Optional[bool] = True
-    tenant_pays_water: Optional[bool] = False
-    tenant_pays_trash: Optional[bool] = False
-    landlord_utility_cost_monthly: Optional[int] = None
-
-    # LEGAL & PERMITS
-    has_rental_license: Optional[bool] = False
-    rental_license_expiry: Optional[date] = None
-    has_code_violations: Optional[bool] = False
-    zoning_allows_multifamily: Optional[bool] = True
-    legal_notes: Optional[str] = None
-
-    # NEIGHBORHOOD ASSESSMENT
-    neighborhood_safety_rating: Optional[int] = Field(None, ge=1, le=10)
-    walkability_notes: Optional[str] = None
-    would_live_here: Optional[bool] = None
-    neighborhood_notes: Optional[str] = None
-    gut_feeling_rating: Optional[int] = Field(None, ge=1, le=10)
-
-# Initialize Supabase client early
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-
-# Global dataframe - will be loaded on startup
+inspections_client = InspectionsClient(supabase)
 df = None
 rents = None
 
-# Load assumptions with fallbacks
 def load_assumptions():
     """Load assumptions from YAML file with fallback defaults"""
     default_assumptions = {
@@ -127,7 +41,6 @@ def load_assumptions():
         print("🔧 Using default assumptions")
         return default_assumptions
 
-# Load assumptions on module import
 assumptions = load_assumptions()
 appreciation_rate = assumptions["appreciation_rate"]
 rent_appreciation_rate = assumptions["rent_appreciation_rate"]
@@ -138,7 +51,6 @@ repair_savings_rate = assumptions["repair_savings_rate"]
 closing_costs_rate = assumptions["closing_costs_rate"]
 live_in_unit_setting = assumptions["unit_living_in"]
 
-# Load loan details with fallbacks
 def load_loan_details():
     """Load FHA loan details from Supabase with fallback defaults"""
     default_loan = {
@@ -165,8 +77,6 @@ def load_loan_details():
         print(f"⚠️ Failed to load loan details from database: {str(e)}")
         print("🔧 Using default loan settings")
         return default_loan
-
-# Load loan details on module import
 loan_details = load_loan_details()
 interest_rate = loan_details['interest_rate']
 apr_rate = loan_details['apr_rate']
@@ -175,22 +85,7 @@ loan_length_years = loan_details['years']
 mip_upfront_rate = loan_details['mip_upfront_rate']
 mip_annual_rate = loan_details['mip_annual_rate']
 
-def convert_numpy_types(obj):
-    """Convert numpy types to native Python types for JSON serialization"""
-    import numpy as np
-    
-    if isinstance(obj, dict):
-        return {k: convert_numpy_types(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_numpy_types(item) for item in obj]
-    elif isinstance(obj, np.integer):
-        return int(obj)
-    elif isinstance(obj, np.floating):
-        return float(obj)
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
-    else:
-        return obj
+
 
 def reload_dataframe_logic():
     global df, rents
@@ -285,7 +180,6 @@ async def get_all_properties(
     if status:
         filtered_df = filtered_df[filtered_df['status'] == status]
     
-    # Convert to records and handle NaN values
     properties = filtered_df.fillna(0).to_dict('records')
     
     return {
@@ -374,7 +268,6 @@ async def get_property_analysis(property_id: str):
     
     row = property_data.iloc[0]
     
-    # Calculate detailed scoring breakdown
     cf_y2_score = (3 if row["monthly_cash_flow_y2"] > 500 else 2 if row["monthly_cash_flow_y2"] > 400 else 1 if row["monthly_cash_flow_y2"] > 200 else 0)
     cf_y1_bonus = (3 if row["monthly_cash_flow_y1"] > 0 else 2 if row["monthly_cash_flow_y1"] > -350 else 0)
     coc_score = (3 if row["CoC_y2"] > 0.15 else 2 if row["CoC_y2"] > 0.12 else 1 if row["CoC_y2"] > 0.08 else 0)
@@ -448,16 +341,15 @@ async def get_property_analysis(property_id: str):
 async def get_inspection(address1: str):
     """Get inspection data for a specific property by address1"""
     try:
-        response = supabase.table('inspections').select('*').eq('address1', address1).execute()
+        inspection_data = inspections_client.get_inspection(address1)
 
-        if not response.data:
+        if not inspection_data:
             raise HTTPException(
                 status_code=404,
                 detail=f"No inspection found for property {address1}"
             )
 
-        # Return the first (and should be only) inspection for this address
-        return response.data[0]
+        return inspection_data
 
     except HTTPException:
         raise
@@ -471,21 +363,12 @@ async def get_inspection(address1: str):
 async def upsert_inspection(inspection: InspectionCreate):
     """Create or update inspection record for a property (upsert)"""
     try:
-        # Convert the Pydantic model to a dict, excluding None values
         inspection_data = inspection.model_dump(exclude_none=True)
-
-        # Upsert the inspection data (insert or update based on address1 unique constraint)
-        response = supabase.table('inspections').upsert(inspection_data).execute()
-
-        if not response.data:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to upsert inspection record"
-            )
+        saved_inspection = inspections_client.upsert_inspection(inspection_data)
 
         return {
             "message": "Inspection saved successfully",
-            "inspection": response.data[0]
+            "inspection": saved_inspection
         }
 
     except HTTPException:

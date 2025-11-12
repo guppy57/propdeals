@@ -19,11 +19,13 @@ from helpers import (
 )
 from loans import LoansProvider
 from rent_research import RentResearcher
+from inspections import InspectionsClient
 
 load_dotenv()
 
 console = Console() 
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+inspections = InspectionsClient(supabase_client=supabase)
 
 white_style = Style([
     ('qmark', 'fg:white bold'),           # question mark
@@ -915,6 +917,60 @@ def display_rent_estimates_comparison(property_id: str, estimates: dict, existin
     
     return update_database
 
+def is_property_maps_done(row) -> bool:
+    places = ['gas_station', 'school', 'university', 'grocery_or_supermarket', 'hospital', 'park', 'transit_station']
+    is_done = True
+
+    for place in places:
+        distance = row.get(f'{place}_distance_miles')
+        count = row.get(f'{place}_count_5mi')
+
+        if pd.isna(distance) and distance is None:
+            is_done = False
+        if pd.isna(count) and count is None:
+            is_done = False
+
+    return is_done
+
+def display_phase2_data_checklist():
+    filtered_df, reduced_df, creative_df = get_all_phase1_qualifying_properties()
+    combined_df = pd.concat(
+        [filtered_df, reduced_df, creative_df], ignore_index=True
+    ).drop_duplicates(subset=["address1"], keep="first")
+
+    table = Table(title="Phase 2 Data Checklist", show_header=True, header_style="bold green")
+
+    table.add_column("Address", style="cyan")
+    table.add_column("DATE", style="white")
+    table.add_column("INSP", style="white")
+    table.add_column("MAPS", style="white")
+    table.add_column("SCHL", style="white")
+    table.add_column("RENT", style="white")
+    table.add_column("NGBH", style="white")
+    table.add_column("TAXS", style="white")
+
+    for _, row in combined_df.iterrows():
+        has_listing = "[green]done[/green]" if row["listed_date"] else "[dim]none[/dim]"
+        has_inspection_done = "[green]done[/green]" if inspections.is_property_inspection_done(row["address1"]) else "[dim]none[/dim]"
+        has_maps_data = "[green]done[/green]" if is_property_maps_done(row) else "[dim]none[/dim]"
+        has_school_district = "[green]done[/green]" if row["school_district"] else "[dim]none[/dim]"
+        has_rent_dd = "[green]done[/green]" if row["rent_dd_completed"] else "[dim]none[/dim]"
+        has_neighborhood_dd = "[green]done[/green]" if row["neighborhood_dd_completed"] else "[dim]none[/dim]"
+        has_taxes = "[green]done[/green]" if row.get("annual_tax_amount") else "[dim]none[/dim]"
+
+        table.add_row(
+            row["address1"],
+            has_listing,
+            has_inspection_done,
+            has_maps_data,
+            has_school_district,
+            has_rent_dd,
+            has_neighborhood_dd,
+            has_taxes,
+        )
+
+    console.print(table)
+
 def handle_generate_rent_estimates(property_id: str):
     """Handle generating rent estimates from an existing research report"""
     researcher = RentResearcher(supabase, console)
@@ -1051,13 +1107,15 @@ using_application = True
 def run_all_properties_options():
     using_all_properties = True
     choices = [
-        "Go back",
+        "Phase 1 - Qualifiers",
+        "Phase 2 - Data Checklist",
+        "Phase 2 - Qualifiers",
         "All properties - Active (FHA)",
-        "Phase 1 Qualifiers",
-        "Reduce price and recalculate",
-        "Property Info",
+        "All properties - Reduce price and recalculate",
+        "All properties - Property Info",
         "All properties - Creative Pricing",
         "All properties - Sold / Passed (FHA)",
+        "Go back",
     ]
 
     while using_all_properties:
@@ -1072,16 +1130,16 @@ def run_all_properties_options():
             display_all_properties(
                 properties_df=dataframe, title="All active properties using FHA"
             )
-        elif option == "Phase 1 Qualifiers":
+        elif option == "Phase 1 - Qualifiers":
             display_all_phase1_qualifying_properties()
-        elif option == "Reduce price and recalculate":
+        elif option == "All properties - Reduce price and recalculate":
             percent = questionary.text(
                 "Enter a percent to reduce purchase price by"
             ).ask()
             converted = float(int(percent)) / 100.0
             reduced_df = get_reduced_pp_df(reduction_factor=converted)
             display_all_properties(properties_df=reduced_df, title=f"{converted}% Price Reduction")
-        elif option == "Property Info":
+        elif option == "All properties - Property Info":
             display_all_properties_info(properties_df=df)
         elif option == "All properties - Creative Pricing":
             display_creative_pricing_all_properties()
@@ -1092,6 +1150,10 @@ def run_all_properties_options():
                 title="All inactive properties using FHA",
                 show_status=True,
             )
+        elif option == "Phase 2 - Data Checklist":
+            display_phase2_data_checklist()
+        elif option == "Phase 2 - Qualifiers":
+            pass
 
 def run_loans_options():
   using_loans = True
