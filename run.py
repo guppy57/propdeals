@@ -701,7 +701,7 @@ def analyze_property(property_id):
     cost_table.add_row("Vacancy Reserve", format_currency(row['monthly_vacancy_costs']), format_currency(row['monthly_vacancy_costs'] * 12))
     cost_table.add_row("Repair Reserve", format_currency(row['monthly_repair_costs']), format_currency(row['monthly_repair_costs'] * 12))
     cost_table.add_row("[bold]Total Monthly Cost[/bold]", f"[bold red]{format_currency(row['total_monthly_cost'])}[/bold red]", f"[bold red]{format_currency(row['total_monthly_cost'] * 12)}[/bold red]")
-    cost_table.add_row("Electricity (est.)", format_currency(row['annual_electricity_cost_est']), format_currency(row['annual_electricity_cost_est'] / 12))
+    cost_table.add_row("Electricity (est.)", format_currency(row['annual_electricity_cost_est'] / 12), format_currency(row['annual_electricity_cost_est']))
     
     console.print(cost_table)
     
