@@ -1,4 +1,5 @@
 import pandas as pd
+import math
 
 def format_currency(value):
     """Format currency values with $ sign, commas, and 2 decimal places"""
@@ -115,3 +116,12 @@ def calculate_monthly_take_home(gross_annual_income, state_tax_code='IA'):
     monthly_take_home = annual_take_home / 12
 
     return monthly_take_home
+
+def express_percent_as_months_and_days(rate: float) -> str:
+    try:
+        days = math.ceil(365 * rate)
+        months = math.floor(days / 30)
+        days_left = math.ceil(days % 30)
+        return f"{months}m {days_left}d"
+    except Exception:
+        return "0m 0d"

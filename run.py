@@ -20,6 +20,7 @@ from helpers import (
   format_number,
   format_percentage,
   calculate_monthly_take_home,
+  express_percent_as_months_and_days,
 )
 from loans import LoansProvider
 from rent_research import RentResearcher
@@ -174,9 +175,6 @@ def get_seller_motivation_score(row) -> str:
     else:
         return 'high'
 
-def get_rentability_score(row) -> int:
-    return 0
-
 def get_expected_gains(row, length_years):
     current_home_value = row["purchase_price"]
     loan_amount = row["loan_amount"]
@@ -306,6 +304,8 @@ def calculate_roe(row):
         return row["annual_cash_flow_y2"] / current_equity
     return 0
 
+def apply_calculations_on_dataframe(df):
+
 def reload_dataframe():
     global df, rents
     console.print("[yellow]Reloading property data...[/yellow]")
@@ -314,6 +314,7 @@ def reload_dataframe():
     properties_get_response = supabase.table('properties').select('*').execute()
     df = pd.DataFrame(properties_get_response.data)
     df = df.drop(["zillow_link", "full_address"], axis=1)
+
     cols = ["walk_score", "transit_score", "bike_score"]
     df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
     df[cols] = df[cols].fillna(0)
@@ -364,6 +365,7 @@ def reload_dataframe():
     df["price_per_door"] = df["purchase_price"] / df["units"] # Price per unit/door
     df["rent_per_sqft"] = df["total_rent"] / df["square_ft"] # Monthly rent per square foot
     df["break_even_occupancy"] = df["total_monthly_cost"] / df["total_rent"] # Break-even occupancy rate
+    df["break_even_vacancy"] = 1.0 - df["break_even_occupancy"]
     df["oer"] = df["operating_expenses"] / df["total_rent"] # Operating Expense Ratio (standard industry metric)
     df["egi"] = df["total_rent"] - df["monthly_vacancy_costs"] # Effective Gross Income
     df["debt_yield"] = df["annual_NOI_y2"] / df["loan_amount"] # Debt Yield (lender metric)
@@ -397,7 +399,6 @@ def reload_dataframe():
     df["cash_flow_y1_downside_10pct"] = (df["net_rent_y1"] * 0.9) - df["total_monthly_cost"]
     df["cash_flow_y2_downside_10pct"] = (df["total_rent"] * 0.9) - df["total_monthly_cost"]
     df["deal_score"] = df.apply(get_deal_score, axis=1)
-
     console.print("[green]Property data reloaded successfully![/green]")
 
 load_assumptions()
@@ -553,14 +554,42 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
     console.print(table)
 
 def display_property_metrics(properties_df=None):
-    """Display investment metrics for all properties with abbreviated column names"""
     dataframe = df if properties_df is None else properties_df
-    table = Table(title="Investment Metrics Comparison", show_header=True, header_style="bold magenta")
+    console.print("\n[bold]Column Key:[/bold]")
+    key_items = [
+        ("ADDR", "Address", "Property location identifier", ""),
+        ("P/DR", "Price Per Door", "Purchase price divided by number of units; measures value per unit", "(lower = better)"),
+        ("R/SF", "Rent Per Sqft", "Monthly rent per square foot; indicates rent efficiency", "(higher = better)"),
+        ("BRKE", "Break-Even Occupancy", "Minimum occupancy % needed to cover all expenses", "(lower = better)"),
+        ("BRKV", "Break-Even Vacancy", "Maximum vacant days while still covering all expenses", "(higher = better)"),
+        ("OER", "Operating Expense Ratio", "Operating expenses as % of revenue; measures efficiency", "(lower = better)"),
+        ("EGI", "Effective Gross Income", "Total annual rental income after vacancy losses", "(higher = better)"),
+        ("DYLD", "Debt Yield", "NOI divided by loan amount; measures lender risk", "(higher = better)"),
+        ("DEPR", "Monthly Depreciation", "Tax deduction from property depreciation over 27.5 years", "(higher = better)"),
+        ("TAXS", "Monthly Tax Savings", "Tax savings from depreciation and expense deductions", "(higher = better)"),
+        ("ATCY1", "After-Tax Cash Flow Y1", "Monthly cash flow after tax benefits in Year 1", "(higher = better)"),
+        ("ATCY2", "After-Tax Cash Flow Y2", "Monthly cash flow after tax benefits in Year 2", "(higher = better)"),
+        ("FV10", "Future Value 10yr", "Estimated property value after 10 years of appreciation", "(higher = better)"),
+        ("NP10", "Net Proceeds 10yr", "Cash from sale after closing costs, loan payoff, and taxes", "(higher = better)"),
+        ("EM10", "Equity Multiple 10yr", "Total return as multiple of initial cash invested", "(higher = better)"),
+        ("AR10", "Avg Annual Return 10yr", "Average yearly return percentage over 10 years", "(higher = better)"),
+        ("ROE", "Return on Equity Y2", "Annual return on equity investment in Year 2", "(higher = better)"),
+        ("LEVB", "Leverage Benefit", "Return boost from using debt financing vs all-cash purchase", "(higher = better)"),
+        ("PAYB", "Payback Period", "Years needed to recover initial cash investment", "(lower = better)"),
+        ("IR10", "IRR 10yr", "Internal rate of return accounting for cash flows and sale proceeds", "(higher = better)"),
+        ("CFDN", "Cash Flow Y2 Downside 10%", "Monthly cash flow if rents drop 10%; tests resilience", "(positive = resilient)")
+    ]
 
+    for code, name, description, direction in key_items:
+        direction_text = f" [yellow]{direction}[/yellow]" if direction else ""
+        console.print(f"  [red]{code}[/red] - [bold]{name}[/bold]: [dim cyan]{description}[/dim cyan]{direction_text}")
+
+    table = Table(title="Investment Metrics Comparison", show_header=True, header_style="bold magenta")
     table.add_column("ADDR", style="cyan")
     table.add_column("P/DR", justify="right", style="green")
     table.add_column("R/SF", justify="right", style="green")
     table.add_column("BRKE", justify="right", style="green")
+    table.add_column("BRKV", justify="right", style="green")
     table.add_column("OER", justify="right", style="green")
     table.add_column("EGI", justify="right", style="green")
     table.add_column("DYLD", justify="right", style="green")
@@ -577,18 +606,21 @@ def display_property_metrics(properties_df=None):
     table.add_column("PAYB", justify="right", style="green")
     table.add_column("IR10", justify="right", style="green")
     table.add_column("CFDN", justify="right", style="green")
-
+    
     phase1 = get_combined_phase1_qualifiers()
     not_phase1 = dataframe[~dataframe['address1'].isin(phase1['address1'])]
 
     def add_rows(given_table, given_df):
         for _, row in given_df.iterrows():
             payback_display = f"{row['payback_period_years']:.1f} yr" if row['payback_period_years'] != float('inf') else "Never"
+            break_even_display = format_percentage(row["break_even_occupancy"]) if row["break_even_occupancy"] < 1 else "---"
+            break_v_display = express_percent_as_months_and_days(row["break_even_vacancy"]) if row["break_even_occupancy"] < 1 else "---"
             given_table.add_row(
                 str(row["address1"]),
                 format_currency(row['price_per_door']),
                 format_currency(row['rent_per_sqft']),
-                format_percentage(row['break_even_occupancy']),
+                break_even_display,
+                break_v_display,
                 format_percentage(row['oer']),
                 format_currency(row['egi']),
                 format_percentage(row['debt_yield']),
@@ -612,36 +644,7 @@ def display_property_metrics(properties_df=None):
     table.add_section()
     table.add_row("[white]PHASE 1 DISQUALIFIED[/white]")
     add_rows(given_table=table, given_df=not_phase1)
-
     console.print(table)
-
-    console.print("\n[bold]Column Key:[/bold]")
-    key_items = [
-        ("ADDR", "Address", "Property location identifier", ""),
-        ("P/DR", "Price Per Door", "Purchase price divided by number of units; measures value per unit", "(lower = better)"),
-        ("R/SF", "Rent Per Sqft", "Monthly rent per square foot; indicates rent efficiency", "(higher = better)"),
-        ("BRKE", "Break-Even Occupancy", "Minimum occupancy % needed to cover all expenses", "(lower = better)"),
-        ("OER", "Operating Expense Ratio", "Operating expenses as % of revenue; measures efficiency", "(lower = better)"),
-        ("EGI", "Effective Gross Income", "Total annual rental income after vacancy losses", "(higher = better)"),
-        ("DYLD", "Debt Yield", "NOI divided by loan amount; measures lender risk", "(higher = better)"),
-        ("DEPR", "Monthly Depreciation", "Tax deduction from property depreciation over 27.5 years", "(higher = better)"),
-        ("TAXS", "Monthly Tax Savings", "Tax savings from depreciation and expense deductions", "(higher = better)"),
-        ("ATCY1", "After-Tax Cash Flow Y1", "Monthly cash flow after tax benefits in Year 1", "(higher = better)"),
-        ("ATCY2", "After-Tax Cash Flow Y2", "Monthly cash flow after tax benefits in Year 2", "(higher = better)"),
-        ("FV10", "Future Value 10yr", "Estimated property value after 10 years of appreciation", "(higher = better)"),
-        ("NP10", "Net Proceeds 10yr", "Cash from sale after closing costs, loan payoff, and taxes", "(higher = better)"),
-        ("EM10", "Equity Multiple 10yr", "Total return as multiple of initial cash invested", "(higher = better)"),
-        ("AR10", "Avg Annual Return 10yr", "Average yearly return percentage over 10 years", "(higher = better)"),
-        ("ROE", "Return on Equity Y2", "Annual return on equity investment in Year 2", "(higher = better)"),
-        ("LEVB", "Leverage Benefit", "Return boost from using debt financing vs all-cash purchase", "(higher = better)"),
-        ("PAYB", "Payback Period", "Years needed to recover initial cash investment", "(lower = better)"),
-        ("IR10", "IRR 10yr", "Internal rate of return accounting for cash flows and sale proceeds", "(higher = better)"),
-        ("CFDN", "Cash Flow Y2 Downside 10%", "Monthly cash flow if rents drop 10%; tests resilience", "(positive = resilient)")
-    ]
-
-    for code, name, description, direction in key_items:
-        direction_text = f" [yellow]{direction}[/yellow]" if direction else ""
-        console.print(f"  [red]{code}[/red] - [bold]{name}[/bold]: [dim cyan]{description}[/dim cyan]{direction_text}")
 
 def get_all_phase1_qualifying_properties(active=True):
     """
@@ -798,6 +801,7 @@ def get_reduced_pp_df(reduction_factor):
     dataframe["price_per_door"] = dataframe["purchase_price"] / dataframe["units"]
     dataframe["rent_per_sqft"] = dataframe["total_rent"] / dataframe["square_ft"]
     dataframe["break_even_occupancy"] = dataframe["total_monthly_cost"] / dataframe["total_rent"]
+    dataframe["break_even_vacancy"] = 1.0 - dataframe["break_even_occupancy"]
     dataframe["oer"] = dataframe["operating_expenses"] / dataframe["total_rent"]
     dataframe["egi"] = dataframe["total_rent"] - dataframe["monthly_vacancy_costs"]
     dataframe["debt_yield"] = dataframe["annual_NOI_y2"] / dataframe["loan_amount"]
@@ -1171,8 +1175,6 @@ def analyze_property(property_id):
     criteria_table.add_row("GRM", f"[white]{grm_score}[/white]", "1", f"{row['GRM_y2']:.1f}")
     criteria_table.add_row("Cost per Sqft", f"[white]{sqft_score}[/white]", "2", f"${row['cost_per_sqrft']:.0f}")
     criteria_table.add_row("Property Age", f"[white]{age_score}[/white]", "2", f"{row['home_age']:.0f} years")
-
-    # New criteria rows
     criteria_table.add_row("IRR (10yr)", f"[white]{irr_score}[/white]", "2", f"{row['irr_10yr']:.1%}")
     criteria_table.add_row("After-Tax CF Y2", f"[white]{at_cf_score}[/white]", "2", f"${row['after_tax_cash_flow_y2']:.0f}/month")
     payback_display = f"{row['payback_period_years']:.1f} yrs" if row['payback_period_years'] != float('inf') else "Never"
@@ -1184,7 +1186,6 @@ def analyze_property(property_id):
     criteria_table.add_row("Leverage Benefit", f"[white]{leverage_score}[/white]", "2", f"{row['leverage_benefit']:.1%}")
     criteria_table.add_row("Break-Even Occupancy", f"[white]{breakeven_score}[/white]", "1", f"{row['break_even_occupancy']:.1%}")
     criteria_table.add_row("Net Proceeds (10yr)", f"[white]{proceeds_score}[/white]", "1", f"${row['net_proceeds_10yr']:,.0f}")
-
     criteria_table.add_row("[bold]TOTAL SCORE[/bold]", f"[bold {deal_score_style}]{int(row['deal_score'])}[/bold {deal_score_style}]", "[bold]37[/bold]",
                           f"[bold {deal_score_style}]{'Excellent' if row['deal_score'] >= 20 else 'Good' if row['deal_score'] >= 15 else 'Poor'}[/bold {deal_score_style}]")
     
