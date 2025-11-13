@@ -10,6 +10,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from supabase import Client, create_client
+import numpy_financial as npf
+import math
 
 from add_property import run_add_property
 from helpers import (
@@ -42,7 +44,7 @@ white_style = Style([
 ])
 
 def load_assumptions():
-  global appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting, after_tax_monthly_income
+  global appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting, after_tax_monthly_income, state_tax_code
   console.print("[yellow]Reloading assumptions...[/yellow]")
   assumptions_get_response = supabase.table('assumptions').select('*').eq('id', 1).limit(1).single().execute()
   appreciation_rate = float(assumptions_get_response.data["appreciation_rate"])
@@ -188,10 +190,118 @@ def get_monthly_taxes(row):
         return (annual_tax * 1.05) / 12 # add a small buffer of 5% to be conservative
     return (row["purchase_price"] * property_tax_rate) / 12
 
+def get_state_tax_rate(state_code):
+    """Get state marginal tax rate from state code"""
+    state_rates = {
+        'IA': 0.0482,  # Iowa 4.82%
+        'IL': 0.0495,  # Illinois 4.95%
+    }
+    return state_rates.get(state_code, 0.05)  # Default to 5% if state not found
+
+def calculate_payback_period(row):
+    """Calculate payback period accounting for Year 1 losses"""
+    if row["annual_cash_flow_y1"] < 0:
+        # Year 1 we lose money, need to recover initial investment + Year 1 losses
+        total_to_recover = row["cash_needed"] + abs(row["annual_cash_flow_y1"])
+    else:
+        # Year 1 profitable, deduct from recovery needed
+        total_to_recover = row["cash_needed"] - row["annual_cash_flow_y1"]
+
+    if row["annual_cash_flow_y2"] <= 0:
+        return float('inf')  # Never pays back
+
+    # +1 for Year 1 already passed
+    payback_years = 1 + (total_to_recover / row["annual_cash_flow_y2"])
+    return payback_years
+
+def calculate_net_proceeds(row, years, selling_costs_rate=0.07, capital_gains_rate=0.15):
+    """Calculate net proceeds from sale after N years"""
+    # Future property value
+    future_value = row["purchase_price"] * ((1 + appreciation_rate) ** years)
+
+    # Remaining loan balance
+    loan_amount = row["loan_amount"]
+    monthly_rate = apr_rate / 12
+    num_payments = loan_length_years * 12
+    total_payments_in_period = years * 12
+    remaining_balance = loan_amount * (
+        ((1 + monthly_rate) ** num_payments - (1 + monthly_rate) ** total_payments_in_period) /
+        ((1 + monthly_rate) ** num_payments - 1)
+    )
+
+    # Selling costs (agent commission + closing costs)
+    selling_costs = future_value * selling_costs_rate
+
+    # Capital gains tax (only on appreciation)
+    capital_gain = future_value - row["purchase_price"]
+    capital_gains_tax = capital_gain * capital_gains_rate if capital_gain > 0 else 0
+
+    # Net proceeds = Future value - Loan payoff - Selling costs - Taxes
+    net_proceeds = future_value - remaining_balance - selling_costs - capital_gains_tax
+
+    return net_proceeds
+
+def calculate_irr(row, years):
+    """Calculate Internal Rate of Return over N years"""
+    try:
+        
+
+        # Build cash flow array
+        cash_flows = [-row["cash_needed"]]  # Year 0: initial investment (outflow)
+
+        # Year 1 cash flow
+        cash_flows.append(row["annual_cash_flow_y1"])
+
+        # Years 2 through N: compounded with rent appreciation
+        for year in range(2, years + 1):
+            yearly_cashflow = row["annual_cash_flow_y2"] * ((1 + rent_appreciation_rate) ** (year - 2))
+            cash_flows.append(yearly_cashflow)
+
+        # Final year: add net proceeds from sale
+        net_proceeds = calculate_net_proceeds(row, years)
+        cash_flows[-1] += net_proceeds
+
+        # Calculate IRR
+        irr = npf.irr(cash_flows)
+        return irr if not math.isnan(irr) else 0
+    except Exception:
+        return 0  # Return 0 if calculation fails
+
+def calculate_roe(row):
+    """Calculate Return on Equity for Year 2"""
+    # Equity after Year 1 = down payment + principal paid in Year 1
+    loan_amount = row["loan_amount"]
+    monthly_rate = apr_rate / 12
+    num_payments = loan_length_years * 12
+
+    # Remaining balance after 1 year (12 payments)
+    remaining_balance_y1 = loan_amount * (
+        ((1 + monthly_rate) ** num_payments - (1 + monthly_rate) ** 12) /
+        ((1 + monthly_rate) ** num_payments - 1)
+    )
+
+    # Principal paid in Year 1
+    principal_paid_y1 = loan_amount - remaining_balance_y1
+
+    # Current equity = down payment + principal paid
+    current_equity = row["down_payment"] + principal_paid_y1
+
+    # ROE = Annual cash flow Y2 / Current equity
+    if current_equity > 0:
+        return row["annual_cash_flow_y2"] / current_equity
+    return 0
+
 def reload_dataframe():
     """Reload and recalculate all property data from supabase"""
     global df, rents
     console.print("[yellow]Reloading property data...[/yellow]")
+
+    # Investment calculation constants
+    LAND_VALUE_PCT = 0.20  # 20% of purchase price is land (non-depreciable)
+    FEDERAL_TAX_RATE = 0.22  # 22% federal tax bracket
+    SELLING_COSTS_RATE = 0.07  # 7% selling costs (6% agent commission + 1% closing)
+    CAPITAL_GAINS_RATE = 0.15  # 15% long-term capital gains tax
+    DEPRECIATION_YEARS = 27.5  # Residential property depreciation period
     properties_get_response = supabase.table('properties').select('*').execute()
     df = pd.DataFrame(properties_get_response.data)
     df = df.drop(["zillow_link", "full_address"], axis=1)
@@ -244,12 +354,64 @@ def reload_dataframe():
     df["MGR_PP"] = df["total_rent"] / df["purchase_price"] # Monthly Gross Rent : Purchase Price, goal is for it to be greater than 0.01
     df["OpEx_Rent"] = df["operating_expenses"] / df["total_rent"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
     df["DSCR"] = df["total_rent"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
+
+    # Additional investment metrics
+    df["ltv_ratio"] = df["loan_amount"] / df["purchase_price"] # Loan-to-Value ratio
+    df["price_per_door"] = df["purchase_price"] / df["units"] # Price per unit/door
+    df["rent_per_sqft"] = df["total_rent"] / df["square_ft"] # Monthly rent per square foot
+    df["break_even_occupancy"] = df["total_monthly_cost"] / df["total_rent"] # Break-even occupancy rate
+    df["oer"] = df["operating_expenses"] / df["total_rent"] # Operating Expense Ratio (standard industry metric)
+    df["egi"] = df["total_rent"] - df["monthly_vacancy_costs"] # Effective Gross Income
+    df["debt_yield"] = df["annual_NOI_y2"] / df["loan_amount"] # Debt Yield (lender metric)
+
     df["5y_forecast"] = df.apply(get_expected_gains, axis=1, args=(5,))
     df["10y_forecast"] = df.apply(get_expected_gains, axis=1, args=(10,))
     df["20y_forecast"] = df.apply(get_expected_gains, axis=1, args=(20,))
     df["deal_score"] = df.apply(get_deal_score, axis=1)
     df["mobility_score"] = df.apply(get_mobility_score, axis=1)
     df['costs_to_income'] = (df['monthly_mortgage'] + df['monthly_mip'] + df['monthly_taxes'] + df['monthly_insurance']) / after_tax_monthly_income
+
+    # Tax benefits and after-tax metrics
+    state_rate = get_state_tax_rate(state_tax_code)
+    combined_tax_rate = FEDERAL_TAX_RATE + state_rate
+    df["monthly_depreciation"] = (df["purchase_price"] * (1 - LAND_VALUE_PCT)) / DEPRECIATION_YEARS / 12
+    df["tax_savings_monthly"] = df["monthly_depreciation"] * combined_tax_rate
+    df["after_tax_cash_flow_y1"] = df["monthly_cash_flow_y1"] + df["tax_savings_monthly"]
+    df["after_tax_cash_flow_y2"] = df["monthly_cash_flow_y2"] + df["tax_savings_monthly"]
+
+    # Future property values
+    df["future_value_5yr"] = df["purchase_price"] * ((1 + appreciation_rate) ** 5)
+    df["future_value_10yr"] = df["purchase_price"] * ((1 + appreciation_rate) ** 10)
+    df["future_value_20yr"] = df["purchase_price"] * ((1 + appreciation_rate) ** 20)
+
+    # Net proceeds from sale
+    df["net_proceeds_5yr"] = df.apply(calculate_net_proceeds, axis=1, args=(5, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
+    df["net_proceeds_10yr"] = df.apply(calculate_net_proceeds, axis=1, args=(10, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
+    df["net_proceeds_20yr"] = df.apply(calculate_net_proceeds, axis=1, args=(20, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
+
+    # Equity multiples and return percentages
+    df["equity_multiple_5yr"] = (df["5y_forecast"] + df["cash_needed"]) / df["cash_needed"]
+    df["equity_multiple_10yr"] = (df["10y_forecast"] + df["cash_needed"]) / df["cash_needed"]
+    df["equity_multiple_20yr"] = (df["20y_forecast"] + df["cash_needed"]) / df["cash_needed"]
+    df["avg_annual_return_5yr"] = ((df["5y_forecast"] / df["cash_needed"]) / 5) * 100
+    df["avg_annual_return_10yr"] = ((df["10y_forecast"] / df["cash_needed"]) / 10) * 100
+    df["avg_annual_return_20yr"] = ((df["20y_forecast"] / df["cash_needed"]) / 20) * 100
+
+    # ROE and leverage metrics
+    df["roe_y2"] = df.apply(calculate_roe, axis=1)
+    df["leverage_benefit"] = df["CoC_y2"] - (df["annual_NOI_y2"] / df["purchase_price"])
+
+    # Payback period
+    df["payback_period_years"] = df.apply(calculate_payback_period, axis=1)
+
+    # IRR calculations
+    df["irr_5yr"] = df.apply(calculate_irr, axis=1, args=(5,))
+    df["irr_10yr"] = df.apply(calculate_irr, axis=1, args=(10,))
+    df["irr_20yr"] = df.apply(calculate_irr, axis=1, args=(20,))
+
+    # Risk metrics (downside scenario: 10% rent reduction)
+    df["cash_flow_y2_downside_10pct"] = (df["total_rent"] * 0.9) - df["total_monthly_cost"]
+
     console.print("[green]Property data reloaded successfully![/green]")
 
 load_assumptions()
@@ -306,6 +468,9 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
     table.add_column(
         "10Y", justify="right", style="bold white"
     )  # 10 year investment growth
+    table.add_column(
+        "IRR 10Y", justify="right", style="bold white"
+    )  # 10 year IRR percentage
 
     if show_status:
         table.add_column("Status", justify="right", style="bold white")
@@ -377,9 +542,10 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             f"[{costs_to_income_style}]{format_percentage(row['costs_to_income'])}[/{costs_to_income_style}]",
             f"[{deal_score_style}]{int(row['deal_score'])}/24[/{deal_score_style}]",
             f"[{mobility_score_style}]{int(row['mobility_score'])}[/{mobility_score_style}]",
-            f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]"
+            f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]",
+            format_percentage(row['irr_10yr'])
         ]
-        
+
         if show_status:
             row_args.append(row["status"])
         
@@ -539,6 +705,54 @@ def get_reduced_pp_df(reduction_factor):
     dataframe["10y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(10,))
     dataframe["20y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(20,))
     dataframe["deal_score"] = dataframe.apply(get_deal_score, axis=1)
+
+    # Additional investment metrics (same as reload_dataframe)
+    LAND_VALUE_PCT = 0.20
+    FEDERAL_TAX_RATE = 0.22
+    SELLING_COSTS_RATE = 0.07
+    CAPITAL_GAINS_RATE = 0.15
+    DEPRECIATION_YEARS = 27.5
+
+    dataframe["ltv_ratio"] = dataframe["loan_amount"] / dataframe["purchase_price"]
+    dataframe["price_per_door"] = dataframe["purchase_price"] / dataframe["units"]
+    dataframe["rent_per_sqft"] = dataframe["total_rent"] / dataframe["square_ft"]
+    dataframe["break_even_occupancy"] = dataframe["total_monthly_cost"] / dataframe["total_rent"]
+    dataframe["oer"] = dataframe["operating_expenses"] / dataframe["total_rent"]
+    dataframe["egi"] = dataframe["total_rent"] - dataframe["monthly_vacancy_costs"]
+    dataframe["debt_yield"] = dataframe["annual_NOI_y2"] / dataframe["loan_amount"]
+
+    state_rate = get_state_tax_rate(state_tax_code)
+    combined_tax_rate = FEDERAL_TAX_RATE + state_rate
+    dataframe["monthly_depreciation"] = (dataframe["purchase_price"] * (1 - LAND_VALUE_PCT)) / DEPRECIATION_YEARS / 12
+    dataframe["tax_savings_monthly"] = dataframe["monthly_depreciation"] * combined_tax_rate
+    dataframe["after_tax_cash_flow_y1"] = dataframe["monthly_cash_flow_y1"] + dataframe["tax_savings_monthly"]
+    dataframe["after_tax_cash_flow_y2"] = dataframe["monthly_cash_flow_y2"] + dataframe["tax_savings_monthly"]
+
+    dataframe["future_value_5yr"] = dataframe["purchase_price"] * ((1 + appreciation_rate) ** 5)
+    dataframe["future_value_10yr"] = dataframe["purchase_price"] * ((1 + appreciation_rate) ** 10)
+    dataframe["future_value_20yr"] = dataframe["purchase_price"] * ((1 + appreciation_rate) ** 20)
+
+    dataframe["net_proceeds_5yr"] = dataframe.apply(calculate_net_proceeds, axis=1, args=(5, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
+    dataframe["net_proceeds_10yr"] = dataframe.apply(calculate_net_proceeds, axis=1, args=(10, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
+    dataframe["net_proceeds_20yr"] = dataframe.apply(calculate_net_proceeds, axis=1, args=(20, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
+
+    dataframe["equity_multiple_5yr"] = (dataframe["5y_forecast"] + dataframe["cash_needed"]) / dataframe["cash_needed"]
+    dataframe["equity_multiple_10yr"] = (dataframe["10y_forecast"] + dataframe["cash_needed"]) / dataframe["cash_needed"]
+    dataframe["equity_multiple_20yr"] = (dataframe["20y_forecast"] + dataframe["cash_needed"]) / dataframe["cash_needed"]
+    dataframe["avg_annual_return_5yr"] = ((dataframe["5y_forecast"] / dataframe["cash_needed"]) / 5) * 100
+    dataframe["avg_annual_return_10yr"] = ((dataframe["10y_forecast"] / dataframe["cash_needed"]) / 10) * 100
+    dataframe["avg_annual_return_20yr"] = ((dataframe["20y_forecast"] / dataframe["cash_needed"]) / 20) * 100
+
+    dataframe["roe_y2"] = dataframe.apply(calculate_roe, axis=1)
+    dataframe["leverage_benefit"] = dataframe["CoC_y2"] - (dataframe["annual_NOI_y2"] / dataframe["purchase_price"])
+    dataframe["payback_period_years"] = dataframe.apply(calculate_payback_period, axis=1)
+
+    dataframe["irr_5yr"] = dataframe.apply(calculate_irr, axis=1, args=(5,))
+    dataframe["irr_10yr"] = dataframe.apply(calculate_irr, axis=1, args=(10,))
+    dataframe["irr_20yr"] = dataframe.apply(calculate_irr, axis=1, args=(20,))
+
+    dataframe["cash_flow_y2_downside_10pct"] = (dataframe["total_rent"] * 0.9) - dataframe["total_monthly_cost"]
+
     return dataframe
 
 def display_all_properties_info(properties_df):
@@ -744,7 +958,111 @@ def analyze_property(property_id):
     table.add_row("DSCR (Rent/Mortgage)",
                   f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
                   f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]")
-    
+
+    # Basic Investment Metrics
+    table.add_row("LTV Ratio",
+                  format_percentage(row['ltv_ratio']),
+                  format_percentage(row['ltv_ratio']))
+    table.add_row("Price Per Door",
+                  format_currency(row['price_per_door']),
+                  format_currency(row['price_per_door']))
+    table.add_row("Rent Per Sqft",
+                  format_currency(row['rent_per_sqft']),
+                  format_currency(row['rent_per_sqft']))
+    table.add_row("Break-Even Occupancy",
+                  format_percentage(row['break_even_occupancy']),
+                  format_percentage(row['break_even_occupancy']))
+    table.add_row("Operating Expense Ratio",
+                  format_percentage(row['oer']),
+                  format_percentage(row['oer']))
+    table.add_row("Effective Gross Income",
+                  format_currency(row['egi']),
+                  format_currency(row['egi']))
+    table.add_row("Debt Yield",
+                  format_percentage(row['debt_yield']),
+                  format_percentage(row['debt_yield']))
+
+    # Tax Benefits
+    table.add_row("Monthly Depreciation Deduction",
+                  format_currency(row['monthly_depreciation']),
+                  format_currency(row['monthly_depreciation']))
+    table.add_row("Monthly Tax Savings",
+                  format_currency(row['tax_savings_monthly']),
+                  format_currency(row['tax_savings_monthly']))
+    table.add_row("After-Tax Cash Flow",
+                  format_currency(row['after_tax_cash_flow_y1']),
+                  format_currency(row['after_tax_cash_flow_y2']))
+
+    # Future Property Values
+    table.add_row("Future Value (5yr)",
+                  format_currency(row['future_value_5yr']),
+                  format_currency(row['future_value_5yr']))
+    table.add_row("Future Value (10yr)",
+                  format_currency(row['future_value_10yr']),
+                  format_currency(row['future_value_10yr']))
+    table.add_row("Future Value (20yr)",
+                  format_currency(row['future_value_20yr']),
+                  format_currency(row['future_value_20yr']))
+
+    # Net Proceeds from Sale
+    table.add_row("Net Proceeds (5yr)",
+                  format_currency(row['net_proceeds_5yr']),
+                  format_currency(row['net_proceeds_5yr']))
+    table.add_row("Net Proceeds (10yr)",
+                  format_currency(row['net_proceeds_10yr']),
+                  format_currency(row['net_proceeds_10yr']))
+    table.add_row("Net Proceeds (20yr)",
+                  format_currency(row['net_proceeds_20yr']),
+                  format_currency(row['net_proceeds_20yr']))
+
+    # Equity & Return Metrics
+    table.add_row("Equity Multiple (5yr)",
+                  format_number(row['equity_multiple_5yr']),
+                  format_number(row['equity_multiple_5yr']))
+    table.add_row("Equity Multiple (10yr)",
+                  format_number(row['equity_multiple_10yr']),
+                  format_number(row['equity_multiple_10yr']))
+    table.add_row("Equity Multiple (20yr)",
+                  format_number(row['equity_multiple_20yr']),
+                  format_number(row['equity_multiple_20yr']))
+    table.add_row("Avg Annual Return % (5yr)",
+                  format_percentage(row['avg_annual_return_5yr'] / 100),
+                  format_percentage(row['avg_annual_return_5yr'] / 100))
+    table.add_row("Avg Annual Return % (10yr)",
+                  format_percentage(row['avg_annual_return_10yr'] / 100),
+                  format_percentage(row['avg_annual_return_10yr'] / 100))
+    table.add_row("Avg Annual Return % (20yr)",
+                  format_percentage(row['avg_annual_return_20yr'] / 100),
+                  format_percentage(row['avg_annual_return_20yr'] / 100))
+    table.add_row("Return on Equity (ROE) Y2",
+                  "",
+                  format_percentage(row['roe_y2']))
+    table.add_row("Leverage Benefit",
+                  format_percentage(row['leverage_benefit']),
+                  format_percentage(row['leverage_benefit']))
+
+    payback_display = f"{row['payback_period_years']:.1f} years" if row['payback_period_years'] != float('inf') else "Never"
+    table.add_row("Payback Period",
+                  payback_display,
+                  payback_display)
+
+    # IRR Metrics
+    table.add_row("IRR (5yr)",
+                  format_percentage(row['irr_5yr']),
+                  format_percentage(row['irr_5yr']))
+    table.add_row("IRR (10yr)",
+                  format_percentage(row['irr_10yr']),
+                  format_percentage(row['irr_10yr']))
+    table.add_row("IRR (20yr)",
+                  format_percentage(row['irr_20yr']),
+                  format_percentage(row['irr_20yr']))
+
+    # Risk Metrics
+    downside_style = "green" if row['cash_flow_y2_downside_10pct'] > 0 else "red"
+    table.add_row("Cash Flow Y2 (10% Rent Drop)",
+                  "",
+                  f"[{downside_style}]{format_currency(row['cash_flow_y2_downside_10pct'])}[/{downside_style}]")
+
     console.print(table)
     
     criteria_table = Table(title="Investment Criteria Breakdown", show_header=True, header_style="bold magenta")
