@@ -101,7 +101,8 @@ def get_deal_score(row):
     score += (2 if row["after_tax_cash_flow_y2"] > 600 else 1 if row["after_tax_cash_flow_y2"] > 400 else 0)  # After-tax CF Y2
     score += (2 if row["payback_period_years"] < 7 and row["payback_period_years"] != float('inf') else
               1 if row["payback_period_years"] < 10 and row["payback_period_years"] != float('inf') else 0)  # Payback period
-    score += (1 if row["cash_flow_y2_downside_10pct"] > 0 else 0)  # Downside resilience
+    score += (2 if row["cash_flow_y1_downside_10pct"] > 0 else 1 if row["cash_flow_y1_downside_10pct"] > -200 else 0)  # Y1 downside resilience (heavier weight)
+    score += (1 if row["cash_flow_y2_downside_10pct"] > 0 else 0)  # Y2 downside resilience
     score += (2 if row["equity_multiple_10yr"] >= 3 else 1 if row["equity_multiple_10yr"] >= 2 else 0)  # Equity multiple 10yr
     score += (2 if row["roe_y2"] >= 0.20 else 1 if row["roe_y2"] >= 0.15 else 0)  # ROE Y2
     score += (2 if row["leverage_benefit"] >= 0.05 else 1 if row["leverage_benefit"] >= 0.02 else 0)  # Leverage benefit
@@ -393,6 +394,7 @@ def reload_dataframe():
     df["irr_5yr"] = df.apply(calculate_irr, axis=1, args=(5,))
     df["irr_10yr"] = df.apply(calculate_irr, axis=1, args=(10,))
     df["irr_20yr"] = df.apply(calculate_irr, axis=1, args=(20,))
+    df["cash_flow_y1_downside_10pct"] = (df["net_rent_y1"] * 0.9) - df["total_monthly_cost"]
     df["cash_flow_y2_downside_10pct"] = (df["total_rent"] * 0.9) - df["total_monthly_cost"]
     df["deal_score"] = df.apply(get_deal_score, axis=1)
 
@@ -482,8 +484,8 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
 
         deal_score_style = (
             "green"
-            if row["deal_score"] >= 15
-            else ("yellow" if row["deal_score"] >= 12 else "red")
+            if row["deal_score"] >= 30
+            else ("yellow" if row["deal_score"] >= 20 else "red")
         )
 
         mobility_score_style = (
@@ -532,7 +534,7 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
             f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
             f"[{costs_to_income_style}]{format_percentage(row['costs_to_income'])}[/{costs_to_income_style}]",
-            f"[{deal_score_style}]{int(row['deal_score'])}/35[/{deal_score_style}]",
+            f"[{deal_score_style}]{int(row['deal_score'])}/37[/{deal_score_style}]",
             f"[{mobility_score_style}]{int(row['mobility_score'])}[/{mobility_score_style}]",
             f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]",
             f"[{irr_10yr_style}]{format_percentage(row['irr_10yr'])}[/{irr_10yr_style}]"
@@ -821,6 +823,7 @@ def get_reduced_pp_df(reduction_factor):
     dataframe["irr_5yr"] = dataframe.apply(calculate_irr, axis=1, args=(5,))
     dataframe["irr_10yr"] = dataframe.apply(calculate_irr, axis=1, args=(10,))
     dataframe["irr_20yr"] = dataframe.apply(calculate_irr, axis=1, args=(20,))
+    dataframe["cash_flow_y1_downside_10pct"] = (dataframe["net_rent_y1"] * 0.9) - dataframe["total_monthly_cost"]
     dataframe["cash_flow_y2_downside_10pct"] = (dataframe["total_rent"] * 0.9) - dataframe["total_monthly_cost"]
     return dataframe
 
@@ -1067,10 +1070,11 @@ def analyze_property(property_id):
                   payback_display)
 
     # Risk Metrics
-    downside_style = "green" if row['cash_flow_y2_downside_10pct'] > 0 else "red"
-    table.add_row("Cash Flow Y2 (10% Rent Drop)",
-                  "",
-                  f"[{downside_style}]{format_currency(row['cash_flow_y2_downside_10pct'])}[/{downside_style}]")
+    downside_y1_style = "green" if row['cash_flow_y1_downside_10pct'] > 0 else "red"
+    downside_y2_style = "green" if row['cash_flow_y2_downside_10pct'] > 0 else "red"
+    table.add_row("Cash Flow (10% Rent Drop)",
+                  f"[{downside_y1_style}]{format_currency(row['cash_flow_y1_downside_10pct'])}[/{downside_y1_style}]",
+                  f"[{downside_y2_style}]{format_currency(row['cash_flow_y2_downside_10pct'])}[/{downside_y2_style}]")
 
     console.print(table)
 
@@ -1144,7 +1148,8 @@ def analyze_property(property_id):
     at_cf_score = (2 if row["after_tax_cash_flow_y2"] > 600 else 1 if row["after_tax_cash_flow_y2"] > 400 else 0)
     payback_score = (2 if row["payback_period_years"] < 7 and row["payback_period_years"] != float('inf') else
                      1 if row["payback_period_years"] < 10 and row["payback_period_years"] != float('inf') else 0)
-    downside_score = (1 if row["cash_flow_y2_downside_10pct"] > 0 else 0)
+    downside_y1_score = (2 if row["cash_flow_y1_downside_10pct"] > 0 else 1 if row["cash_flow_y1_downside_10pct"] > -200 else 0)
+    downside_y2_score = (1 if row["cash_flow_y2_downside_10pct"] > 0 else 0)
     equity_mult_score = (2 if row["equity_multiple_10yr"] >= 3 else 1 if row["equity_multiple_10yr"] >= 2 else 0)
     roe_score = (2 if row["roe_y2"] >= 0.20 else 1 if row["roe_y2"] >= 0.15 else 0)
     leverage_score = (2 if row["leverage_benefit"] >= 0.05 else 1 if row["leverage_benefit"] >= 0.02 else 0)
@@ -1170,14 +1175,15 @@ def analyze_property(property_id):
     criteria_table.add_row("After-Tax CF Y2", f"[white]{at_cf_score}[/white]", "2", f"${row['after_tax_cash_flow_y2']:.0f}/month")
     payback_display = f"{row['payback_period_years']:.1f} yrs" if row['payback_period_years'] != float('inf') else "Never"
     criteria_table.add_row("Payback Period", f"[white]{payback_score}[/white]", "2", payback_display)
-    criteria_table.add_row("10% Rent Drop Resilience", f"[white]{downside_score}[/white]", "1", f"${row['cash_flow_y2_downside_10pct']:.0f}/month")
+    criteria_table.add_row("Y1 Rent Drop Resilience (10%)", f"[white]{downside_y1_score}[/white]", "2", f"${row['cash_flow_y1_downside_10pct']:.0f}/month")
+    criteria_table.add_row("Y2 Rent Drop Resilience (10%)", f"[white]{downside_y2_score}[/white]", "1", f"${row['cash_flow_y2_downside_10pct']:.0f}/month")
     criteria_table.add_row("Equity Multiple (10yr)", f"[white]{equity_mult_score}[/white]", "2", f"{row['equity_multiple_10yr']:.2f}x")
     criteria_table.add_row("Return on Equity Y2", f"[white]{roe_score}[/white]", "2", f"{row['roe_y2']:.1%}")
     criteria_table.add_row("Leverage Benefit", f"[white]{leverage_score}[/white]", "2", f"{row['leverage_benefit']:.1%}")
     criteria_table.add_row("Break-Even Occupancy", f"[white]{breakeven_score}[/white]", "1", f"{row['break_even_occupancy']:.1%}")
     criteria_table.add_row("Net Proceeds (10yr)", f"[white]{proceeds_score}[/white]", "1", f"${row['net_proceeds_10yr']:,.0f}")
 
-    criteria_table.add_row("[bold]TOTAL SCORE[/bold]", f"[bold {deal_score_style}]{int(row['deal_score'])}[/bold {deal_score_style}]", "[bold]35[/bold]",
+    criteria_table.add_row("[bold]TOTAL SCORE[/bold]", f"[bold {deal_score_style}]{int(row['deal_score'])}[/bold {deal_score_style}]", "[bold]37[/bold]",
                           f"[bold {deal_score_style}]{'Excellent' if row['deal_score'] >= 20 else 'Good' if row['deal_score'] >= 15 else 'Poor'}[/bold {deal_score_style}]")
     
     console.print(criteria_table)
