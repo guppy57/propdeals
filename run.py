@@ -607,8 +607,10 @@ def display_property_metrics(properties_df=None):
                 format_currency(row['cash_flow_y2_downside_10pct'])
             )
     
+    table.add_row("[white]PHASE 1 QUALIFIERS[/white]")
     add_rows(given_table=table, given_df=phase1)
     table.add_section()
+    table.add_row("[white]PHASE 1 DISQUALIFIED[/white]")
     add_rows(given_table=table, given_df=not_phase1)
 
     console.print(table)
