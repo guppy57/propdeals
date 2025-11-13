@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 import pandas as pd
 import questionary
@@ -66,7 +67,7 @@ def load_loan(loan_id):
   lender_fees = loan.lender_fees
   console.print("[green]FHA loan data reloaded successfully![/green]")
 
-def deal_score_property(row):
+def get_deal_score(row):
     score = 0
     score += (3 if row["monthly_cash_flow_y2"] > 500 else 
               2 if row["monthly_cash_flow_y2"] > 400 else 
@@ -85,9 +86,81 @@ def deal_score_property(row):
     score += (2 if row["home_age"] < 20 else 0)
     return score
 
-def mobility_score(row):
+def get_mobility_score(row):
     score = (row["walk_score"] * 0.6) + (row["transit_score"] * 0.30) + (row["bike_score"] * 0.10)
     return score
+
+def get_rentability_score(row) -> float:
+    score = 0.0
+
+    # determine factors that make something more or less rentable
+    # in-unit laundry, shared basement or not, renovated units, proximity to certain locations
+    # then make a score out of it
+
+    return score
+
+def get_seller_motivation_score(row) -> str:
+    """
+    Calculate seller motivation score based on multiple factors.
+    Returns: 'low', 'medium', or 'high'
+    """
+
+    listed_date = row.get('listed_date')
+    if listed_date and pd.notna(listed_date):
+        if isinstance(listed_date, str):
+            listed_datetime = datetime.fromisoformat(listed_date.replace('Z', '+00:00').split('T')[0])
+        else:
+            listed_datetime = pd.to_datetime(listed_date)
+        days_on_market = (datetime.now() - listed_datetime).days
+    else:
+        days_on_market = 0  # Default to 0 if no listing date available
+    
+    price_reductions: bool = row['has_reduced_price']
+    seller_circumstances: str = row.get('seller_circumstance')
+    property_condition: str = row.get('property_condition') # 'excellent', 'good', 'fair', 'poor'
+    score = 0
+    
+    if days_on_market > 30 and days_on_market < 60:
+        score += 1
+    elif days_on_market < 90:
+        score += 2
+    else: 
+        score += 3
+    
+    if price_reductions:
+        score += 2
+    
+    high_motivation_circumstances = ['estate_sale', 'financial_distress', 'divorce', 'relocation', 'inherited']
+    medium_motivation_circumstances = ['downsizing', 'upgrading', 'portfolio_liquidation']
+    
+    if seller_circumstances in high_motivation_circumstances:
+        score += 3
+    elif seller_circumstances in medium_motivation_circumstances:
+        score += 2
+    
+    if property_condition == 'poor':
+        score += 2
+    elif property_condition == 'fair':
+        score += 1
+    
+    if score <= 3:
+        return 'low'
+    elif score <= 7:
+        return 'medium'
+    else:
+        return 'high'
+
+def get_rennovation_costs(row) -> int:
+    total_cost = 0
+
+    sqr_ft = row["square_ft"]
+    units = row["units"]
+    beds = row["beds"]
+    baths = row["baths"]
+    # get all the unit configurations
+
+
+    return total_cost
 
 def get_expected_gains(row, length_years):
     current_home_value = row["purchase_price"]
@@ -112,10 +185,10 @@ def get_expected_gains(row, length_years):
     equity_gains = loan_amount - remaining_balance
     return cumulative_cashflow + appreciation_gains + equity_gains
 
-def set_monthly_taxes(row):
+def get_monthly_taxes(row):
     annual_tax = row.get('annual_tax_amount')
     if pd.notna(annual_tax) and annual_tax is not None:
-        return annual_tax / 12
+        return (annual_tax * 1.05) / 12 # add a small buffer of 5% to be conservative
     return (row["purchase_price"] * property_tax_rate) / 12
 
 def reload_dataframe():
@@ -136,7 +209,7 @@ def reload_dataframe():
     df["loan_amount"] = df["purchase_price"] - df["down_payment"] + (df["purchase_price"] * mip_upfront_rate)
     df["monthly_mortgage"] = df["loan_amount"].apply(lambda x: calculate_mortgage(x, apr_rate, loan_length_years))
     df["monthly_mip"] = (df["loan_amount"] * mip_annual_rate) / 12
-    df["monthly_taxes"] = df.apply(set_monthly_taxes, axis=1)
+    df["monthly_taxes"] = df.apply(get_monthly_taxes, axis=1)
     df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
     df["cash_needed"] = df["closing_costs"] + df["down_payment"]
 
@@ -176,8 +249,8 @@ def reload_dataframe():
     df["DSCR"] = df["total_rent"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
     df["5y_forecast"] = df.apply(get_expected_gains, axis=1, args=(5,))
     df["10y_forecast"] = df.apply(get_expected_gains, axis=1, args=(10,))
-    df["deal_score"] = df.apply(deal_score_property, axis=1)
-    df["mobility_score"] = df.apply(mobility_score, axis=1)
+    df["deal_score"] = df.apply(get_deal_score, axis=1)
+    df["mobility_score"] = df.apply(get_mobility_score, axis=1)
   
     console.print("[green]Property data reloaded successfully![/green]")
 
@@ -345,6 +418,31 @@ def get_all_phase1_qualifying_properties(active=True):
     
     return filtered_df, reduced_df, creative_df 
 
+def get_all_phase2_qualifying_properties():
+    current_df, reduced_df, creative_df = get_all_phase1_qualifying_properties()
+    p1_df = pd.concat(
+        [current_df, reduced_df, creative_df], ignore_index=True
+    ).drop_duplicates(subset=["address1"], keep="first")
+
+    # run evaluations (will modify dataframe)
+    #   property condition evaluation
+    #     identify deal breakers / red flags
+    #   rentability evaluation
+    #   seller motivation evaluation
+    # pass all data through a criteria
+    #   filter out properties that have red flags
+    #   filter out properties based on any scores
+    # return dataframe
+
+    # p1_df['has_dealbreakers'] = p1_df.apply() -> this implementation is okay, but if the deal breakers are things we can measure
+    # like roof age, we can just make that part of the criteria (for example: roof_age < 10)
+
+    p1_df['property_condition'] = p1_df.apply(inspections.get_property_condition, axis=1)
+    p1_df['seller_motivation_score'] = p1_df.apply(get_seller_motivation_score, axis=1)
+    p1_df['rentability_score'] = # need a way of determining this to judge our properties
+
+    return p1_df 
+
 def display_all_phase1_qualifying_properties():
     current, contingent, creative = get_all_phase1_qualifying_properties()
 
@@ -362,7 +460,10 @@ def display_all_phase1_qualifying_properties():
       title="Phase 1 Criteria Qualifiers - If we rent out additional rooms in our unit",
       show_min_rent_data=True
     )
-  
+
+def display_all_phase2_qualifying_properties():
+    pass
+
 def display_creative_pricing_all_properties():
     creative_df = get_additional_room_rental_df()
     display_all_properties(
@@ -385,7 +486,7 @@ def get_additional_room_rental_df():
     df2["cap_rate_y1"] = df2["annual_NOI_y1"] / df2["purchase_price"]
     df2["CoC_y1"] = df2["annual_cash_flow_y1"] / df2["cash_needed"]
     df2["GRM_y1"] = df2["purchase_price"] / df2["annual_rent_y1"]
-    df2["deal_score"] = df2.apply(deal_score_property, axis=1)
+    df2["deal_score"] = df2.apply(get_deal_score, axis=1)
     return df2
 
 def get_reduced_pp_df(reduction_factor):
@@ -421,7 +522,7 @@ def get_reduced_pp_df(reduction_factor):
     dataframe["DSCR"] = dataframe["total_rent"] / dataframe["monthly_mortgage"]
     dataframe["5y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(5,))
     dataframe["10y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(10,))
-    dataframe["deal_score"] = dataframe.apply(deal_score_property, axis=1)
+    dataframe["deal_score"] = dataframe.apply(get_deal_score, axis=1)
     return dataframe
 
 def display_all_properties_info(properties_df):
@@ -745,6 +846,13 @@ def handle_rent_research_generation(property_id: str):
                 report_data = researcher.get_report_by_id(report_id)
                 if report_data:
                     researcher.display_report(report_data['report_content'])
+            
+            extract_estimates = questionary.confirm(
+                "Would you like to extract rent estimates from this report?"
+            ).ask()
+
+            if extract_estimates:
+                handle_generate_rent_estimates(property_id, report_id=report_id)
         else:
             console.print("[red]❌ Research generation failed.[/red]")
             
@@ -971,48 +1079,62 @@ def display_phase2_data_checklist():
 
     console.print(table)
 
-def handle_generate_rent_estimates(property_id: str):
+def handle_generate_rent_estimates(property_id: str, report_id: str = None):
     """Handle generating rent estimates from an existing research report"""
     researcher = RentResearcher(supabase, console)
-    reports = researcher.get_reports_for_property(property_id)
-    
-    if not reports:
-        console.print("[yellow]No research reports found for this property.[/yellow]")
-        console.print("[dim]Generate a research report first to use this feature.[/dim]")
-        return
-    
-    report_choices = []
-    for report in reports:
-        created_date = report['created_at'][:10]  # Extract date part
-        status = report['status']
-        cost = report['api_cost']
-        choice_label = f"{created_date} - {status} (${cost:.4f}) - ID: {report['id'][:8]}"
-        report_choices.append(choice_label)
-    
-    selected = inquirer.fuzzy(
-        message="Type to search and select a research report:",
-        choices=report_choices,
-        default="",
-        multiselect=False,
-        validate=None,
-        invalid_message="Invalid selection"
-    ).execute()
-    
-    if not selected:
-        return
-    
+
+    selected = None
     selected_id = None
-    for report in reports:
-        if report['id'][:8] in selected:
-            selected_id = report['id']
-            break
+
+    if not report_id:
+        reports = researcher.get_reports_for_property(property_id)
     
-    if not selected_id:
-        console.print("[red]Error: Could not identify selected report.[/red]")
-        return
-    
+        if not reports:
+            console.print("[yellow]No research reports found for this property.[/yellow]")
+            console.print("[dim]Generate a research report first to use this feature.[/dim]")
+            return
+        
+        report_choices = []
+        for report in reports:
+            created_date = report['created_at'][:10]  # Extract date part
+            status = report['status']
+            cost = report['api_cost']
+            choice_label = f"{created_date} - {status} (${cost:.4f}) - ID: {report['id'][:8]}"
+            report_choices.append(choice_label)
+        
+        selected = inquirer.fuzzy(
+            message="Type to search and select a research report:",
+            choices=report_choices,
+            default="",
+            multiselect=False,
+            validate=None,
+            invalid_message="Invalid selection"
+        ).execute()
+        
+        if not selected:
+            return
+
+        for report in reports:
+            if report['id'][:8] in selected:
+                selected_id = report['id']
+                break
+        
+        if not selected_id:
+            console.print("[red]Error: Could not identify selected report.[/red]")
+            return
+    else:
+        # When report_id is provided, create a description for display
+        selected_id = report_id
+        report_data = researcher.get_report_by_id(report_id)
+        if report_data:
+            created_date = report_data['created_at'][:10]
+            selected = f"{created_date} - Report ID: {report_id[:8]}"
+        else:
+            selected = f"Report ID: {report_id[:8]}"
+
     try:
-        result = researcher.generate_rent_estimates_from_report(selected_id)
+        id_to_use = report_id if report_id else selected_id
+        result = researcher.generate_rent_estimates_from_report(id_to_use)
         
         if result["success"]:
             estimates = result["estimates"]

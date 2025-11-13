@@ -111,6 +111,13 @@ class InspectionsClient():
             raise Exception("Failed to upsert inspection record - no data returned")
 
         return response.data[0]
+    
+    def get_property_condition(self, address1: str) -> str:
+        condition = "" # excellent, good, fair, poor
+
+        # ideally, we want our property inspection data to give us this score, instead of our gut feeling about it
+
+        return condition
 
     def is_property_inspection_done(self, address1: str) -> bool:
         """
