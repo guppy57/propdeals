@@ -164,10 +164,11 @@ def get_expected_gains(row, length_years):
     y1_cashflow = row["annual_cash_flow_y1"]
     y2_cashflow = row["annual_cash_flow_y2"]
 
-    y1_cashflow_grown = y1_cashflow * (1 + rent_appreciation_rate)
-    cumulative_cashflow = y1_cashflow_grown
+    # Year 1 is the base year (no appreciation applied)
+    cumulative_cashflow = y1_cashflow
     for year in range(2, length_years + 1):
-        yearly_cashflow = y2_cashflow * ((1 + rent_appreciation_rate) ** (year - 1))
+        # Year 2 starts with base y2_cashflow, then compounds
+        yearly_cashflow = y2_cashflow * ((1 + rent_appreciation_rate) ** (year - 2))
         cumulative_cashflow += yearly_cashflow
 
     appreciation_gains = current_home_value * ((1 + appreciation_rate) ** length_years - 1)
@@ -245,6 +246,7 @@ def reload_dataframe():
     df["DSCR"] = df["total_rent"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
     df["5y_forecast"] = df.apply(get_expected_gains, axis=1, args=(5,))
     df["10y_forecast"] = df.apply(get_expected_gains, axis=1, args=(10,))
+    df["20y_forecast"] = df.apply(get_expected_gains, axis=1, args=(20,))
     df["deal_score"] = df.apply(get_deal_score, axis=1)
     df["mobility_score"] = df.apply(get_mobility_score, axis=1)
     df['costs_to_income'] = (df['monthly_mortgage'] + df['monthly_mip'] + df['monthly_taxes'] + df['monthly_insurance']) / after_tax_monthly_income
@@ -535,6 +537,7 @@ def get_reduced_pp_df(reduction_factor):
     dataframe["DSCR"] = dataframe["total_rent"] / dataframe["monthly_mortgage"]
     dataframe["5y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(5,))
     dataframe["10y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(10,))
+    dataframe["20y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(20,))
     dataframe["deal_score"] = dataframe.apply(get_deal_score, axis=1)
     return dataframe
 
@@ -724,6 +727,9 @@ def analyze_property(property_id):
     table.add_row("10-Year Investment Gain",
                   format_currency(row['10y_forecast']),
                   format_currency(row['10y_forecast']))
+    table.add_row("20-Year Investment Gain",
+                  format_currency(row['20y_forecast']),
+                  format_currency(row['20y_forecast']))
     
     mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
     opex_rent_style = "green" if 0.45 <= row['OpEx_Rent'] <= 0.55 else ("yellow" if 0.35 <= row['OpEx_Rent'] <= 0.65 else "red")
