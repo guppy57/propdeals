@@ -425,6 +425,8 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
     mobility_25th_percentile = df["mobility_score"].quantile(0.25)
     forecast_10y_75th_percentile = df["10y_forecast"].quantile(0.75)
     forecast_10y_25th_percentile = df["10y_forecast"].quantile(0.25)
+    irr_10yr_75th_percentile = df["irr_10yr"].quantile(0.75)
+    irr_10yr_25th_percentile = df["irr_10yr"].quantile(0.25)
     price_20th = dataframe["purchase_price"].quantile(0.20)
     price_40th = dataframe["purchase_price"].quantile(0.40)
     price_60th = dataframe["purchase_price"].quantile(0.60)
@@ -512,6 +514,12 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             else ("yellow" if row["10y_forecast"] >= forecast_10y_25th_percentile else "red")
         )
 
+        irr_10yr_style = (
+            "green"
+            if row["irr_10yr"] >= irr_10yr_75th_percentile
+            else ("yellow" if row["irr_10yr"] >= irr_10yr_25th_percentile else "red")
+        )
+
         price_style = get_quintile_color(
             row["purchase_price"], price_20th, price_40th, price_60th, price_80th
         )
@@ -543,7 +551,7 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             f"[{deal_score_style}]{int(row['deal_score'])}/24[/{deal_score_style}]",
             f"[{mobility_score_style}]{int(row['mobility_score'])}[/{mobility_score_style}]",
             f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]",
-            format_percentage(row['irr_10yr'])
+            f"[{irr_10yr_style}]{format_percentage(row['irr_10yr'])}[/{irr_10yr_style}]"
         ]
 
         if show_status:
