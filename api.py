@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 from typing import Optional
 from run import reload_dataframe, get_all_phase1_qualifying_properties
-from inspections import InspectionCreate, InspectionsClient
+from models.inspections import InspectionCreate, UnitInspectionCreate
+from inspections import InspectionsClient
 from helpers import convert_numpy_types
 
 load_dotenv()
@@ -343,6 +344,45 @@ async def upsert_inspection(inspection: InspectionCreate):
         raise HTTPException(
             status_code=500,
             detail=f"Error saving inspection: {str(e)}"
+        )
+
+@app.get("/inspections/units/{rent_estimate_id}")
+async def get_unit_inspection(rent_estimate_id: int):
+    """Get inspection data for a specific unit at a property by address1"""
+    try:
+        inspection_data = inspections_client.get_unit_inspection(rent_estimate_id)
+
+        if not inspection_data:
+            raise HTTPException(
+                status_code=404, detail=f"No inspection found for rent_estimate_id: {rent_estimate_id}"
+            )
+
+        return inspection_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching unit inspection data: {str(e)}"
+        )
+
+@app.post("/inspections/units")
+async def upsert_unit_inspection(unit_inspection: UnitInspectionCreate):
+    """Create or update unit inspection record for a property unit (upsert)"""
+    try:
+        inspection_data = unit_inspection.model_dump(exclude_none=True)
+        saved_inspection = inspections_client.upsert_unit_inspection(inspection_data)
+
+        return {
+            "message": "Unit Inspection saved successfully",
+            "inspection": saved_inspection,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error saving unit inspection: {str(e)}"
         )
 
 

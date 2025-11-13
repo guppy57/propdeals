@@ -447,11 +447,11 @@ def get_all_phase2_qualifying_properties():
     p1_df['est_diy_repair_costs'] = p1_df.apply(inspections.get_est_diy_repair_costs, axis=1)
     p1_df['est_pro_repair_costs'] = p1_df.apply(inspections.get_est_pro_repair_costs, axis=1)
     
-    # need a way of determining this to judge our properties
-
     # STEP 2 - CREATE CRITERIA AND QUERY
     criteria = "has_inspection_dealbreakers == False & costs_to_income <= 0.45" # todo add more here
     filtered_df = p1_df.query(criteria)
+
+    # STEP 3 - CREATE A DF-RELATIVE RANKING AMONGST QUALIFIERS
 
     return filtered_df
 
