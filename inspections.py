@@ -112,12 +112,37 @@ class InspectionsClient():
 
         return response.data[0]
     
-    def get_property_condition(self, address1: str) -> str:
+    def get_property_condition(self, row) -> str:
         condition = "" # excellent, good, fair, poor
 
         # ideally, we want our property inspection data to give us this score, instead of our gut feeling about it
 
         return condition
+    
+    def has_dealbreakers(self, row) -> bool:
+        has_dealbreakers = False
+
+        return has_dealbreakers
+    
+    def get_total_diy_repair_costs(self, row) -> int:
+        total_cost = 0
+
+        sqr_ft = row["square_ft"]
+        units = row["units"]
+        beds = row["beds"]
+        baths = row["baths"]
+        # get all the unit configurations
+
+        return total_cost
+    
+    def get_total_pro_repair_costs(self, row) -> int:
+        return 0
+    
+    def get_est_diy_repair_costs(self, row) -> int:
+        return 0
+    
+    def get_est_pro_repair_costs(self, row) -> int:
+        return 0
 
     def is_property_inspection_done(self, address1: str) -> bool:
         """

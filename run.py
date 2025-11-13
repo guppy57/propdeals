@@ -17,6 +17,7 @@ from helpers import (
   format_currency,
   format_number,
   format_percentage,
+  calculate_monthly_take_home,
 )
 from loans import LoansProvider
 from rent_research import RentResearcher
@@ -27,6 +28,7 @@ load_dotenv()
 console = Console() 
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 inspections = InspectionsClient(supabase_client=supabase)
+LAST_USED_LOAN = 1
 
 white_style = Style([
     ('qmark', 'fg:white bold'),           # question mark
@@ -40,7 +42,7 @@ white_style = Style([
 ])
 
 def load_assumptions():
-  global appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting
+  global appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting, after_tax_monthly_income
   console.print("[yellow]Reloading assumptions...[/yellow]")
   assumptions_get_response = supabase.table('assumptions').select('*').eq('id', 1).limit(1).single().execute()
   appreciation_rate = float(assumptions_get_response.data["appreciation_rate"])
@@ -51,6 +53,9 @@ def load_assumptions():
   repair_savings_rate = float(assumptions_get_response.data["repair_savings_rate"])
   closing_costs_rate = float(assumptions_get_response.data["closing_costs_rate"])
   live_in_unit_setting = assumptions_get_response.data["live_in_unit_setting"]
+  gross_annual_income = assumptions_get_response.data["gross_annual_income"]
+  state_tax_code = assumptions_get_response.data["state_tax_code"]
+  after_tax_monthly_income = calculate_monthly_take_home(gross_annual_income, state_tax_code)
   console.print(f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]")
 
 def load_loan(loan_id):
@@ -150,17 +155,8 @@ def get_seller_motivation_score(row) -> str:
     else:
         return 'high'
 
-def get_rennovation_costs(row) -> int:
-    total_cost = 0
-
-    sqr_ft = row["square_ft"]
-    units = row["units"]
-    beds = row["beds"]
-    baths = row["baths"]
-    # get all the unit configurations
-
-
-    return total_cost
+def get_rentability_score(row) -> int:
+    return 0
 
 def get_expected_gains(row, length_years):
     current_home_value = row["purchase_price"]
@@ -251,11 +247,11 @@ def reload_dataframe():
     df["10y_forecast"] = df.apply(get_expected_gains, axis=1, args=(10,))
     df["deal_score"] = df.apply(get_deal_score, axis=1)
     df["mobility_score"] = df.apply(get_mobility_score, axis=1)
-  
+    df['costs_to_income'] = (df['monthly_mortgage'] + df['monthly_mip'] + df['monthly_taxes'] + df['monthly_insurance']) / after_tax_monthly_income
     console.print("[green]Property data reloaded successfully![/green]")
 
 load_assumptions()
-load_loan(1)
+load_loan(LAST_USED_LOAN)
 reload_dataframe()
 
 def display_all_properties(properties_df, title, show_status=False, show_min_rent_data=False):
@@ -273,6 +269,8 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
     cash_40th = dataframe["cash_needed"].quantile(0.40)
     cash_60th = dataframe["cash_needed"].quantile(0.60)
     cash_80th = dataframe["cash_needed"].quantile(0.80)
+    costs_to_income_75th_percentile = dataframe["costs_to_income"].quantile(0.75)
+    costs_to_income_25th_percentile = dataframe["costs_to_income"].quantile(0.25)
 
     def get_quintile_color(value, p20, p40, p60, p80):
         """Return color based on quintile position (lower values = better = greener)"""
@@ -300,6 +298,7 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
     table.add_column("1% Rule", justify="right", style="cyan")
     table.add_column("50% Rule", justify="right", style="magenta")
     table.add_column("DSCR", justify="right", style="blue")
+    table.add_column("Cost/Inc", justify="right", style="bold white")
     table.add_column("DS", justify="right", style="bold white")  # deal score
     table.add_column("MS", justify="right", style="bold white")  # mobility score
     table.add_column(
@@ -353,6 +352,12 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             row["cash_needed"], cash_20th, cash_40th, cash_60th, cash_80th
         )
 
+        costs_to_income_style = (
+            "green"
+            if row["costs_to_income"] <= costs_to_income_25th_percentile
+            else ("yellow" if row["costs_to_income"] <= costs_to_income_75th_percentile else "red")
+        )
+
         row_args = [
             str(row["address1"]),
             f"[{price_style}]{format_currency(row['purchase_price'])}[/{price_style}]",
@@ -367,6 +372,7 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
             f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
             f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
+            f"[{costs_to_income_style}]{format_percentage(row['costs_to_income'])}[/{costs_to_income_style}]",
             f"[{deal_score_style}]{int(row['deal_score'])}/24[/{deal_score_style}]",
             f"[{mobility_score_style}]{int(row['mobility_score'])}[/{mobility_score_style}]",
             f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]"
@@ -419,29 +425,35 @@ def get_all_phase1_qualifying_properties(active=True):
     return filtered_df, reduced_df, creative_df 
 
 def get_all_phase2_qualifying_properties():
+    """
+    This method filters phase 1 qualifiers based property condition, rentability, and affordability 
+    Current criteria:
+      - property must qualify for phase 1
+      - property must not have any 'deal breakers'
+      - fixed monthly costs to after tax income ratio must be greater than 0.3
+    """
     current_df, reduced_df, creative_df = get_all_phase1_qualifying_properties()
     p1_df = pd.concat(
         [current_df, reduced_df, creative_df], ignore_index=True
     ).drop_duplicates(subset=["address1"], keep="first")
 
-    # run evaluations (will modify dataframe)
-    #   property condition evaluation
-    #     identify deal breakers / red flags
-    #   rentability evaluation
-    #   seller motivation evaluation
-    # pass all data through a criteria
-    #   filter out properties that have red flags
-    #   filter out properties based on any scores
-    # return dataframe
-
-    # p1_df['has_dealbreakers'] = p1_df.apply() -> this implementation is okay, but if the deal breakers are things we can measure
-    # like roof age, we can just make that part of the criteria (for example: roof_age < 10)
-
+    # STEP 1 - RUN ALL NEW EVALUATIONS AND MODIFY DATAFRAME
     p1_df['property_condition'] = p1_df.apply(inspections.get_property_condition, axis=1)
+    p1_df['has_inspection_dealbreakers'] = p1_df.apply(inspections.has_dealbreakers, axis=1)
     p1_df['seller_motivation_score'] = p1_df.apply(get_seller_motivation_score, axis=1)
-    p1_df['rentability_score'] = # need a way of determining this to judge our properties
+    p1_df['rentability_score'] = p1_df.apply(get_rentability_score, axis=1)
+    p1_df['total_diy_repair_costs'] = p1_df.apply(inspections.get_total_diy_repair_costs, axis=1)
+    p1_df['total_pro_repair_costs'] = p1_df.apply(inspections.get_total_pro_repair_costs, axis=1)
+    p1_df['est_diy_repair_costs'] = p1_df.apply(inspections.get_est_diy_repair_costs, axis=1)
+    p1_df['est_pro_repair_costs'] = p1_df.apply(inspections.get_est_pro_repair_costs, axis=1)
+    
+    # need a way of determining this to judge our properties
 
-    return p1_df 
+    # STEP 2 - CREATE CRITERIA AND QUERY
+    criteria = "has_inspection_dealbreakers == False & costs_to_income <= 0.45" # todo add more here
+    filtered_df = p1_df.query(criteria)
+
+    return filtered_df
 
 def display_all_phase1_qualifying_properties():
     current, contingent, creative = get_all_phase1_qualifying_properties()
@@ -462,7 +474,8 @@ def display_all_phase1_qualifying_properties():
     )
 
 def display_all_phase2_qualifying_properties():
-    pass
+    df = get_all_phase2_qualifying_properties()
+    display_all_properties(properties_df=df, title="Phase 2 Qualifiers")
 
 def display_creative_pricing_all_properties():
     creative_df = get_additional_room_rental_df()
@@ -681,7 +694,10 @@ def analyze_property(property_id):
                       f"Monthly Operating Expenses: {format_currency(row['operating_expenses'])} ({format_currency(row['operating_expenses'] * 12)} annually)\n\n"
                       f"[bold green]Net Operating Income (NOI):[/bold green]\n"
                       f"NOI Year 1 (Live-in): {format_currency(row['net_rent_y1'] - row['operating_expenses'])} ({format_currency(row['annual_NOI_y1'])} annually)\n"
-                      f"NOI Year 2 (All Rent): {format_currency(row['monthly_NOI'])} ({format_currency(row['annual_NOI_y2'])} annually)", 
+                      f"NOI Year 2 (All Rent): {format_currency(row['monthly_NOI'])} ({format_currency(row['annual_NOI_y2'])} annually)\n\n"
+                      f"[bold cyan]Personal Income & Housing Costs:[/bold cyan]\n"
+                      f"After-Tax Monthly Income: {format_currency(after_tax_monthly_income)}\n"
+                      f"Housing Cost to Income Ratio: {format_percentage(row['costs_to_income'])}",
                       title="Income Breakdown"))
     
     table.add_row("Monthly Cash Flow", 
@@ -1221,6 +1237,7 @@ def handle_changing_loan():
     if f"{loan.id} - {loan.name}" == selected_loan:
       selected_loan_id = loan.id
 
+  LAST_USED_LOAN = selected_loan_id
   load_loan(selected_loan_id)
   reload_dataframe()
 
@@ -1275,7 +1292,7 @@ def run_all_properties_options():
         elif option == "Phase 2 - Data Checklist":
             display_phase2_data_checklist()
         elif option == "Phase 2 - Qualifiers":
-            pass
+            display_all_phase2_qualifying_properties()
 
 def run_loans_options():
   using_loans = True
@@ -1346,4 +1363,6 @@ if __name__ == "__main__":
     elif option == "Loans":
       run_loans_options()
     elif option == "Refresh data":
+      load_assumptions()
+      load_loan(LAST_USED_LOAN)
       reload_dataframe()
