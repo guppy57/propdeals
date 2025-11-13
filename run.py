@@ -305,16 +305,8 @@ def calculate_roe(row):
     return 0
 
 def apply_calculations_on_dataframe(df):
-
-def reload_dataframe():
-    global df, rents
-    console.print("[yellow]Reloading property data...[/yellow]")
     state_rate = get_state_tax_rate(state_tax_code)
     combined_tax_rate = FEDERAL_TAX_RATE + state_rate
-    properties_get_response = supabase.table('properties').select('*').execute()
-    df = pd.DataFrame(properties_get_response.data)
-    df = df.drop(["zillow_link", "full_address"], axis=1)
-
     cols = ["walk_score", "transit_score", "bike_score"]
     df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
     df[cols] = df[cols].fillna(0)
@@ -328,17 +320,6 @@ def reload_dataframe():
     df["monthly_taxes"] = df.apply(get_monthly_taxes, axis=1)
     df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
     df["cash_needed"] = df["closing_costs"] + df["down_payment"]
-    rents_get_response = supabase.table('rent_estimates').select('*').execute()
-    rents = pd.DataFrame(rents_get_response.data)
-    rents = rents.drop(['id'], axis=1)
-    rent_summary = rents.groupby("address1")["rent_estimate"].agg(["sum", "min"]).reset_index()
-    rent_summary.columns = ["address1", "total_rent", "min_rent"]
-    min_rent_indices = rents.groupby("address1")["rent_estimate"].idxmin()
-    min_rent_units = rents.loc[min_rent_indices, ["address1", "unit_num", "beds"]].reset_index(drop=True)
-    min_rent_units.columns = ["address1", "min_rent_unit", "min_rent_unit_beds"]
-    rent_summary = rent_summary.merge(min_rent_units, on="address1", how="left")
-    rent_summary["net_rent_y1"] = rent_summary["total_rent"] - rent_summary["min_rent"]
-    df = df.merge(rent_summary, on="address1", how="left")
     df["annual_rent_y1"] = df["net_rent_y1"] * 12
     df["annual_rent_y2"] = df["total_rent"] * 12
     df["monthly_vacancy_costs"] = df["total_rent"] * vacancy_rate
@@ -399,6 +380,26 @@ def reload_dataframe():
     df["cash_flow_y1_downside_10pct"] = (df["net_rent_y1"] * 0.9) - df["total_monthly_cost"]
     df["cash_flow_y2_downside_10pct"] = (df["total_rent"] * 0.9) - df["total_monthly_cost"]
     df["deal_score"] = df.apply(get_deal_score, axis=1)
+    return df
+
+def reload_dataframe():
+    global df, rents
+    console.print("[yellow]Reloading property data...[/yellow]")
+    properties_get_response = supabase.table('properties').select('*').execute()
+    df = pd.DataFrame(properties_get_response.data)
+    df = df.drop(["zillow_link", "full_address"], axis=1)
+    rents_get_response = supabase.table('rent_estimates').select('*').execute()
+    rents = pd.DataFrame(rents_get_response.data)
+    rents = rents.drop(['id'], axis=1)
+    rent_summary = rents.groupby("address1")["rent_estimate"].agg(["sum", "min"]).reset_index()
+    rent_summary.columns = ["address1", "total_rent", "min_rent"]
+    min_rent_indices = rents.groupby("address1")["rent_estimate"].idxmin()
+    min_rent_units = rents.loc[min_rent_indices, ["address1", "unit_num", "beds"]].reset_index(drop=True)
+    min_rent_units.columns = ["address1", "min_rent_unit", "min_rent_unit_beds"]
+    rent_summary = rent_summary.merge(min_rent_units, on="address1", how="left")
+    rent_summary["net_rent_y1"] = rent_summary["total_rent"] - rent_summary["min_rent"]
+    df = df.merge(rent_summary, on="address1", how="left")
+    df = apply_calculations_on_dataframe(df=df)
     console.print("[green]Property data reloaded successfully![/green]")
 
 load_assumptions()
@@ -553,6 +554,97 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
 
     console.print(table)
 
+def calculate_quintile_colors_for_metrics(dataframe):
+    """
+    Calculate quintile-based colors for all metrics across ALL properties.
+    Uses 3-color scheme: Green (top 40%), Yellow (middle 20%), Red (bottom 40%).
+
+    Returns a dictionary mapping (address, metric_name) -> color_string
+    """
+    import numpy as np
+
+    # Define which metrics should be colored with "lower is better" logic
+    lower_is_better = {
+        'price_per_door',
+        'break_even_occupancy',
+        'oer',
+        'payback_period_years'
+    }
+
+    # Metric column name to actual dataframe column mapping
+    metric_columns = {
+        'price_per_door': 'price_per_door',
+        'rent_per_sqft': 'rent_per_sqft',
+        'break_even_occupancy': 'break_even_occupancy',
+        'break_even_vacancy': 'break_even_vacancy',
+        'oer': 'oer',
+        'egi': 'egi',
+        'debt_yield': 'debt_yield',
+        'monthly_depreciation': 'monthly_depreciation',
+        'tax_savings_monthly': 'tax_savings_monthly',
+        'after_tax_cash_flow_y1': 'after_tax_cash_flow_y1',
+        'after_tax_cash_flow_y2': 'after_tax_cash_flow_y2',
+        'future_value_10yr': 'future_value_10yr',
+        'net_proceeds_10yr': 'net_proceeds_10yr',
+        'equity_multiple_10yr': 'equity_multiple_10yr',
+        'avg_annual_return_10yr': 'avg_annual_return_10yr',
+        'roe_y2': 'roe_y2',
+        'leverage_benefit': 'leverage_benefit',
+        'payback_period_years': 'payback_period_years',
+        'irr_10yr': 'irr_10yr',
+        'cash_flow_y2_downside_10pct': 'cash_flow_y2_downside_10pct'
+    }
+
+    color_map = {}
+
+    for metric_name, col_name in metric_columns.items():
+        if col_name not in dataframe.columns:
+            continue
+
+        # Filter out special values (inf, -inf, NaN)
+        valid_mask = ~(dataframe[col_name].isna() |
+                      np.isinf(dataframe[col_name]))
+        valid_data = dataframe[valid_mask][col_name]
+
+        if len(valid_data) == 0:
+            # No valid data, skip this metric
+            continue
+
+        # Calculate 40th and 60th percentiles
+        p40 = np.percentile(valid_data, 40)
+        p60 = np.percentile(valid_data, 60)
+
+        # Assign colors to each property for this metric
+        for idx, row in dataframe.iterrows():
+            address = row['address1']
+            value = row[col_name]
+
+            # Handle special values with gray color
+            if pd.isna(value) or np.isinf(value):
+                color = 'dim white'
+            else:
+                # Determine color based on quintile and direction
+                if metric_name in lower_is_better:
+                    # Lower is better: green for low values, red for high
+                    if value <= p40:
+                        color = 'green'
+                    elif value <= p60:
+                        color = 'yellow'
+                    else:
+                        color = 'red'
+                else:
+                    # Higher is better: green for high values, red for low
+                    if value >= p60:
+                        color = 'green'
+                    elif value >= p40:
+                        color = 'yellow'
+                    else:
+                        color = 'red'
+
+            color_map[(address, metric_name)] = color
+
+    return color_map
+
 def display_property_metrics(properties_df=None):
     dataframe = df if properties_df is None else properties_df
     console.print("\n[bold]Column Key:[/bold]")
@@ -586,57 +678,70 @@ def display_property_metrics(properties_df=None):
 
     table = Table(title="Investment Metrics Comparison", show_header=True, header_style="bold magenta")
     table.add_column("ADDR", style="cyan")
-    table.add_column("P/DR", justify="right", style="green")
-    table.add_column("R/SF", justify="right", style="green")
-    table.add_column("BRKE", justify="right", style="green")
-    table.add_column("BRKV", justify="right", style="green")
-    table.add_column("OER", justify="right", style="green")
-    table.add_column("EGI", justify="right", style="green")
-    table.add_column("DYLD", justify="right", style="green")
-    table.add_column("DEPR", justify="right", style="green")
-    table.add_column("TAXS", justify="right", style="green")
-    table.add_column("ATCY1", justify="right", style="green")
-    table.add_column("ATCY2", justify="right", style="green")
-    table.add_column("FV10", justify="right", style="green")
-    table.add_column("NP10", justify="right", style="green")
-    table.add_column("EM10", justify="right", style="green")
-    table.add_column("AR10", justify="right", style="green")
-    table.add_column("ROE", justify="right", style="green")
-    table.add_column("LEVB", justify="right", style="green")
-    table.add_column("PAYB", justify="right", style="green")
-    table.add_column("IR10", justify="right", style="green")
-    table.add_column("CFDN", justify="right", style="green")
-    
+    table.add_column("P/DR", justify="right")
+    table.add_column("R/SF", justify="right")
+    table.add_column("BRKE", justify="right")
+    table.add_column("BRKV", justify="right")
+    table.add_column("OER", justify="right")
+    table.add_column("EGI", justify="right")
+    table.add_column("DYLD", justify="right")
+    table.add_column("DEPR", justify="right")
+    table.add_column("TAXS", justify="right")
+    table.add_column("ATCY1", justify="right")
+    table.add_column("ATCY2", justify="right")
+    table.add_column("FV10", justify="right")
+    table.add_column("NP10", justify="right")
+    table.add_column("EM10", justify="right")
+    table.add_column("AR10", justify="right")
+    table.add_column("ROE", justify="right")
+    table.add_column("LEVB", justify="right")
+    table.add_column("PAYB", justify="right")
+    table.add_column("IR10", justify="right")
+    table.add_column("CFDN", justify="right")
+
+    # Calculate quintile colors for ALL properties
+    color_map = calculate_quintile_colors_for_metrics(dataframe)
+
     phase1 = get_combined_phase1_qualifiers()
     not_phase1 = dataframe[~dataframe['address1'].isin(phase1['address1'])]
 
     def add_rows(given_table, given_df):
         for _, row in given_df.iterrows():
+            address = row["address1"]
+
+            # Helper function to apply color to a value
+            def colorize(value, metric_name):
+                color = color_map.get((address, metric_name), 'white')
+                return f"[{color}]{value}[/{color}]"
+
+            # Format values (same as before)
             payback_display = f"{row['payback_period_years']:.1f} yr" if row['payback_period_years'] != float('inf') else "Never"
             break_even_display = format_percentage(row["break_even_occupancy"]) if row["break_even_occupancy"] < 1 else "---"
             break_v_display = express_percent_as_months_and_days(row["break_even_vacancy"]) if row["break_even_occupancy"] < 1 else "---"
+
+            # Add row with colored values
             given_table.add_row(
-                str(row["address1"]),
-                format_currency(row['price_per_door']),
-                format_currency(row['rent_per_sqft']),
-                break_even_display,
-                break_v_display,
-                format_percentage(row['oer']),
-                format_currency(row['egi']),
-                format_percentage(row['debt_yield']),
-                format_currency(row['monthly_depreciation']),
-                format_currency(row['tax_savings_monthly']),
-                format_currency(row['after_tax_cash_flow_y1']),
-                format_currency(row['after_tax_cash_flow_y2']),
-                format_currency(row['future_value_10yr']),
-                format_currency(row['net_proceeds_10yr']),
-                format_number(row['equity_multiple_10yr']),
-                format_percentage(row['avg_annual_return_10yr'] / 100),
-                format_percentage(row['roe_y2']),
-                format_percentage(row['leverage_benefit']),
-                payback_display,
-                format_percentage(row['irr_10yr']),
-                format_currency(row['cash_flow_y2_downside_10pct'])
+                str(address),
+                colorize(format_currency(row['price_per_door']), 'price_per_door'),
+                colorize(format_currency(row['rent_per_sqft']), 'rent_per_sqft'),
+                colorize(break_even_display, 'break_even_occupancy'),
+                colorize(break_v_display, 'break_even_vacancy'),
+                colorize(format_percentage(row['oer']), 'oer'),
+                colorize(format_currency(row['egi']), 'egi'),
+                colorize(format_percentage(row['debt_yield']), 'debt_yield'),
+                colorize(format_currency(row['monthly_depreciation']), 'monthly_depreciation'),
+                colorize(format_currency(row['tax_savings_monthly']), 'tax_savings_monthly'),
+                colorize(format_currency(row['after_tax_cash_flow_y1']), 'after_tax_cash_flow_y1'),
+                colorize(format_currency(row['after_tax_cash_flow_y2']), 'after_tax_cash_flow_y2'),
+                colorize(format_currency(row['future_value_10yr']), 'future_value_10yr'),
+                colorize(format_currency(row['net_proceeds_10yr']), 'net_proceeds_10yr'),
+                colorize(format_number(row['equity_multiple_10yr']), 'equity_multiple_10yr'),
+                colorize(format_percentage(row['avg_annual_return_10yr'] / 100), 'avg_annual_return_10yr'),
+                colorize(format_percentage(row['roe_y2']), 'roe_y2'),
+                colorize(format_percentage(row['leverage_benefit']), 'leverage_benefit'),
+                colorize(payback_display, 'payback_period_years'),
+                colorize(format_percentage(row['irr_10yr']), 'irr_10yr'),
+                colorize(format_currency(row['cash_flow_y2_downside_10pct']), 'cash_flow_y2_downside_10pct')
             )
     
     table.add_row("[white]PHASE 1 QUALIFIERS[/white]")
@@ -766,71 +871,7 @@ def get_reduced_pp_df(reduction_factor):
     dataframe = df.copy()
     dataframe["original_price"] = dataframe["purchase_price"]
     dataframe["purchase_price"] = dataframe["purchase_price"] * (1 - reduction_factor) # new purchase price
-    dataframe["cost_per_sqrft"] = dataframe["purchase_price"] / dataframe["square_ft"]
-    dataframe["closing_costs"] = dataframe["purchase_price"] * closing_costs_rate
-    dataframe["down_payment"] = dataframe["purchase_price"] * down_payment_rate
-    dataframe["loan_amount"] = dataframe["purchase_price"] - dataframe["down_payment"] + (dataframe["purchase_price"] * mip_upfront_rate)
-    dataframe["monthly_mortgage"] = dataframe["loan_amount"].apply(lambda x: calculate_mortgage(x, apr_rate, loan_length_years))
-    dataframe["monthly_mip"] = (dataframe["loan_amount"] * mip_annual_rate) / 12
-    dataframe["monthly_taxes"] = (dataframe["purchase_price"] * property_tax_rate) / 12
-    dataframe["monthly_insurance"] = (dataframe["purchase_price"] * home_insurance_rate) / 12
-    dataframe["cash_needed"] = dataframe["closing_costs"] + dataframe["down_payment"]
-    dataframe["operating_expenses"] = dataframe["monthly_vacancy_costs"] + dataframe["monthly_repair_costs"] + dataframe["monthly_taxes"] + dataframe["monthly_insurance"]
-    dataframe["total_monthly_cost"] = dataframe["monthly_mortgage"] + dataframe["monthly_mip"] + dataframe["operating_expenses"]
-    dataframe["monthly_cash_flow_y1"] = dataframe["net_rent_y1"] - dataframe["total_monthly_cost"]
-    dataframe["monthly_cash_flow_y2"] = dataframe["total_rent"] - dataframe["total_monthly_cost"]
-    dataframe["annual_cash_flow_y1"] = dataframe["monthly_cash_flow_y1"] * 12
-    dataframe["annual_cash_flow_y2"] = dataframe["monthly_cash_flow_y2"] * 12
-    dataframe["monthly_NOI"] = dataframe["total_rent"] - dataframe["operating_expenses"]
-    dataframe["annual_NOI_y1"] = (dataframe["net_rent_y1"] - dataframe["operating_expenses"]) * 12
-    dataframe["annual_NOI_y2"] = dataframe["monthly_NOI"] * 12
-    dataframe["cap_rate_y1"] = dataframe["annual_NOI_y1"] / dataframe["purchase_price"]
-    dataframe["cap_rate_y2"] = dataframe["annual_NOI_y2"] / dataframe["purchase_price"]
-    dataframe["CoC_y1"] = dataframe["annual_cash_flow_y1"] / dataframe["cash_needed"]
-    dataframe["CoC_y2"] = dataframe["annual_cash_flow_y2"] / dataframe["cash_needed"]
-    dataframe["GRM_y1"] = dataframe["purchase_price"] / dataframe["annual_rent_y1"]
-    dataframe["GRM_y2"] = dataframe["purchase_price"] / dataframe["annual_rent_y2"]
-    dataframe["MGR_PP"] = dataframe["total_rent"] / dataframe["purchase_price"]
-    dataframe["OpEx_Rent"] = dataframe["operating_expenses"] / dataframe["total_rent"]
-    dataframe["DSCR"] = dataframe["total_rent"] / dataframe["monthly_mortgage"]
-    dataframe["5y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(5,))
-    dataframe["10y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(10,))
-    dataframe["20y_forecast"] = dataframe.apply(get_expected_gains, axis=1, args=(20,))
-    dataframe["deal_score"] = dataframe.apply(get_deal_score, axis=1)
-    dataframe["ltv_ratio"] = dataframe["loan_amount"] / dataframe["purchase_price"]
-    dataframe["price_per_door"] = dataframe["purchase_price"] / dataframe["units"]
-    dataframe["rent_per_sqft"] = dataframe["total_rent"] / dataframe["square_ft"]
-    dataframe["break_even_occupancy"] = dataframe["total_monthly_cost"] / dataframe["total_rent"]
-    dataframe["break_even_vacancy"] = 1.0 - dataframe["break_even_occupancy"]
-    dataframe["oer"] = dataframe["operating_expenses"] / dataframe["total_rent"]
-    dataframe["egi"] = dataframe["total_rent"] - dataframe["monthly_vacancy_costs"]
-    dataframe["debt_yield"] = dataframe["annual_NOI_y2"] / dataframe["loan_amount"]
-    state_rate = get_state_tax_rate(state_tax_code)
-    combined_tax_rate = FEDERAL_TAX_RATE + state_rate
-    dataframe["monthly_depreciation"] = (dataframe["purchase_price"] * (1 - LAND_VALUE_PCT)) / DEPRECIATION_YEARS / 12
-    dataframe["tax_savings_monthly"] = dataframe["monthly_depreciation"] * combined_tax_rate
-    dataframe["after_tax_cash_flow_y1"] = dataframe["monthly_cash_flow_y1"] + dataframe["tax_savings_monthly"]
-    dataframe["after_tax_cash_flow_y2"] = dataframe["monthly_cash_flow_y2"] + dataframe["tax_savings_monthly"]
-    dataframe["future_value_5yr"] = dataframe["purchase_price"] * ((1 + appreciation_rate) ** 5)
-    dataframe["future_value_10yr"] = dataframe["purchase_price"] * ((1 + appreciation_rate) ** 10)
-    dataframe["future_value_20yr"] = dataframe["purchase_price"] * ((1 + appreciation_rate) ** 20)
-    dataframe["net_proceeds_5yr"] = dataframe.apply(calculate_net_proceeds, axis=1, args=(5, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
-    dataframe["net_proceeds_10yr"] = dataframe.apply(calculate_net_proceeds, axis=1, args=(10, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
-    dataframe["net_proceeds_20yr"] = dataframe.apply(calculate_net_proceeds, axis=1, args=(20, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
-    dataframe["equity_multiple_5yr"] = (dataframe["5y_forecast"] + dataframe["cash_needed"]) / dataframe["cash_needed"]
-    dataframe["equity_multiple_10yr"] = (dataframe["10y_forecast"] + dataframe["cash_needed"]) / dataframe["cash_needed"]
-    dataframe["equity_multiple_20yr"] = (dataframe["20y_forecast"] + dataframe["cash_needed"]) / dataframe["cash_needed"]
-    dataframe["avg_annual_return_5yr"] = ((dataframe["5y_forecast"] / dataframe["cash_needed"]) / 5) * 100
-    dataframe["avg_annual_return_10yr"] = ((dataframe["10y_forecast"] / dataframe["cash_needed"]) / 10) * 100
-    dataframe["avg_annual_return_20yr"] = ((dataframe["20y_forecast"] / dataframe["cash_needed"]) / 20) * 100
-    dataframe["roe_y2"] = dataframe.apply(calculate_roe, axis=1)
-    dataframe["leverage_benefit"] = dataframe["CoC_y2"] - (dataframe["annual_NOI_y2"] / dataframe["purchase_price"])
-    dataframe["payback_period_years"] = dataframe.apply(calculate_payback_period, axis=1)
-    dataframe["irr_5yr"] = dataframe.apply(calculate_irr, axis=1, args=(5,))
-    dataframe["irr_10yr"] = dataframe.apply(calculate_irr, axis=1, args=(10,))
-    dataframe["irr_20yr"] = dataframe.apply(calculate_irr, axis=1, args=(20,))
-    dataframe["cash_flow_y1_downside_10pct"] = (dataframe["net_rent_y1"] * 0.9) - dataframe["total_monthly_cost"]
-    dataframe["cash_flow_y2_downside_10pct"] = (dataframe["total_rent"] * 0.9) - dataframe["total_monthly_cost"]
+    dataframe = apply_calculations_on_dataframe(df=dataframe)
     return dataframe
 
 def display_all_properties_info(properties_df):
@@ -1648,7 +1689,7 @@ def handle_changing_loan():
       selected_loan_id = loan.id
 
   LAST_USED_LOAN = selected_loan_id
-  load_loan(selected_loan_id)
+  load_loan(LAST_USED_LOAN)
   reload_dataframe()
 
 using_application = True
