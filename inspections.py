@@ -57,11 +57,50 @@ class InspectionsClient():
         units = row["units"]
         beds = row["beds"]
         baths = row["baths"]
+
         # get all the unit configurations
+
+        ## HIGH DIY
+        # painting
+        # kitch cabinet painting
+        # Landscaping setup (native plantings, basic yard work)
+        # Storage systems
+        # Fire safety upgrades (smoke detectors, extinguishers, emergency lighting)
+        # Kitchen backsplash
+
+        # Revamping doors
+
+        ## MODERATE DIT
+        # Updated lighting fixtures
+        # luxury vinly flooring
+        # Appliance installation (+ cost of appliances)
+        # Ceiling fans (DIY if electrical box already present)
+        # Bathroom exhaust fans
+        # Entry door REPLACEMENT 
+        # Hardwood floor refinishing (only if the property has hardwoods)
+        # Pet fencing
+        # Parking lot striping
 
         return total_cost
     
     def get_total_pro_repair_costs(self, row) -> int:
+        # Bathroom fixtures / vanity
+        # Bathroom rile work
+        # Deck/patio construction
+        # Security cameras
+        # Exterior painting
+        # In-unit W/D installation
+        # Countertops
+        # Central A/C
+        # Windows
+        # Garage/carport
+        # Furnace
+        # Electrical panel
+        # Plumbing systems
+        # Roof
+        # Sewer/drainage
+        # Foundation
+
         return 0
     
     def get_est_diy_repair_costs(self, row) -> int:

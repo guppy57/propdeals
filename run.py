@@ -51,7 +51,7 @@ white_style = Style([
 ])
 
 def load_assumptions():
-  global appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting, after_tax_monthly_income, state_tax_code
+  global appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting, after_tax_monthly_income, state_tax_code, discount_rate
   console.print("[yellow]Reloading assumptions...[/yellow]")
   assumptions_get_response = supabase.table('assumptions').select('*').eq('id', 1).limit(1).single().execute()
   appreciation_rate = float(assumptions_get_response.data["appreciation_rate"])
@@ -65,6 +65,7 @@ def load_assumptions():
   gross_annual_income = assumptions_get_response.data["gross_annual_income"]
   state_tax_code = assumptions_get_response.data["state_tax_code"]
   after_tax_monthly_income = calculate_monthly_take_home(gross_annual_income, state_tax_code)
+  discount_rate = assumptions_get_response.data["discount_rate"]
   console.print(f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]")
 
 def load_loan(loan_id):
@@ -803,20 +804,22 @@ def get_all_phase2_qualifying_properties():
     p1_df = get_combined_phase1_qualifiers()
 
     # STEP 1 - RUN ALL NEW EVALUATIONS AND MODIFY DATAFRAME
-    p1_df['property_condition'] = p1_df.apply(inspections.get_property_condition, axis=1)
-    p1_df['has_inspection_dealbreakers'] = p1_df.apply(inspections.has_dealbreakers, axis=1)
-    p1_df['seller_motivation_score'] = p1_df.apply(get_seller_motivation_score, axis=1)
-    p1_df['rentability_score'] = p1_df.apply(get_rentability_score, axis=1)
-    p1_df['total_diy_repair_costs'] = p1_df.apply(inspections.get_total_diy_repair_costs, axis=1)
-    p1_df['total_pro_repair_costs'] = p1_df.apply(inspections.get_total_pro_repair_costs, axis=1)
-    p1_df['est_diy_repair_costs'] = p1_df.apply(inspections.get_est_diy_repair_costs, axis=1)
-    p1_df['est_pro_repair_costs'] = p1_df.apply(inspections.get_est_pro_repair_costs, axis=1)
-    
+    p1_df['property_condition'] = p1_df.apply(inspections.get_property_condition, axis=1) # TODO - finish this
+    p1_df['has_inspection_dealbreakers'] = p1_df.apply(inspections.has_dealbreakers, axis=1) # TODO - finish this
+    p1_df['seller_motivation_score'] = p1_df.apply(get_seller_motivation_score, axis=1)  # TODO - finish this
+    p1_df['rentability_score'] = p1_df.apply(get_rentability_score, axis=1)  # TODO - finish this
+    p1_df['total_diy_repair_costs'] = p1_df.apply(inspections.get_total_diy_repair_costs, axis=1)  # TODO - finish this
+    p1_df['total_pro_repair_costs'] = p1_df.apply(inspections.get_total_pro_repair_costs, axis=1)  # TODO - finish this
+    p1_df['est_diy_repair_costs'] = p1_df.apply(inspections.get_est_diy_repair_costs, axis=1)  # TODO - finish this
+    p1_df['est_pro_repair_costs'] = p1_df.apply(inspections.get_est_pro_repair_costs, axis=1)  # TODO - finish this
+
     # STEP 2 - CREATE CRITERIA AND QUERY
     criteria = "has_inspection_dealbreakers == False & costs_to_income <= 0.45" # todo add more here
     filtered_df = p1_df.query(criteria)
 
     # STEP 3 - CREATE A DF-RELATIVE RANKING AMONGST QUALIFIERS
+    # maybe pandas has ranking methods?
+
 
     return filtered_df
 
@@ -928,7 +931,6 @@ def display_all_properties_info(properties_df):
             if row["home_age"] <= built_25th_percentile
             else ("yellow" if row["home_age"] <= built_75th_percentile else "red")
         )
-
         walk_style = (
             "green"
             if row["walk_score"] >= walk_75th_percentile
@@ -1042,6 +1044,9 @@ def analyze_property(property_id):
     table.add_row("Annual Cash Flow",
                   f"[{'red' if row['annual_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['annual_cash_flow_y1'])}[/]",
                   f"[{'red' if row['annual_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['annual_cash_flow_y2'])}[/]")
+    table.add_row("After-Tax Cash Flow",
+                  format_currency(row['after_tax_cash_flow_y1']),
+                  format_currency(row['after_tax_cash_flow_y2']))
     table.add_row("Cap Rate", 
                   format_percentage(row['cap_rate_y1']),
                   format_percentage(row['cap_rate_y2']))
@@ -1054,85 +1059,38 @@ def analyze_property(property_id):
     table.add_row("Annual Rent",
                   format_currency(row['annual_rent_y1']),
                   format_currency(row['annual_rent_y2']))
-
     mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
     opex_rent_style = "green" if 0.45 <= row['OpEx_Rent'] <= 0.55 else ("yellow" if 0.35 <= row['OpEx_Rent'] <= 0.65 else "red")
     dscr_style = "green" if row['DSCR'] >= 1.25 else "red"
+    table.add_row("1% Rule (MGR/PP)","",f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]")
+    table.add_row("50% Rule (OpEx/Rent)","",f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]")
+    table.add_row("DSCR (Rent/Mortgage)","",f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]")
+    table.add_row("LTV Ratio","",format_percentage(row['ltv_ratio']))
+    table.add_row("Price Per Door","",format_currency(row['price_per_door']))
+    table.add_row("Rent Per Sqft","",format_currency(row['rent_per_sqft']))
+    table.add_row("Break-Even Occupancy","",format_percentage(row['break_even_occupancy']))
+    table.add_row("Break-Even Vacancy","",express_percent_as_months_and_days(row["break_even_vacancy"]))
+    table.add_row("Operating Expense Ratio","",format_percentage(row['oer']))
+    table.add_row("Effective Gross Income","",format_currency(row['egi']))
+    table.add_row("Debt Yield","",format_percentage(row['debt_yield']))
+    table.add_row("Monthly Depreciation Deduction","",format_currency(row['monthly_depreciation']))
+    table.add_row("Monthly Tax Savings","",format_currency(row['tax_savings_monthly']))
     
-    table.add_row("1% Rule (MGR/PP)",
-                  f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
-                  f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]")
-    table.add_row("50% Rule (OpEx/Rent)",
-                  f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
-                  f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]")
-    table.add_row("DSCR (Rent/Mortgage)",
-                  f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
-                  f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]")
-
-    # Basic Investment Metrics
-    table.add_row("LTV Ratio",
-                  format_percentage(row['ltv_ratio']),
-                  format_percentage(row['ltv_ratio']))
-    table.add_row("Price Per Door",
-                  format_currency(row['price_per_door']),
-                  format_currency(row['price_per_door']))
-    table.add_row("Rent Per Sqft",
-                  format_currency(row['rent_per_sqft']),
-                  format_currency(row['rent_per_sqft']))
-    table.add_row("Break-Even Occupancy",
-                  format_percentage(row['break_even_occupancy']),
-                  format_percentage(row['break_even_occupancy']))
-    table.add_row("Operating Expense Ratio",
-                  format_percentage(row['oer']),
-                  format_percentage(row['oer']))
-    table.add_row("Effective Gross Income",
-                  format_currency(row['egi']),
-                  format_currency(row['egi']))
-    table.add_row("Debt Yield",
-                  format_percentage(row['debt_yield']),
-                  format_percentage(row['debt_yield']))
-
-    # Tax Benefits
-    table.add_row("Monthly Depreciation Deduction",
-                  format_currency(row['monthly_depreciation']),
-                  format_currency(row['monthly_depreciation']))
-    table.add_row("Monthly Tax Savings",
-                  format_currency(row['tax_savings_monthly']),
-                  format_currency(row['tax_savings_monthly']))
-    table.add_row("After-Tax Cash Flow",
-                  format_currency(row['after_tax_cash_flow_y1']),
-                  format_currency(row['after_tax_cash_flow_y2']))
-
-    # Equity & Return Metrics - Keep non-time-horizon metrics
-    table.add_row("Return on Equity (ROE) Y2",
-                  "",
-                  format_percentage(row['roe_y2']))
-    table.add_row("Leverage Benefit",
-                  format_percentage(row['leverage_benefit']),
-                  format_percentage(row['leverage_benefit']))
-
+    table.add_row("Return on Equity (ROE) Y2","",format_percentage(row['roe_y2']))
+    table.add_row("Leverage Benefit","",format_percentage(row['leverage_benefit']))
     payback_display = f"{row['payback_period_years']:.1f} years" if row['payback_period_years'] != float('inf') else "Never"
-    table.add_row("Payback Period",
-                  payback_display,
-                  payback_display)
-
-    # Risk Metrics
+    table.add_row("Payback Period","",payback_display)
     downside_y1_style = "green" if row['cash_flow_y1_downside_10pct'] > 0 else "red"
     downside_y2_style = "green" if row['cash_flow_y2_downside_10pct'] > 0 else "red"
     table.add_row("Cash Flow (10% Rent Drop)",
                   f"[{downside_y1_style}]{format_currency(row['cash_flow_y1_downside_10pct'])}[/{downside_y1_style}]",
                   f"[{downside_y2_style}]{format_currency(row['cash_flow_y2_downside_10pct'])}[/{downside_y2_style}]")
-
     console.print(table)
-
-    # Investment Projections Table - Time-Horizon View
     projections_table = Table(title="Investment Projections", show_header=True, header_style="bold cyan")
     projections_table.add_column("Metric", style="yellow", no_wrap=True)
     projections_table.add_column("5Y", justify="right", style="green")
     projections_table.add_column("10Y", justify="right", style="blue")
     projections_table.add_column("20Y", justify="right", style="magenta")
-
-    # Add rows for each metric
     projections_table.add_row(
         "Investment Gain",
         format_currency(row['5y_forecast']),
