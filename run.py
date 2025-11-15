@@ -129,7 +129,6 @@ def get_seller_motivation_score(row) -> str:
     Calculate seller motivation score based on multiple factors.
     Returns: 'low', 'medium', or 'high'
     """
-
     listed_date = row.get('listed_date')
     if listed_date and pd.notna(listed_date):
         if isinstance(listed_date, str):
@@ -140,9 +139,9 @@ def get_seller_motivation_score(row) -> str:
     else:
         days_on_market = 0  # Default to 0 if no listing date available
     
+    property_condition: str = row['property_condition']
     price_reductions: bool = row['has_reduced_price']
     seller_circumstances: str = row.get('seller_circumstance')
-    property_condition: str = row.get('property_condition') # 'excellent', 'good', 'fair', 'poor'
     score = 0
     
     if days_on_market > 30 and days_on_market < 60:
@@ -162,11 +161,11 @@ def get_seller_motivation_score(row) -> str:
         score += 3
     elif seller_circumstances in medium_motivation_circumstances:
         score += 2
-    
-    if property_condition == 'poor':
-        score += 2
-    elif property_condition == 'fair':
+
+    if property_condition == "medium":
         score += 1
+    elif property_condition == "low":
+        score += 2
     
     if score <= 3:
         return 'low'
@@ -1523,6 +1522,7 @@ def display_phase2_data_checklist():
     table.add_column("RENT", style="white")
     table.add_column("NGBH", style="white")
     table.add_column("TAXS", style="white")
+    table.add_column("CIRC", style="white")
 
     for _, row in combined_df.iterrows():
         has_listing = "[green]done[/green]" if row["listed_date"] else "[dim]none[/dim]"
@@ -1532,6 +1532,7 @@ def display_phase2_data_checklist():
         has_rent_dd = "[green]done[/green]" if row["rent_dd_completed"] else "[dim]none[/dim]"
         has_neighborhood_dd = "[green]done[/green]" if row["neighborhood_dd_completed"] else "[dim]none[/dim]"
         has_taxes = "[green]done[/green]" if row.get("annual_tax_amount") else "[dim]none[/dim]"
+        has_seller_circumstances = "[green]done[/green]" if row.get("seller_circumstances") else "[dim]none[/dim]"
 
         table.add_row(
             row["address1"],
@@ -1542,6 +1543,7 @@ def display_phase2_data_checklist():
             has_rent_dd,
             has_neighborhood_dd,
             has_taxes,
+            has_seller_circumstances,
         )
 
     console.print(table)
