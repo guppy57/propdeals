@@ -11,7 +11,6 @@ CREATE TABLE public.inspections (
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
-
   CONSTRAINT inspections_pkey PRIMARY KEY (id),
   CONSTRAINT inspections_address1_fkey FOREIGN KEY (address1) REFERENCES properties (address1)
 );
