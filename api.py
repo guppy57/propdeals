@@ -165,7 +165,7 @@ async def get_phase1_qualifiers():
     
     criteria = "status == 'active' & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400"
     assumptions_response = supabase.table('assumptions').select("*").eq("id", 1).limit(1).single().execute()
-    deal_score_total = 37
+    deal_score_total = 38
     
     try:
         current, contingent, creative = get_all_phase1_qualifying_properties()

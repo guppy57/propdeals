@@ -110,6 +110,7 @@ def get_deal_score(row):
     score += (2 if row["leverage_benefit"] >= 0.05 else 1 if row["leverage_benefit"] >= 0.02 else 0)  # Leverage benefit
     score += (1 if row["break_even_occupancy"] < 0.80 else 0)  # Break-even occupancy
     score += (1 if row["net_proceeds_10yr"] > 100000 else 0)  # Net proceeds 10yr
+    score += (1 if row["npv_10yr"] > 20000 else 0)  # NPV 10yr (beats market)
     return score
 
 def get_mobility_score(row):
@@ -281,6 +282,33 @@ def calculate_irr(row, years):
     except Exception:
         return 0  # Return 0 if calculation fails
 
+def calculate_npv(row, years):
+    """Calculate Net Present Value over N years using discount_rate"""
+    try:
+        # Build cash flow array (same as IRR)
+        cash_flows = [-row["cash_needed"]]  # Year 0: initial investment (outflow)
+
+        # Year 1 cash flow
+        cash_flows.append(row["annual_cash_flow_y1"])
+
+        # Years 2 through N: compounded with rent appreciation
+        for year in range(2, years + 1):
+            yearly_cashflow = row["annual_cash_flow_y2"] * ((1 + rent_appreciation_rate) ** (year - 2))
+            cash_flows.append(yearly_cashflow)
+
+        # Final year: add net proceeds from sale
+        net_proceeds = calculate_net_proceeds(row, years)
+        cash_flows[-1] += net_proceeds
+
+        # Calculate NPV: discount each cash flow back to present
+        npv = 0
+        for year, cash_flow in enumerate(cash_flows):
+            npv += cash_flow / ((1 + discount_rate) ** year)
+
+        return npv
+    except Exception:
+        return 0  # Return 0 if calculation fails
+
 def calculate_roe(row):
     """Calculate Return on Equity for Year 2"""
     # Equity after Year 1 = down payment + principal paid in Year 1
@@ -378,6 +406,12 @@ def apply_calculations_on_dataframe(df):
     df["irr_5yr"] = df.apply(calculate_irr, axis=1, args=(5,))
     df["irr_10yr"] = df.apply(calculate_irr, axis=1, args=(10,))
     df["irr_20yr"] = df.apply(calculate_irr, axis=1, args=(20,))
+    df["npv_5yr"] = df.apply(calculate_npv, axis=1, args=(5,))
+    df["npv_10yr"] = df.apply(calculate_npv, axis=1, args=(10,))
+    df["npv_20yr"] = df.apply(calculate_npv, axis=1, args=(20,))
+    df["fair_value_10yr"] = df["purchase_price"] + df["npv_10yr"]
+    df["value_gap_pct_10yr"] = (df["npv_10yr"] / df["cash_needed"]) * 100
+    df["beats_market"] = df["npv_10yr"] > 0
     df["cash_flow_y1_downside_10pct"] = (df["net_rent_y1"] * 0.9) - df["total_monthly_cost"]
     df["cash_flow_y2_downside_10pct"] = (df["total_rent"] * 0.9) - df["total_monthly_cost"]
     df["deal_score"] = df.apply(get_deal_score, axis=1)
@@ -537,7 +571,7 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
             f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
             f"[{costs_to_income_style}]{format_percentage(row['costs_to_income'])}[/{costs_to_income_style}]",
-            f"[{deal_score_style}]{int(row['deal_score'])}/37[/{deal_score_style}]",
+            f"[{deal_score_style}]{int(row['deal_score'])}/38[/{deal_score_style}]",
             f"[{mobility_score_style}]{int(row['mobility_score'])}[/{mobility_score_style}]",
             f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]",
             f"[{irr_10yr_style}]{format_percentage(row['irr_10yr'])}[/{irr_10yr_style}]"
@@ -593,6 +627,7 @@ def calculate_quintile_colors_for_metrics(dataframe):
         'leverage_benefit': 'leverage_benefit',
         'payback_period_years': 'payback_period_years',
         'irr_10yr': 'irr_10yr',
+        'npv_10yr': 'npv_10yr',
         'cash_flow_y2_downside_10pct': 'cash_flow_y2_downside_10pct'
     }
 
@@ -670,6 +705,7 @@ def display_property_metrics(properties_df=None):
         ("LEVB", "Leverage Benefit", "Return boost from using debt financing vs all-cash purchase", "(higher = better)"),
         ("PAYB", "Payback Period", "Years needed to recover initial cash investment", "(lower = better)"),
         ("IR10", "IRR 10yr", "Internal rate of return accounting for cash flows and sale proceeds", "(higher = better)"),
+        ("NPV10", "NPV 10yr", "Net present value at discount rate; answers: does this beat market returns?", "(positive = beats market)"),
         ("CFDN", "Cash Flow Y2 Downside 10%", "Monthly cash flow if rents drop 10%; tests resilience", "(positive = resilient)")
     ]
 
@@ -698,6 +734,7 @@ def display_property_metrics(properties_df=None):
     table.add_column("LEVB", justify="right")
     table.add_column("PAYB", justify="right")
     table.add_column("IR10", justify="right")
+    table.add_column("NPV10", justify="right")
     table.add_column("CFDN", justify="right")
 
     # Calculate quintile colors for ALL properties
@@ -742,6 +779,7 @@ def display_property_metrics(properties_df=None):
                 colorize(format_percentage(row['leverage_benefit']), 'leverage_benefit'),
                 colorize(payback_display, 'payback_period_years'),
                 colorize(format_percentage(row['irr_10yr']), 'irr_10yr'),
+                colorize(format_currency(row['npv_10yr']), 'npv_10yr'),
                 colorize(format_currency(row['cash_flow_y2_downside_10pct']), 'cash_flow_y2_downside_10pct')
             )
     
@@ -1127,6 +1165,24 @@ def analyze_property(property_id):
         format_percentage(row['irr_10yr']),
         format_percentage(row['irr_20yr'])
     )
+    projections_table.add_row(
+        "NPV",
+        format_currency(row['npv_5yr']),
+        format_currency(row['npv_10yr']),
+        format_currency(row['npv_20yr'])
+    )
+    projections_table.add_row(
+        "Fair Value",
+        "---",
+        format_currency(row['fair_value_10yr']),
+        "---"
+    )
+    projections_table.add_row(
+        "Value Gap %",
+        "---",
+        format_percentage(row['value_gap_pct_10yr'] / 100),
+        "---"
+    )
 
     console.print(projections_table)
 
@@ -1160,6 +1216,7 @@ def analyze_property(property_id):
     leverage_score = (2 if row["leverage_benefit"] >= 0.05 else 1 if row["leverage_benefit"] >= 0.02 else 0)
     breakeven_score = (1 if row["break_even_occupancy"] < 0.80 else 0)
     proceeds_score = (1 if row["net_proceeds_10yr"] > 100000 else 0)
+    npv_score = (1 if row["npv_10yr"] > 20000 else 0)
 
     deal_score_style = ("green" if row['deal_score'] >= 20 else "yellow" if row['deal_score'] >= 15 else "red")
     
@@ -1185,7 +1242,8 @@ def analyze_property(property_id):
     criteria_table.add_row("Leverage Benefit", f"[white]{leverage_score}[/white]", "2", f"{row['leverage_benefit']:.1%}")
     criteria_table.add_row("Break-Even Occupancy", f"[white]{breakeven_score}[/white]", "1", f"{row['break_even_occupancy']:.1%}")
     criteria_table.add_row("Net Proceeds (10yr)", f"[white]{proceeds_score}[/white]", "1", f"${row['net_proceeds_10yr']:,.0f}")
-    criteria_table.add_row("[bold]TOTAL SCORE[/bold]", f"[bold {deal_score_style}]{int(row['deal_score'])}[/bold {deal_score_style}]", "[bold]37[/bold]",
+    criteria_table.add_row("NPV (10yr)", f"[white]{npv_score}[/white]", "1", f"${row['npv_10yr']:,.0f}")
+    criteria_table.add_row("[bold]TOTAL SCORE[/bold]", f"[bold {deal_score_style}]{int(row['deal_score'])}[/bold {deal_score_style}]", "[bold]38[/bold]",
                           f"[bold {deal_score_style}]{'Excellent' if row['deal_score'] >= 20 else 'Good' if row['deal_score'] >= 15 else 'Poor'}[/bold {deal_score_style}]")
     
     console.print(criteria_table)
