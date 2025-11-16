@@ -840,23 +840,32 @@ def get_all_phase2_qualifying_properties():
     """
     p1_df = get_combined_phase1_qualifiers()
 
-    # STEP 1 - RUN ALL NEW EVALUATIONS AND MODIFY DATAFRAME
-    p1_df['property_condition'] = p1_df.apply(inspections.get_property_condition, axis=1) # TODO - finish this
-    p1_df['has_inspection_dealbreakers'] = p1_df.apply(inspections.has_dealbreakers, axis=1) # TODO - finish this
-    p1_df['seller_motivation_score'] = p1_df.apply(get_seller_motivation_score, axis=1)  # TODO - finish this
-    p1_df['rentability_score'] = p1_df.apply(get_rentability_score, axis=1)  # TODO - finish this
-    p1_df['total_diy_repair_costs'] = p1_df.apply(inspections.get_total_diy_repair_costs, axis=1)  # TODO - finish this
-    p1_df['total_pro_repair_costs'] = p1_df.apply(inspections.get_total_pro_repair_costs, axis=1)  # TODO - finish this
-    p1_df['est_diy_repair_costs'] = p1_df.apply(inspections.get_est_diy_repair_costs, axis=1)  # TODO - finish this
-    p1_df['est_pro_repair_costs'] = p1_df.apply(inspections.get_est_pro_repair_costs, axis=1)  # TODO - finish this
+    # STEP 1 - REMOVE PROPERTIES THAT AREN'T DATA COMPLETE
+    checklist = get_phase2_data_checklist()
 
-    # STEP 2 - CREATE CRITERIA AND QUERY
+    complete_address1s = [
+        address for address, checks in checklist.items()
+        if all(checks.values())
+    ]
+
+    completed_df = p1_df[p1_df['address1'].isin(complete_address1s)] 
+
+    # STEP 2 - RUN ALL NEW EVALUATIONS AND MODIFY DATAFRAME
+    completed_df['property_condition'] = p1_df.apply(inspections.get_property_condition, axis=1) # TODO - finish this
+    completed_df['has_inspection_dealbreakers'] = p1_df.apply(inspections.has_dealbreakers, axis=1) # TODO - finish this
+    completed_df['seller_motivation_score'] = p1_df.apply(get_seller_motivation_score, axis=1)  # TODO - finish this
+    completed_df['rentability_score'] = p1_df.apply(get_rentability_score, axis=1)  # TODO - finish this
+    completed_df['total_diy_repair_costs'] = p1_df.apply(inspections.get_total_diy_repair_costs, axis=1)  # TODO - finish this
+    completed_df['total_pro_repair_costs'] = p1_df.apply(inspections.get_total_pro_repair_costs, axis=1)  # TODO - finish this
+    completed_df['est_diy_repair_costs'] = p1_df.apply(inspections.get_est_diy_repair_costs, axis=1)  # TODO - finish this
+    completed_df['est_pro_repair_costs'] = p1_df.apply(inspections.get_est_pro_repair_costs, axis=1)  # TODO - finish this
+
+    # STEP 3 - CREATE CRITERIA AND QUERY
     criteria = "has_inspection_dealbreakers == False & costs_to_income <= 0.45" # todo add more here
     filtered_df = p1_df.query(criteria)
 
-    # STEP 3 - CREATE A DF-RELATIVE RANKING AMONGST QUALIFIERS
+    # STEP 4 - CREATE A DF-RELATIVE RANKING AMONGST QUALIFIERS
     # maybe pandas has ranking methods?
-
 
     return filtered_df
 
