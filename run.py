@@ -836,7 +836,7 @@ def get_all_phase2_qualifying_properties():
     Current criteria:
       - property must qualify for phase 1
       - property must not have any 'deal breakers'
-      - fixed monthly costs to after tax income ratio must be greater than 0.3
+      - fixed monthly costs to after tax income ratio must be greater than 0.45
     """
     p1_df = get_combined_phase1_qualifiers()
 
@@ -1525,6 +1525,10 @@ def is_property_maps_done(row) -> bool:
             is_done = False
 
     return is_done
+
+def get_phase2_data_checklist():
+    """Gets all phase 1 properties and their data checklist"""
+    pass
 
 def display_phase2_data_checklist():
     combined_df = get_combined_phase1_qualifiers()
