@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from typing import Optional
-from run import reload_dataframe, get_all_phase1_qualifying_properties
+from run import reload_dataframe, get_all_phase1_qualifying_properties, get_phase2_data_checklist
 from models.inspections import InspectionCreate, UnitInspectionCreate
 from inspections import InspectionsClient
 from helpers import convert_numpy_types
@@ -125,7 +125,7 @@ async def root():
     }
 
 @app.get("/properties")
-async def get_all_properties(
+async def get_all_properties_route(
     status: Optional[str] = Query(None, description="Filter by property status (active, sold, passed)")
 ):
     global df
@@ -155,7 +155,7 @@ async def get_all_properties(
     }
 
 @app.get("/properties/phase1")
-async def get_phase1_qualifiers():
+async def get_phase1_qualifiers_route():
     global df
 
     reload_dataframe_logic()
@@ -198,12 +198,24 @@ async def get_phase1_qualifiers():
         raise HTTPException(status_code=500, detail=f"Error filtering properties: {str(e)}")
 
 @app.get("/properties/phase2/data-checklist")
-async def get_phase2_data_checklist():
+async def get_phase2_data_checklist_route():
     """
     Gets all phase1 properties and their subsequent 'data checklist' to easily display the remaining work
     we have to do to get all data needed for Phase 2
     """
-    pass
+    global df
+
+    reload_dataframe_logic()
+    
+    if df is None or df.empty:
+        raise HTTPException(status_code=404, detail="No properties found")
+    
+    try:
+        return get_phase2_data_checklist()
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=500, detail=f"Error getting phase2 data checklist: {str(e)}")
+
 
 if __name__ == "__main__":
     import uvicorn

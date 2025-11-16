@@ -314,45 +314,47 @@ class InspectionsClient():
         Returns:
             True if inspection is complete with all required fields, False otherwise
         """
-        inspection = self.get_inspection(address1)
+        # inspection = self.get_inspection(address1)
 
-        if not inspection:
-            return False
+        # if not inspection:
+        #     return False
 
-        if not inspection.get('inspection_date'):
-            return False
+        # if not inspection.get('inspection_date'):
+        #     return False
 
-        model_fields = InspectionCreate.model_fields.keys()
+        # model_fields = InspectionCreate.model_fields.keys()
 
-        excluded_fields = {
-            'address1',
-            'roof_notes',
-            'basement_notes',
-            'electrical_notes',
-            'plumbing_notes',
-            'legal_notes',
-            'walkability_notes',
-            'neighborhood_notes',
-            'sump_pump_condition',
-            'rental_license_expiry',
-            'laundry_condition',
-            'laundry_coin_revenue_monthly',
-        }
+        # excluded_fields = {
+        #     'address1',
+        #     'roof_notes',
+        #     'basement_notes',
+        #     'electrical_notes',
+        #     'plumbing_notes',
+        #     'legal_notes',
+        #     'walkability_notes',
+        #     'neighborhood_notes',
+        #     'sump_pump_condition',
+        #     'rental_license_expiry',
+        #     'laundry_condition',
+        #     'laundry_coin_revenue_monthly',
+        # }
 
-        for field_name in model_fields:
-            if field_name not in excluded_fields:
-                value = inspection.get(field_name)
-                if value is None:
-                    return False
+        # for field_name in model_fields:
+        #     if field_name not in excluded_fields:
+        #         value = inspection.get(field_name)
+        #         if value is None:
+        #             return False
 
-        if inspection.get('has_sump_pump') and not inspection.get('sump_pump_condition'):
-            return False
+        # if inspection.get('has_sump_pump') and not inspection.get('sump_pump_condition'):
+        #     return False
 
-        if inspection.get('has_rental_license') and not inspection.get('rental_license_expiry'):
-            return False
+        # if inspection.get('has_rental_license') and not inspection.get('rental_license_expiry'):
+        #     return False
 
-        if inspection.get('has_shared_laundry'):
-            if not inspection.get('laundry_condition') or inspection.get('laundry_coin_revenue_monthly') is None:
-                return False
+        # if inspection.get('has_shared_laundry'):
+        #     if not inspection.get('laundry_condition') or inspection.get('laundry_coin_revenue_monthly') is None:
+        #         return False
 
-        return True
+        # return True
+
+        return False

@@ -1528,10 +1528,25 @@ def is_property_maps_done(row) -> bool:
 
 def get_phase2_data_checklist():
     """Gets all phase 1 properties and their data checklist"""
-    pass
+    combined_df = get_combined_phase1_qualifiers()
+    checklist = {}
+
+    for _, row in combined_df.iterrows():
+      checklist[row['address1']] = {
+        "has_listing": row['listed_date'] is not None,
+        "has_inspection_done": inspections.is_property_inspection_done(row['address1']),
+        "has_maps_data": is_property_maps_done(row),
+        "has_school_district": row['school_district'] is not None,
+        "has_rent_dd": row['rent_dd_completed'] is not None,
+        "has_neighbordhood_dd": row['neighborhood_dd_completed'] is not None,
+        "has_taxes": row['annual_tax_amount'] is not None,
+        "has_seller_circumstances": row['seller_circumstances'] is not None,
+      }
+    
+    return checklist
 
 def display_phase2_data_checklist():
-    combined_df = get_combined_phase1_qualifiers()
+    checklist = get_phase2_data_checklist()
     table = Table(title="Phase 2 Data Checklist", show_header=True, header_style="bold green")
 
     table.add_column("Address", style="cyan")
@@ -1544,26 +1559,20 @@ def display_phase2_data_checklist():
     table.add_column("TAXS", style="white")
     table.add_column("CIRC", style="white")
 
-    for _, row in combined_df.iterrows():
-        has_listing = "[green]done[/green]" if row["listed_date"] else "[dim]none[/dim]"
-        has_inspection_done = "[green]done[/green]" if inspections.is_property_inspection_done(row["address1"]) else "[dim]none[/dim]"
-        has_maps_data = "[green]done[/green]" if is_property_maps_done(row) else "[dim]none[/dim]"
-        has_school_district = "[green]done[/green]" if row["school_district"] else "[dim]none[/dim]"
-        has_rent_dd = "[green]done[/green]" if row["rent_dd_completed"] else "[dim]none[/dim]"
-        has_neighborhood_dd = "[green]done[/green]" if row["neighborhood_dd_completed"] else "[dim]none[/dim]"
-        has_taxes = "[green]done[/green]" if row.get("annual_tax_amount") else "[dim]none[/dim]"
-        has_seller_circumstances = "[green]done[/green]" if row.get("seller_circumstances") else "[dim]none[/dim]"
+    def format_check(has_value):
+        return "[green]done[/green]" if has_value else "[dim]none[/dim]"
 
+    for address, checks in checklist.items():
         table.add_row(
-            row["address1"],
-            has_listing,
-            has_inspection_done,
-            has_maps_data,
-            has_school_district,
-            has_rent_dd,
-            has_neighborhood_dd,
-            has_taxes,
-            has_seller_circumstances,
+            address,
+            format_check(checks["has_listing"]),
+            format_check(checks["has_inspection_done"]),
+            format_check(checks["has_maps_data"]),
+            format_check(checks["has_school_district"]),
+            format_check(checks["has_rent_dd"]),
+            format_check(checks["has_neighbordhood_dd"]),
+            format_check(checks["has_taxes"]),
+            format_check(checks["has_seller_circumstances"]),
         )
 
     console.print(table)
