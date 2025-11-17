@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from typing import Optional
-from run import reload_dataframe, get_all_phase1_qualifying_properties, get_phase2_data_checklist
+from run import reload_dataframe, get_all_phase1_qualifying_properties, get_phase2_data_checklist, get_all_phase2_properties
 from models.inspections import InspectionCreate, UnitInspectionCreate
 from inspections import InspectionsClient
 from helpers import convert_numpy_types
@@ -51,8 +51,6 @@ down_payment_rate = loan_details['down_payment_rate']
 loan_length_years = loan_details['years']
 mip_upfront_rate = loan_details['mip_upfront_rate']
 mip_annual_rate = loan_details['mip_annual_rate']
-
-
 
 def reload_dataframe_logic():
     global df, rents
@@ -197,7 +195,7 @@ async def get_phase1_qualifiers_route():
         print(e)
         raise HTTPException(status_code=500, detail=f"Error filtering properties: {str(e)}")
 
-@app.get("/properties/phase2/data-checklist")
+@app.get("/properties/phase2")
 async def get_phase2_data_checklist_route():
     """
     Gets all phase1 properties and their subsequent 'data checklist' to easily display the remaining work
@@ -211,10 +209,26 @@ async def get_phase2_data_checklist_route():
         raise HTTPException(status_code=404, detail="No properties found")
     
     try:
-        return get_phase2_data_checklist()
+        return get_all_phase2_properties()
     except Exception as e:
         print(e)
-        raise HTTPException(status_code=500, detail=f"Error getting phase2 data checklist: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting phase2 properties: {str(e)}")
+
+@app.get("/properties/phase2/{address1}/data-checklist")
+async def get_phase2_data_checklist_for_property_route(address1: str):
+    global df
+
+    reload_dataframe_logic()
+
+    if df is None or df.empty:
+        raise HTTPException(status_code=404, detail="No properties found")
+    
+    try:
+        checklist = get_phase2_data_checklist()
+        return checklist[address1]
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=500, detail=f"Error getting phase2 data checklist for property: {str(e)}")
 
 
 if __name__ == "__main__":
