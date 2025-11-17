@@ -830,7 +830,7 @@ def get_combined_phase1_qualifiers(active=True):
     ).drop_duplicates(subset=["address1"], keep="first") 
     return combined 
 
-def get_all_phase2_qualifying_properties():
+def get_all_phase2_properties():
     """
     This method filters phase 1 qualifiers based property condition, rentability, and affordability 
     Current criteria:
@@ -848,26 +848,37 @@ def get_all_phase2_qualifying_properties():
         if all(checks.values())
     ]
 
-    completed_df = p1_df[p1_df['address1'].isin(complete_address1s)] 
+    completed_df = p1_df[p1_df['address1'].isin(complete_address1s)].copy()
+    incompleted_df = p1_df[~p1_df['address1'].isin(complete_address1s)].copy()
 
     # STEP 2 - RUN ALL NEW EVALUATIONS AND MODIFY DATAFRAME
-    completed_df['property_condition'] = p1_df.apply(inspections.get_property_condition, axis=1) # TODO - finish this
-    completed_df['has_inspection_dealbreakers'] = p1_df.apply(inspections.has_dealbreakers, axis=1) # TODO - finish this
-    completed_df['seller_motivation_score'] = p1_df.apply(get_seller_motivation_score, axis=1)  # TODO - finish this
-    completed_df['rentability_score'] = p1_df.apply(get_rentability_score, axis=1)  # TODO - finish this
-    completed_df['total_diy_repair_costs'] = p1_df.apply(inspections.get_total_diy_repair_costs, axis=1)  # TODO - finish this
-    completed_df['total_pro_repair_costs'] = p1_df.apply(inspections.get_total_pro_repair_costs, axis=1)  # TODO - finish this
-    completed_df['est_diy_repair_costs'] = p1_df.apply(inspections.get_est_diy_repair_costs, axis=1)  # TODO - finish this
-    completed_df['est_pro_repair_costs'] = p1_df.apply(inspections.get_est_pro_repair_costs, axis=1)  # TODO - finish this
+    qualifying_df = [] 
+    disqualifying_df = [] 
 
-    # STEP 3 - CREATE CRITERIA AND QUERY
-    criteria = "has_inspection_dealbreakers == False & costs_to_income <= 0.45" # todo add more here
-    filtered_df = p1_df.query(criteria)
+    if not completed_df.empty:
+        completed_df['property_condition'] = completed_df.apply(lambda row: inspections.get_property_condition(row), axis=1) # TODO - finish this
+        completed_df['has_inspection_dealbreakers'] = completed_df.apply(lambda row: inspections.has_dealbreakers(row), axis=1) # TODO - finish this
+        completed_df['seller_motivation_score'] = completed_df.apply(lambda row: get_seller_motivation_score(row), axis=1)  # TODO - finish this
+        completed_df['rentability_score'] = completed_df.apply(lambda row: get_rentability_score(row), axis=1)  # TODO - finish this
+        completed_df['total_diy_repair_costs'] = completed_df.apply(lambda row: inspections.get_total_diy_repair_costs(row), axis=1)  # TODO - finish this
+        completed_df['total_pro_repair_costs'] = completed_df.apply(lambda row: inspections.get_total_pro_repair_costs(row), axis=1)  # TODO - finish this
+        completed_df['est_diy_repair_costs'] = completed_df.apply(lambda row: inspections.get_est_diy_repair_costs(row), axis=1)  # TODO - finish this
+        completed_df['est_pro_repair_costs'] = completed_df.apply(lambda row: inspections.get_est_pro_repair_costs(row), axis=1)  # TODO - finish this
+
+        # STEP 3 - CREATE CRITERIA AND QUERY
+        qualifying_criteria = "has_inspection_dealbreakers == False & costs_to_income <= 0.45" # todo add more here
+        disqualifying_criteria = "has_inspection_dealbreaks == True | costs_to_income >= 0.45" # todo add more here
+        qualifying_df = completed_df.query(qualifying_criteria)
+        disqualifying_df = completed_df.query(disqualifying_criteria)
 
     # STEP 4 - CREATE A DF-RELATIVE RANKING AMONGST QUALIFIERS
     # maybe pandas has ranking methods?
 
-    return filtered_df
+    return {
+        "qualifiers": qualifying_df,
+        "disqualifiers": disqualifying_df,
+        "incomplete_data": incompleted_df if not incompleted_df.empty else [],
+    }
 
 def display_all_phase1_qualifying_properties():
     current, contingent, creative = get_all_phase1_qualifying_properties()
@@ -888,9 +899,23 @@ def display_all_phase1_qualifying_properties():
     )
 
 def display_all_phase2_qualifying_properties():
-    df = get_all_phase2_qualifying_properties()
-    display_all_properties(properties_df=df, title="Phase 2 Qualifiers")
+    dfs = get_all_phase2_properties()
+    
+    if len(dfs['incomplete_data']) == 0:
+      console.print("[dim]All properties have complete data![/dim]")
+    else:
+        display_all_properties(properties_df=dfs["incomplete_data"], title="Need more data")
 
+    if len(dfs['qualifiers']) == 0:
+      console.print("[dim]No properties qualify[/dim]")
+    else:
+      display_all_properties(properties_df=dfs["qualifiers"], title="Phase 2 Qualifiers")
+
+    if len(dfs["disqualifiers"]) == 0:
+      console.print('[dim]No properties are disqualified[/dim]')
+    else:
+      display_all_properties(properties_df=dfs["disqualifiers"], title="Phase 2 Disqualifiers")
+data
 def display_creative_pricing_all_properties():
     creative_df = get_additional_room_rental_df()
     display_all_properties(

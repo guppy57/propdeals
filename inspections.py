@@ -39,7 +39,7 @@ class InspectionsClient():
         return response.data[0]
     
     def get_property_condition(self, row) -> str:
-        condition = "" # excellent, good, fair, poor
+        condition = "fair" # excellent, good, fair, poor
 
         # ideally, we want our property inspection data to give us this score, instead of our gut feeling about it
 
