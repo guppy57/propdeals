@@ -11,3 +11,4 @@ InquirerPy
 prompt-toolkit
 openai
 tavily-python
+numpy_financial
