@@ -489,12 +489,9 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
     table.add_column("Cost/Inc", justify="right", style="bold white")
     table.add_column("DS", justify="right", style="bold white")  # deal score
     table.add_column("MS", justify="right", style="bold white")  # mobility score
-    table.add_column(
-        "10Y", justify="right", style="bold white"
-    )  # 10 year investment growth
-    table.add_column(
-        "IRR 10Y", justify="right", style="bold white"
-    )  # 10 year IRR percentage
+    table.add_column("10Y", justify="right", style="bold white")  # 10 year investment growth
+    table.add_column("IRR 10Y", justify="right", style="bold white")  
+    table.add_column("NPV10Y", justify="right", style="bold white") # Net present value 10 years
 
     if show_status:
         table.add_column("Status", justify="right", style="bold white")
@@ -555,6 +552,8 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             else ("yellow" if row["costs_to_income"] <= costs_to_income_75th_percentile else "red")
         )
 
+        npv_style = "red" if row["npv_10yr"] <= 0 else "green" 
+
         row_args = [
             str(row["address1"]),
             f"[{price_style}]{format_currency(row['purchase_price'])}[/{price_style}]",
@@ -573,7 +572,8 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             f"[{deal_score_style}]{int(row['deal_score'])}/38[/{deal_score_style}]",
             f"[{mobility_score_style}]{int(row['mobility_score'])}[/{mobility_score_style}]",
             f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]",
-            f"[{irr_10yr_style}]{format_percentage(row['irr_10yr'])}[/{irr_10yr_style}]"
+            f"[{irr_10yr_style}]{format_percentage(row['irr_10yr'])}[/{irr_10yr_style}]",
+            f"[{npv_style}]{format_currency(row["npv_10yr"])}[/{npv_style}]"
         ]
 
         if show_status:
@@ -828,7 +828,7 @@ def get_combined_phase1_qualifiers(active=True):
     combined = pd.concat(
         [current_df, reduced_df, creative_df], ignore_index=True
     ).drop_duplicates(subset=["address1"], keep="first") 
-    return combined 
+    return combined
 
 def get_all_phase2_properties():
     """
@@ -915,7 +915,7 @@ def display_all_phase2_qualifying_properties():
       console.print('[dim]No properties are disqualified[/dim]')
     else:
       display_all_properties(properties_df=dfs["disqualifiers"], title="Phase 2 Disqualifiers")
-data
+
 def display_creative_pricing_all_properties():
     creative_df = get_additional_room_rental_df()
     display_all_properties(
