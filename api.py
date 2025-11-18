@@ -204,12 +204,17 @@ async def get_phase2_data_checklist_route():
     global df
 
     reload_dataframe_logic()
-    
+
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail="No properties found")
-    
+
     try:
-        return get_all_phase2_properties()
+        result = get_all_phase2_properties()
+        return {
+            "qualifiers": convert_numpy_types(result["qualifiers"].fillna(0).to_dict('records')) if hasattr(result["qualifiers"], 'to_dict') else result["qualifiers"],
+            "disqualifiers": convert_numpy_types(result["disqualifiers"].fillna(0).to_dict('records')) if hasattr(result["disqualifiers"], 'to_dict') else result["disqualifiers"],
+            "incomplete_data": convert_numpy_types(result["incomplete_data"].fillna(0).to_dict('records')) if hasattr(result["incomplete_data"], 'to_dict') else result["incomplete_data"],
+        }
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail=f"Error getting phase2 properties: {str(e)}")
