@@ -6,8 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from typing import Optional
-from run import reload_dataframe, get_all_phase1_qualifying_properties, get_phase2_data_checklist, get_all_phase2_properties
-from models.inspections import InspectionCreate, UnitInspectionCreate
+from run import reload_dataframe, get_all_phase1_qualifying_properties, get_phase2_data_checklist, get_all_phase2_properties, get_combined_phase1_qualifiers
 from inspections import InspectionsClient
 from helpers import convert_numpy_types
 
@@ -230,7 +229,13 @@ async def get_phase2_data_checklist_for_property_route(address1: str):
     
     try:
         checklist = get_phase2_data_checklist()
-        return checklist[address1]
+        properties = get_combined_phase1_qualifiers()
+        property = properties.query('address1 == @address1')
+
+        return {
+            "checklist": checklist[address1],
+            "property": convert_numpy_types(property.fillna(0).to_dict('records')[0])
+        }
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail=f"Error getting phase2 data checklist for property: {str(e)}")
