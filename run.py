@@ -25,12 +25,14 @@ from helpers import (
 from loans import LoansProvider
 from rent_research import RentResearcher
 from inspections import InspectionsClient
+from neighborhoods import NeighborhoodsClient
 
 load_dotenv()
 
 console = Console() 
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 inspections = InspectionsClient(supabase_client=supabase)
+neighborhoods = NeighborhoodsClient()
 
 LAST_USED_LOAN = 1
 LAND_VALUE_PCT = 0.20  # 20% of purchase price is land (non-depreciable)
@@ -1566,16 +1568,18 @@ def get_phase2_data_checklist():
     checklist = {}
 
     for _, row in combined_df.iterrows():
-      checklist[row['address1']] = {
-        "has_listing": row['listed_date'] is not None,
-        "has_inspection_done": inspections.is_property_inspection_done(row['address1']),
-        "has_maps_data": is_property_maps_done(row),
-        "has_school_district": row['school_district'] is not None,
-        "has_rent_dd": row['rent_dd_completed'] is not None,
-        "has_neighbordhood_dd": row['neighborhood_dd_completed'] is not None,
-        "has_taxes": row['annual_tax_amount'] is not None,
-        "has_seller_circumstances": row['seller_circumstances'] is not None,
-      }
+        checklist[row["address1"]] = {
+            "has_listing": row["listed_date"] is not None,
+            "has_inspection_done": inspections.is_property_inspection_done(
+                row["address1"]
+            ),
+            "has_maps_data": is_property_maps_done(row),
+            "has_school_district": row["school_district"] is not None,
+            "has_rent_dd": row["rent_dd_completed"] is not None,
+            "has_neighborhood_assessment": neighborhoods.is_neighborhood_assessment_complete(row["address1"]),
+            "has_taxes": row["annual_tax_amount"] is not None,
+            "has_seller_circumstances": row["seller_circumstances"] is not None,
+        }
     
     return checklist
 
@@ -1604,7 +1608,7 @@ def display_phase2_data_checklist():
             format_check(checks["has_maps_data"]),
             format_check(checks["has_school_district"]),
             format_check(checks["has_rent_dd"]),
-            format_check(checks["has_neighbordhood_dd"]),
+            format_check(checks["has_neighborhood_assessment"]),
             format_check(checks["has_taxes"]),
             format_check(checks["has_seller_circumstances"]),
         )
