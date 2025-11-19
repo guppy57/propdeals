@@ -26,6 +26,7 @@ from loans import LoansProvider
 from rent_research import RentResearcher
 from inspections import InspectionsClient
 from neighborhoods import NeighborhoodsClient
+from exporter import export_property_analysis
 
 load_dotenv()
 
@@ -1340,8 +1341,9 @@ def analyze_property(property_id):
         "Would you like to generate or view rental market research for this property?",
         choices=[
             "Generate new rent research (AI-powered)",
-            "View existing research reports", 
+            "View existing research reports",
             "Generate rent estimates from report",
+            "Export property analysis to PDF",
             "Skip - return to main menu"
         ]
     ).ask()
@@ -1352,6 +1354,14 @@ def analyze_property(property_id):
         handle_view_research_reports(property_id)
     elif research_choice == "Generate rent estimates from report":
         handle_generate_rent_estimates(property_id)
+    elif research_choice == "Export property analysis to PDF":
+        downloads_folder = os.getenv("DOWNLOADS_FOLDER", ".")
+        safe_address = property_id.replace(' ', '_').replace(',', '').replace('.', '')
+        output_path = os.path.join(downloads_folder, f"{safe_address}_analysis.pdf")
+
+        row = df[df['address1'] == property_id].iloc[0]
+        result_path = export_property_analysis(row, rents, after_tax_monthly_income, output_path)
+        console.print(f"[green]PDF exported successfully to: {result_path}[/green]")
 
 def handle_rent_research_generation(property_id: str):
     researcher = RentResearcher(supabase, console)

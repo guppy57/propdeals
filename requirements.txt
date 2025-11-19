@@ -12,3 +12,4 @@ prompt-toolkit
 openai
 tavily-python
 numpy_financial
+fpdf2
