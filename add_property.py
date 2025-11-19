@@ -1,12 +1,14 @@
+import os
+import time
+from datetime import date, timedelta
+import math
+
+import questionary
+import requests
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from dotenv import load_dotenv
-from datetime import date, timedelta
-import os
-import questionary
-import requests
-import time
 
 load_dotenv()
 
@@ -17,7 +19,7 @@ RENTCAST_HEADERS = {
 
 console = Console()
 
-def get_rental_estimations(property_details, unit_configs):
+def get_rental_estimations_multifamily(property_details, unit_configs):
     total_beds = property_details["beds"]
     total_baths = property_details["baths"] * 0.5
     total = total_beds + total_baths
@@ -47,9 +49,10 @@ def get_rental_estimations(property_details, unit_configs):
         except Exception as e:
             console.print(e, style="bold red")
             console.print(
-                "Something went wrong when trying to pulling rental estimate",
+                "Something went wrong when trying to pull rental estimate for multifamily",
                 style="bold red",
             )
+            return None, None
 
         unit["rent_estimate"] = int(float(data["rent"]))
         unit["rent_estimate_low"] = int(float(data["rentRangeLow"]))
@@ -58,6 +61,62 @@ def get_rental_estimations(property_details, unit_configs):
         comparables.append(data["comparables"])
 
     return unit_configs, comparables
+
+def get_rental_estimations_singlefamily(property_details):
+    try:
+        request = requests.get(
+            "https://api.rentcast.io/v1/avm/rent/long-term",
+            headers=RENTCAST_HEADERS,
+            params={
+                "address": property_details["full_address"],
+                "propertyType": "Single-Family",
+                "bedrooms": property_details["beds"],
+                "bathrooms": property_details["baths"],
+                "squareFootage": property_details["square_ft"],
+                "maxRadius": 1,
+                "compCount": 25,
+            },
+        )
+
+        data = request.json()
+    except Exception as e:
+        console.print(e, style="bold red")
+        console.print(
+            "Something went wrong when trying to pull rental estimate for single family",
+            style="bold red",
+        )
+        return None, None
+
+    try:
+        mid = int(float(data["rent"]) * 1.3)
+        low = int(float(data["rentRangeLow"]) * 1.3)
+        high = int(float(data["rentRangeHigh"]) * 1.3)
+        comparables = data["comparables"]
+    except KeyError as e:
+        console.print(f"Missing expected field in API response: {e}", style="bold red")
+        return None, None
+
+    total_beds = property_details["beds"]
+
+    if total_beds <= 0:
+        console.print("Invalid bedroom count (must be > 0)", style="bold red")
+        return None, None
+
+    rent_comps = []
+
+    for i in range(total_beds):
+        rent_comps.append({
+            "address1": property_details["address1"],
+            "unit_num": i + 1,
+            "beds": 1,
+            "baths": 0,
+            "rent_estimate": math.ceil(mid / total_beds),
+            "rent_estimate_low": math.ceil(low / total_beds),
+            "rent_estimate_high": math.ceil(high / total_beds),
+            "estimated_sqrft": 0
+        })
+
+    return rent_comps, comparables 
 
 def get_political_districts(address):
     pass
@@ -68,7 +127,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     on the earth (specified in decimal degrees)
     Returns distance in miles
     """
-    from math import radians, cos, sin, asin, sqrt
+    from math import asin, cos, radians, sin, sqrt
 
     # Convert decimal degrees to radians
     lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
@@ -458,7 +517,7 @@ def collect_property_details():
     purchase_price = questionary.text("Purchase price").ask()
     property_type = questionary.select(
         "Property type",
-        choices=["Duplex", "Triplex", "Fourplex"],
+        choices=["Single Family", "Duplex", "Triplex", "Fourplex"],
     ).ask()
     beds = questionary.text("Bedrooms").ask()
     baths = questionary.text("Bathrooms").ask()
@@ -468,7 +527,7 @@ def collect_property_details():
     has_reduced_price = questionary.confirm("Has had price reductions?").ask()
     has_tenants = questionary.confirm("Are there current tenants?").ask()
     address1 = full_address.split(",")[0]
-    unit_conversion = {"Duplex": 2, "Triplex": 3, "Fourplex": 4}
+    unit_conversion = {"Single Family": 0, "Duplex": 2, "Triplex": 3, "Fourplex": 4}
     units = unit_conversion[property_type]
     listed_date = (date.today() - timedelta(days=int(days_listed))).isoformat() 
 
@@ -691,10 +750,113 @@ def save_comps_to_db(comps, subject_rent_id, supabase):
             print(f"Exception: {e} (save_comps_to_db)")
             print(f"Exception type: {type(e)} (save_comps_to_db)")
 
+def save_property_comps_to_db(comps, address1, supabase):
+    for comp in comps:
+        comp_row = {
+            "id": comp.get("id"),
+            "address": comp.get("formattedAddress"),
+            "county": comp.get("county"),
+            "latitude": comp.get("latitude"),
+            "longitude": comp.get("longitude"),
+            "property_type": comp.get("propertyType"),
+            "beds": comp.get("bedrooms"),
+            "baths": comp.get("bathrooms"),
+            "square_feet": comp.get("squareFootage"),
+            "lot_size": comp.get("lotSize"),
+            "built_in": comp.get("yearBuilt"),
+            "rent_price": comp.get("price"),
+            "status": comp.get("status"),
+            "days_old": comp.get("daysOld"),
+        }
 
-def add_rent_to_supabase(rent_comps, comparables, supabase) -> int:
+        try:
+            # Check if this comparable already exists
+            existing = (
+                supabase.table("comparable_rents")
+                .select("id")
+                .eq("id", comp_row["id"])
+                .execute()
+            )
+
+            if existing.data:
+                print(
+                    f"Comparable {comp_row['id']} already exists, creating new relationship..."
+                )
+            else:
+                query = supabase.table("comparable_rents").insert(comp_row)
+                response = query.execute()
+
+                if hasattr(response, "data"):
+                    print(f"Response data: {response.data} (save_property_comps_to_db)")
+                else:
+                    print("Response has no 'data' attribute (save_property_comps_to_db)")
+
+            existing_join = (
+                supabase.table("rent_comp_to_property")
+                .select("id, distance, correlation")
+                .eq("address1", address1)
+                .eq("comp_id", comp.get("id"))
+                .execute()
+            )
+
+            if existing_join.data:
+                # Check if distance/correlation are missing and update if needed
+                existing_record = existing_join.data[0]
+                needs_update = (
+                    existing_record.get("distance") is None or
+                    existing_record.get("correlation") is None
+                )
+
+                if needs_update:
+                    print(
+                        f"Updating distance/correlation for existing relationship: {comp_row['id']} <-> {address1}"
+                    )
+                    update_data = {
+                        "distance": comp.get("distance"),
+                        "correlation": comp.get("correlation")
+                    }
+
+                    update_query = (
+                        supabase.table("rent_comp_to_property")
+                        .update(update_data)
+                        .eq("id", existing_record["id"])
+                    )
+                    update_response = update_query.execute()
+
+                    if hasattr(update_response, "data"):
+                        print(f"Updated relationship data: {update_response.data}")
+                    else:
+                        print("Update response has no 'data' attribute")
+                else:
+                    print(
+                        f"{comp_row['id']} and property {address1} are already joined with complete data, skipping.."
+                    )
+                continue
+
+            join_row = {
+                "comp_id": comp.get("id"),
+                "address1": address1,
+                "distance": comp.get("distance"),
+                "correlation": comp.get("correlation")
+            }
+
+            query2 = supabase.table("rent_comp_to_property").insert(join_row)
+            response2 = query2.execute()
+
+            if hasattr(response2, "data"):
+                print(f"Response2 data: {response2.data} (save_property_comps_to_db)")
+            else:
+                print("Response2 has no 'data' attribute (save_property_comps_to_db)")
+        except Exception as e:
+            print(f"Exception: {e} (save_property_comps_to_db)")
+            print(f"Exception type: {type(e)} (save_property_comps_to_db)")
+
+def get_current_rent_estimates_count(supabase) -> int:
     current_rents = supabase.table("rent_estimates").select("id").execute()
-    current_count = len(current_rents.data)
+    return len(current_rents.data)
+
+def add_rent_to_supabase(rent_comps, comparables, supabase) -> bool:
+    current_count = get_current_rent_estimates_count(supabase) 
     new_ids = []
 
     # Insert all rent estimates first
@@ -724,6 +886,31 @@ def add_rent_to_supabase(rent_comps, comparables, supabase) -> int:
 
     return True
 
+def add_rent_to_supabase_singlefamily(address1, unit_configs_w_rent, property_comparables, supabase) -> bool:
+    current_count = get_current_rent_estimates_count(supabase)
+
+    for i, unit_config in enumerate(unit_configs_w_rent):
+        new_id = current_count + 1 + i
+        unit_config["id"] = new_id 
+
+        try:
+            query = supabase.table("rent_estimates").insert(unit_config)
+            response = query.execute()
+            if hasattr(response, "data"):
+                print(f"Response data: {response.data}")
+            else:
+                print("Response has no 'data' attribute")
+                return False
+        except Exception as e:
+            print(f"Exception: {e}")
+            print(f"Exception type: {type(e)}")
+            return False
+    
+    # Save comparables for the entire property
+    save_property_comps_to_db(property_comparables, address1, supabase)
+    return True
+
+
 def run_add_property(supabase_client) -> dict:
     console.print("Let's add a new property to analyze", style="bold red")
     proceed = False
@@ -747,7 +934,7 @@ def run_add_property(supabase_client) -> dict:
     console.print("Property details added to Supabase", style="bold green")
     proceed2 = False
 
-    while not proceed2:
+    while not proceed2 and property_details["units"] != 0:
         unit_count = property_details["units"]
         console.print(
             f"Let's now add our rent comparables for this property.\nWe will add details for the {unit_count} units.",
@@ -761,8 +948,13 @@ def run_add_property(supabase_client) -> dict:
         if not proceed2:
             console.print("Add the rent comparables again", style="bold blue")
 
-    rent_comps, comparables = get_rental_estimations(property_details, unit_configs)
-    succeeded2 = add_rent_to_supabase(rent_comps, comparables, supabase_client)
+    if property_details["units"] != 0:
+        rent_comps, comparables = get_rental_estimations_multifamily(property_details, unit_configs)
+        succeeded2 = add_rent_to_supabase(rent_comps, comparables, supabase_client)
+    else:
+        unit_configs_w_rent, comparables = get_rental_estimations_singlefamily(property_details)
+        succeeded2 = add_rent_to_supabase_singlefamily(property_details["address1"], unit_configs_w_rent, comparables, supabase_client)
+      
 
     if not succeeded2:
         console.print("Something went wrong when adding rent comps", style="bold red")

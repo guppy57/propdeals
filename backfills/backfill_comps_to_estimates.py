@@ -1,9 +1,11 @@
-from add_property import save_comps_to_db, get_rental_estimations
-from supabase import create_client, Client
 import os
+
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.progress import track
+from supabase import Client, create_client
+
+from add_property import get_rental_estimations_multifamily, save_comps_to_db
 
 load_dotenv()
 
@@ -100,7 +102,7 @@ def backfill_comparables_for_property(supabase: Client, property_record):
         console.print(f"Fetching new rental comparables for {len(unit_configs)} units...", style="cyan")
         
         # Get fresh rental estimations and comparables
-        updated_unit_configs, comparables = get_rental_estimations(property_data, unit_configs)
+        updated_unit_configs, comparables = get_rental_estimations_multifamily(property_data, unit_configs)
         
         # Save comparables for each unit
         for i, unit_comparables in enumerate(comparables):
