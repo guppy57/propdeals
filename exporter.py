@@ -36,7 +36,7 @@ class PropertyPDF(FPDF):
         self.cell(0, 6, str(value), new_x='LMARGIN', new_y='NEXT')
 
 
-def export_property_analysis(row, rents_df, after_tax_monthly_income, output_path=None):
+def export_property_analysis(row, rents_df, after_tax_monthly_income, loan_info=None, assumptions=None, output_path=None):
     """
     Export property analysis to PDF.
 
@@ -44,6 +44,8 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, output_pat
         row: pandas Series containing property data (single row from df)
         rents_df: DataFrame containing rent data for the property's units
         after_tax_monthly_income: float, user's monthly after-tax income
+        loan_info: dict, optional loan parameters (interest_rate, down_payment_rate, years, etc.)
+        assumptions: dict, optional investment assumptions (appreciation_rate, vacancy_rate, etc.)
         output_path: str, optional path for output PDF. If None, auto-generates from address
 
     Returns:
@@ -73,7 +75,56 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, output_pat
     pdf.info_line('Cost per Sq Ft', format_currency(row['cost_per_sqrft']))
     pdf.ln(5)
 
-    # 2. Unit Rent Estimates
+    # 2. Loan Details & Assumptions
+    if loan_info or assumptions:
+        pdf.section_title('Loan Details & Assumptions')
+
+        if loan_info:
+            pdf.set_font('Helvetica', 'B', 10)
+            pdf.cell(0, 6, 'Loan Details:', new_x='LMARGIN', new_y='NEXT')
+            pdf.set_font('Helvetica', '', 10)
+            if 'name' in loan_info:
+                pdf.info_line('Loan Type', loan_info['name'])
+            if 'interest_rate' in loan_info:
+                pdf.info_line('Interest Rate', format_percentage(loan_info['interest_rate']))
+            if 'apr_rate' in loan_info:
+                pdf.info_line('APR', format_percentage(loan_info['apr_rate']))
+            if 'down_payment_rate' in loan_info:
+                pdf.info_line('Down Payment', format_percentage(loan_info['down_payment_rate']))
+            if 'years' in loan_info:
+                pdf.info_line('Loan Term', f"{loan_info['years']} years")
+            if 'mip_upfront_rate' in loan_info:
+                pdf.info_line('MIP Upfront', format_percentage(loan_info['mip_upfront_rate']))
+            if 'mip_annual_rate' in loan_info:
+                pdf.info_line('MIP Annual', format_percentage(loan_info['mip_annual_rate']))
+            pdf.ln(3)
+
+        if assumptions:
+            pdf.set_font('Helvetica', 'B', 10)
+            pdf.cell(0, 6, 'Investment Assumptions:', new_x='LMARGIN', new_y='NEXT')
+            pdf.set_font('Helvetica', '', 10)
+            if 'appreciation_rate' in assumptions:
+                pdf.info_line('Appreciation Rate', format_percentage(assumptions['appreciation_rate']))
+            if 'rent_appreciation_rate' in assumptions:
+                pdf.info_line('Rent Appreciation', format_percentage(assumptions['rent_appreciation_rate']))
+            if 'property_tax_rate' in assumptions:
+                pdf.info_line('Property Tax Rate', format_percentage(assumptions['property_tax_rate']))
+            if 'home_insurance_rate' in assumptions:
+                pdf.info_line('Home Insurance Rate', format_percentage(assumptions['home_insurance_rate']))
+            if 'vacancy_rate' in assumptions:
+                pdf.info_line('Vacancy Rate', format_percentage(assumptions['vacancy_rate']))
+            if 'repair_savings_rate' in assumptions:
+                pdf.info_line('Repair Reserve', format_percentage(assumptions['repair_savings_rate']))
+            if 'closing_costs_rate' in assumptions:
+                pdf.info_line('Closing Costs Rate', format_percentage(assumptions['closing_costs_rate']))
+            if 'discount_rate' in assumptions:
+                pdf.info_line('Discount Rate', format_percentage(assumptions['discount_rate']))
+            # Fixed constants
+            pdf.info_line('Federal Tax Rate', '22.00%')
+            pdf.info_line('Depreciation Period', '27.5 years')
+        pdf.ln(5)
+
+    # 3. Unit Rent Estimates
     pdf.section_title('Unit Rent Estimates')
 
     property_rents = rents_df[rents_df['address1'] == property_address]
@@ -110,7 +161,7 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, output_pat
     pdf.cell(col_widths[3], 6, '', border=1)
     pdf.ln(8)
 
-    # 3. Income Breakdown
+    # 4. Income Breakdown
     pdf.section_title('Income Breakdown')
     pdf.info_line('Total Monthly Rent (All Units)', format_currency(row['total_rent']))
     pdf.info_line('Your Unit Rent (Not Collected)', format_currency(row['min_rent']))
@@ -136,7 +187,7 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, output_pat
     pdf.info_line('Housing Cost to Income Ratio', format_percentage(row['costs_to_income']))
     pdf.ln(5)
 
-    # 4. Investment Metrics (Year 1 vs Year 2)
+    # 5. Investment Metrics (Year 1 vs Year 2)
     pdf.section_title('Investment Metrics')
 
     # Table header
@@ -184,7 +235,7 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, output_pat
         pdf.ln()
     pdf.ln(5)
 
-    # 5. Investment Projections
+    # 6. Investment Projections
     pdf.section_title('Investment Projections')
 
     # Table header
@@ -218,7 +269,7 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, output_pat
         pdf.ln()
     pdf.ln(5)
 
-    # 6. Deal Score Breakdown
+    # 7. Deal Score Breakdown
     pdf.section_title('Investment Criteria Breakdown')
 
     # Calculate scores (same logic as analyze_property)
@@ -299,7 +350,7 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, output_pat
     pdf.cell(criteria_col_widths[3], 6, deal_rating, border=1)
     pdf.ln(8)
 
-    # 7. Mobility Scores
+    # 8. Mobility Scores
     pdf.section_title('Mobility Score Breakdown')
 
     # Table header
@@ -344,7 +395,7 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, output_pat
     pdf.cell(mobility_col_widths[4], 6, f"{total_mobility_score:.2f}", border=1, align='C')
     pdf.ln(8)
 
-    # 8. Cost Breakdown
+    # 9. Cost Breakdown
     pdf.section_title('Cost Breakdown')
 
     # Table header
@@ -386,7 +437,7 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, output_pat
     pdf.cell(cost_col_widths[2], 6, format_currency(row['annual_electricity_cost_est']), border=1, align='R')
     pdf.ln(8)
 
-    # 9. Investment Summary
+    # 10. Investment Summary
     pdf.section_title('Investment Summary')
     pdf.info_line('Down Payment', format_currency(row['down_payment']))
     pdf.info_line('Closing Costs', format_currency(row['closing_costs']))

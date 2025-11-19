@@ -1360,7 +1360,30 @@ def analyze_property(property_id):
         output_path = os.path.join(downloads_folder, f"{safe_address}_analysis.pdf")
 
         row = df[df['address1'] == property_id].iloc[0]
-        result_path = export_property_analysis(row, rents, after_tax_monthly_income, output_path)
+
+        # Prepare loan info dict
+        loan_info = {
+            'interest_rate': interest_rate,
+            'apr_rate': apr_rate,
+            'down_payment_rate': down_payment_rate,
+            'years': loan_length_years,
+            'mip_upfront_rate': mip_upfront_rate,
+            'mip_annual_rate': mip_annual_rate,
+        }
+
+        # Prepare assumptions dict
+        assumptions = {
+            'appreciation_rate': appreciation_rate,
+            'rent_appreciation_rate': rent_appreciation_rate,
+            'property_tax_rate': property_tax_rate,
+            'home_insurance_rate': home_insurance_rate,
+            'vacancy_rate': vacancy_rate,
+            'repair_savings_rate': repair_savings_rate,
+            'closing_costs_rate': closing_costs_rate,
+            'discount_rate': discount_rate,
+        }
+
+        result_path = export_property_analysis(row, rents, after_tax_monthly_income, loan_info, assumptions, output_path)
         console.print(f"[green]PDF exported successfully to: {result_path}[/green]")
 
 def handle_rent_research_generation(property_id: str):
