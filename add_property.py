@@ -69,7 +69,7 @@ def get_rental_estimations_singlefamily(property_details):
             headers=RENTCAST_HEADERS,
             params={
                 "address": property_details["full_address"],
-                "propertyType": "Single-Family",
+                "propertyType": "Single Family",
                 "bedrooms": property_details["beds"],
                 "bathrooms": property_details["baths"],
                 "squareFootage": property_details["square_ft"],
