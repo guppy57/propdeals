@@ -1,6 +1,8 @@
+import math
 import os
 from datetime import datetime
 
+import numpy_financial as npf
 import pandas as pd
 import questionary
 from dotenv import load_dotenv
@@ -10,23 +12,21 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from supabase import Client, create_client
-import numpy_financial as npf
-import math
 
 from add_property import run_add_property
+from exporter import export_property_analysis
 from helpers import (
+  calculate_monthly_take_home,
   calculate_mortgage,
+  express_percent_as_months_and_days,
   format_currency,
   format_number,
   format_percentage,
-  calculate_monthly_take_home,
-  express_percent_as_months_and_days,
 )
-from loans import LoansProvider
-from rent_research import RentResearcher
 from inspections import InspectionsClient
+from loans import LoansProvider
 from neighborhoods import NeighborhoodsClient
-from exporter import export_property_analysis
+from rent_research import RentResearcher
 
 load_dotenv()
 
@@ -1607,7 +1607,6 @@ def get_phase2_data_checklist():
                 row["address1"]
             ),
             "has_maps_data": is_property_maps_done(row),
-            "has_school_district": row["school_district"] is not None,
             "has_rent_dd": row["rent_dd_completed"] if row["rent_dd_completed"] is not None else False,
             "has_neighborhood_assessment": neighborhoods.is_neighborhood_assessment_complete(row["address1"]),
             "has_taxes": row["annual_tax_amount"] is not None,
@@ -1615,38 +1614,6 @@ def get_phase2_data_checklist():
         }
     
     return checklist
-
-def display_phase2_data_checklist():
-    checklist = get_phase2_data_checklist()
-    table = Table(title="Phase 2 Data Checklist", show_header=True, header_style="bold green")
-
-    table.add_column("Address", style="cyan")
-    table.add_column("DATE", style="white")
-    table.add_column("INSP", style="white")
-    table.add_column("MAPS", style="white")
-    table.add_column("SCHL", style="white")
-    table.add_column("RENT", style="white")
-    table.add_column("NGBH", style="white")
-    table.add_column("TAXS", style="white")
-    table.add_column("CIRC", style="white")
-
-    def format_check(has_value):
-        return "[green]done[/green]" if has_value else "[dim]none[/dim]"
-
-    for address, checks in checklist.items():
-        table.add_row(
-            address,
-            format_check(checks["has_listing"]),
-            format_check(checks["has_inspection_done"]),
-            format_check(checks["has_maps_data"]),
-            format_check(checks["has_school_district"]),
-            format_check(checks["has_rent_dd"]),
-            format_check(checks["has_neighborhood_assessment"]),
-            format_check(checks["has_taxes"]),
-            format_check(checks["has_seller_circumstances"]),
-        )
-
-    console.print(table)
 
 def handle_generate_rent_estimates(property_id: str, report_id: str = None):
     """Handle generating rent estimates from an existing research report"""
@@ -1800,7 +1767,6 @@ def run_all_properties_options():
     using_all_properties = True
     choices = [
         "Phase 1 - Qualifiers",
-        "Phase 2 - Data Checklist",
         "Phase 2 - Qualifiers",
         "All properties - Active (FHA)",
         "All properties - Reduce price and recalculate",
@@ -1845,8 +1811,6 @@ def run_all_properties_options():
                 title="All inactive properties using FHA",
                 show_status=True,
             )
-        elif option == "Phase 2 - Data Checklist":
-            display_phase2_data_checklist()
         elif option == "Phase 2 - Qualifiers":
             display_all_phase2_qualifying_properties()
 
