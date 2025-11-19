@@ -58,6 +58,7 @@ def load_assumptions():
   console.print("[yellow]Reloading assumptions...[/yellow]")
   assumptions_get_response = supabase.table('assumptions').select('*').eq('id', 1).limit(1).single().execute()
   appreciation_rate = float(assumptions_get_response.data["appreciation_rate"])
+  multifamily_appreciation_rate = float(appreciation_rate - 0.01) # multi-family properties appreciate slower than single family
   rent_appreciation_rate = float(assumptions_get_response.data["rent_appreciation_rate"])
   property_tax_rate = float(assumptions_get_response.data["property_tax_rate"])
   home_insurance_rate = float(assumptions_get_response.data["home_insurance_rate"])
@@ -385,7 +386,8 @@ def apply_calculations_on_dataframe(df):
     df["10y_forecast"] = df.apply(get_expected_gains, axis=1, args=(10,))
     df["20y_forecast"] = df.apply(get_expected_gains, axis=1, args=(20,))
     df["mobility_score"] = df.apply(get_mobility_score, axis=1)
-    df['costs_to_income'] = (df['monthly_mortgage'] + df['monthly_mip'] + df['monthly_taxes'] + df['monthly_insurance']) / after_tax_monthly_income
+    df["piti"] = df['monthly_mortgage'] + df['monthly_mip'] + df['monthly_taxes'] + df['monthly_insurance']
+    df['costs_to_income'] = df["piti"] / after_tax_monthly_income
     df["monthly_depreciation"] = (df["purchase_price"] * (1 - LAND_VALUE_PCT)) / DEPRECIATION_YEARS / 12
     df["tax_savings_monthly"] = df["monthly_depreciation"] * combined_tax_rate
     df["after_tax_cash_flow_y1"] = df["monthly_cash_flow_y1"] + df["tax_savings_monthly"]
@@ -411,12 +413,17 @@ def apply_calculations_on_dataframe(df):
     df["npv_5yr"] = df.apply(calculate_npv, axis=1, args=(5,))
     df["npv_10yr"] = df.apply(calculate_npv, axis=1, args=(10,))
     df["npv_20yr"] = df.apply(calculate_npv, axis=1, args=(20,))
+    df["fair_value_5yr"] = df["purchase_price"] + df["npv_5yr"]
     df["fair_value_10yr"] = df["purchase_price"] + df["npv_10yr"]
+    df["fair_value_20yr"] = df["purchase_price"] + df["npv_20yr"]
+    df["value_gap_pct_5yr"] = (df["npv_5yr"] / df["cash_needed"]) * 100
     df["value_gap_pct_10yr"] = (df["npv_10yr"] / df["cash_needed"]) * 100
+    df["value_gap_pct_20yr"] = (df["npv_20yr"] / df["cash_needed"]) * 100
     df["beats_market"] = df["npv_10yr"] > 0
     df["cash_flow_y1_downside_10pct"] = (df["net_rent_y1"] * 0.9) - df["total_monthly_cost"]
     df["cash_flow_y2_downside_10pct"] = (df["total_rent"] * 0.9) - df["total_monthly_cost"]
     df["deal_score"] = df.apply(get_deal_score, axis=1)
+    df["fha_self_sufficiency_ratio"] = (df["total_rent"] * 0.75) / df["piti"]
     return df
 
 def reload_dataframe():
@@ -803,9 +810,10 @@ def get_all_phase1_qualifying_properties(active=True):
       - Debt Service Coverage Ratio should be above 1.25
       - Monthly Cashflow with cheapest unit not rented above -400 (house hacking)
       - Fully rented monthly cashflow above 400
+      - Triplexes / Duplexes must pass FHA self-sufficiency test (Gross Rent * 0.75 >= PITI)
     """
     status_criteria = "status == 'active'" if active else "status != 'active'"
-    criteria = f"{status_criteria} & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400"
+    criteria = f"{status_criteria} & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400 & fha_self_sufficiency_ratio >= 1"
 
     filtered_df = df.copy()
     filtered_df = filtered_df.query(criteria)
@@ -867,6 +875,10 @@ def get_all_phase2_properties():
         completed_df['total_pro_repair_costs'] = completed_df.apply(lambda row: inspections.get_total_pro_repair_costs(row), axis=1)  # TODO - finish this
         completed_df['est_diy_repair_costs'] = completed_df.apply(lambda row: inspections.get_est_diy_repair_costs(row), axis=1)  # TODO - finish this
         completed_df['est_pro_repair_costs'] = completed_df.apply(lambda row: inspections.get_est_pro_repair_costs(row), axis=1)  # TODO - finish this
+        # is_selling_at_loss (using last purchase data)
+        # depreciation_rate_per_year (using last purchase data)
+        # how long has current owner owned (last purchase date - today), longer = more equity = more price flexibility
+        # ^ can be used in seller motivation score
 
         # STEP 3 - CREATE CRITERIA AND QUERY
         qualifying_criteria = "has_inspection_dealbreakers == False & costs_to_income <= 0.45" # todo add more here
@@ -1136,9 +1148,11 @@ def analyze_property(property_id):
     mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
     opex_rent_style = "green" if 0.45 <= row['OpEx_Rent'] <= 0.55 else ("yellow" if 0.35 <= row['OpEx_Rent'] <= 0.65 else "red")
     dscr_style = "green" if row['DSCR'] >= 1.25 else "red"
+    fha_style = "green" if row["fha_self_sufficiency_ratio"] >= 1 else "red"
     table.add_row("1% Rule (MGR/PP)","",f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]")
     table.add_row("50% Rule (OpEx/Rent)","",f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]")
     table.add_row("DSCR (Rent/Mortgage)","",f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]")
+    table.add_row("FHA Self Sufficiency Ratio","",f"[{fha_style}]{format_percentage(row["fha_self_sufficiency_ratio"])}[/{fha_style}]")
     table.add_row("LTV Ratio","",format_percentage(row['ltv_ratio']))
     table.add_row("Price Per Door","",format_currency(row['price_per_door']))
     table.add_row("Rent Per Sqft","",format_currency(row['rent_per_sqft']))
@@ -1209,15 +1223,15 @@ def analyze_property(property_id):
     )
     projections_table.add_row(
         "Fair Value",
-        "---",
+        format_currency(row['fair_value_5yr']),
         format_currency(row['fair_value_10yr']),
-        "---"
+        format_currency(row['fair_value_20yr'])
     )
     projections_table.add_row(
         "Value Gap %",
-        "---",
+        format_percentage(row['value_gap_pct_5yr'] / 100),
         format_percentage(row['value_gap_pct_10yr'] / 100),
-        "---"
+        format_percentage(row['value_gap_pct_20yr'] / 100)
     )
 
     console.print(projections_table)
@@ -1595,6 +1609,35 @@ def is_property_maps_done(row) -> bool:
 
     return is_done
 
+def is_property_assessment_done(row) -> bool:
+    bool_fields = [
+        'obtained_county_records', 'has_short_ownership_pattern',
+        'has_deed_restrictions', 'has_hao', 'has_historic_preservation',
+        'has_easements', 'in_flood_zone', 'has_open_pulled_permits',
+        'has_work_done_wo_permits'
+    ]
+
+    other_fields = [
+        'previous_owner_count', 'last_purchase_price', 'last_purchase_date'
+    ]
+
+    text_fields = [
+        'setbacks', 'easements', 'county_record_notes',
+        'permit_notes', 'whitepages_notes'
+    ]
+
+    for field in bool_fields + other_fields:
+        value = row.get(field)
+        if value is None or pd.isna(value):
+            return False
+
+    for field in text_fields:
+        value = row.get(field)
+        if value is None or pd.isna(value) or value == '':
+            return False
+
+    return True
+
 def get_phase2_data_checklist():
     """Gets all phase 1 properties and their data checklist"""
     combined_df = get_combined_phase1_qualifiers()
@@ -1611,6 +1654,7 @@ def get_phase2_data_checklist():
             "has_neighborhood_assessment": neighborhoods.is_neighborhood_assessment_complete(row["address1"]),
             "has_taxes": row["annual_tax_amount"] is not None,
             "has_seller_circumstances": row["seller_circumstances"] is not None,
+            "has_property_assessment": is_property_assessment_done(row),
         }
     
     return checklist
