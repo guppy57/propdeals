@@ -54,11 +54,11 @@ white_style = Style([
 ])
 
 def load_assumptions():
-  global appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting, after_tax_monthly_income, state_tax_code, discount_rate
+  global appreciation_rate, mf_appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting, after_tax_monthly_income, state_tax_code, discount_rate
   console.print("[yellow]Reloading assumptions...[/yellow]")
   assumptions_get_response = supabase.table('assumptions').select('*').eq('id', 1).limit(1).single().execute()
   appreciation_rate = float(assumptions_get_response.data["appreciation_rate"])
-  # multifamily_appreciation_rate = float(appreciation_rate - 0.01) # multi-family properties appreciate slower than single family
+  mf_appreciation_rate = float(appreciation_rate - 0.01) # multi-family properties appreciate slower than single family
   rent_appreciation_rate = float(assumptions_get_response.data["rent_appreciation_rate"])
   property_tax_rate = float(assumptions_get_response.data["property_tax_rate"])
   home_insurance_rate = float(assumptions_get_response.data["home_insurance_rate"])
@@ -193,7 +193,8 @@ def get_expected_gains(row, length_years):
         yearly_cashflow = y2_cashflow * ((1 + rent_appreciation_rate) ** (year - 2))
         cumulative_cashflow += yearly_cashflow
 
-    appreciation_gains = current_home_value * ((1 + appreciation_rate) ** length_years - 1)
+    rate = appreciation_rate if row["units"] == 0 else mf_appreciation_rate
+    appreciation_gains = current_home_value * ((1 + rate) ** length_years - 1)
     monthly_rate = apr_rate / 12
     num_payments = loan_length_years * 12
     total_payments_in_period = length_years * 12
@@ -236,8 +237,9 @@ def calculate_payback_period(row):
 
 def calculate_net_proceeds(row, years, selling_costs_rate=0.07, capital_gains_rate=0.15):
     """Calculate net proceeds from sale after N years"""
-    # Future property value
-    future_value = row["purchase_price"] * ((1 + appreciation_rate) ** years)
+    # Future property value (single family vs multi-family appreciation rates)
+    rate = appreciation_rate if row["units"] == 0 else mf_appreciation_rate
+    future_value = row["purchase_price"] * ((1 + rate) ** years)
 
     # Remaining loan balance
     loan_amount = row["loan_amount"]
@@ -395,9 +397,18 @@ def apply_calculations_on_dataframe(df):
     df["tax_savings_monthly"] = df["monthly_depreciation"] * combined_tax_rate
     df["after_tax_cash_flow_y1"] = df["monthly_cash_flow_y1"] + df["tax_savings_monthly"]
     df["after_tax_cash_flow_y2"] = df["monthly_cash_flow_y2"] + df["tax_savings_monthly"]
-    df["future_value_5yr"] = df["purchase_price"] * ((1 + appreciation_rate) ** 5)
-    df["future_value_10yr"] = df["purchase_price"] * ((1 + appreciation_rate) ** 10)
-    df["future_value_20yr"] = df["purchase_price"] * ((1 + appreciation_rate) ** 20)
+    df["future_value_5yr"] = df.apply(
+        lambda row: row["purchase_price"] * ((1 + (appreciation_rate if row["units"] == 0 else mf_appreciation_rate)) ** 5),
+        axis=1
+    )
+    df["future_value_10yr"] = df.apply(
+        lambda row: row["purchase_price"] * ((1 + (appreciation_rate if row["units"] == 0 else mf_appreciation_rate)) ** 10),
+        axis=1
+    )
+    df["future_value_20yr"] = df.apply(
+        lambda row: row["purchase_price"] * ((1 + (appreciation_rate if row["units"] == 0 else mf_appreciation_rate)) ** 20),
+        axis=1
+    )
     df["net_proceeds_5yr"] = df.apply(calculate_net_proceeds, axis=1, args=(5, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
     df["net_proceeds_10yr"] = df.apply(calculate_net_proceeds, axis=1, args=(10, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
     df["net_proceeds_20yr"] = df.apply(calculate_net_proceeds, axis=1, args=(20, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))

@@ -336,6 +336,7 @@ class RentResearcher:
         baths = property_data.get("baths", 0)
         square_ft = property_data.get("square_ft", 0)
         built_in = property_data.get("built_in", "Unknown")
+        sq_ft_per_bed = square_ft // beds if beds > 0 else 0
 
         # markdown table with comparable rents
         rent_comp_md_table = self._create_rent_comp_md_table(address1=address, is_single_family=True)
@@ -363,6 +364,7 @@ Analyze this single family home for room-by-room rental investment using the mar
 - **Address**: {address}
 - **Purchase Price**: ${purchase_price:,}
 - **Total Bedrooms**: {beds} | **Bathrooms**: {baths} | **Square Footage**: {square_ft:,} sq ft
+- **Avg Sq Ft Per Bedroom**: {sq_ft_per_bed:,} sq ft
 - **Type**: Single Family Home (Room Rental) | **Year Built**: {built_in}{room_details}
 
 # Market Research Data
