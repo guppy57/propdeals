@@ -61,6 +61,10 @@ class RentResearcher:
             raise ValueError("TAVILY_API_KEY environment variable not set")
         self.tavily_client = TavilyClient(api_key=tavily_api_key)
 
+    def _is_single_family(self, property_data: Dict[str, Any]) -> bool:
+        """Check if property is single family (units == 0)"""
+        return property_data.get("units", 1) == 0
+
     def _calculate_cost(
         self, num_searches: int, input_tokens: int, output_tokens: int
     ) -> Decimal:
@@ -84,26 +88,49 @@ class RentResearcher:
         # Extract city/area from address for location-based searches
         location = address.split(",")[0] if "," in address else address
 
-        queries = [
-            # Comparable rental properties
-            f"{beds} bedroom {baths} bathroom rental near {location}",
-            f"duplex rental prices {location}"
-            if units == 2
-            else f"{units} unit rental {location}",
-            f"rental comps {location} {beds}bed {baths}bath",
-            # Market data and trends
-            f"{location} rental market report 2024 2025",
-            f"{location} average rent prices trends",
-            f"{location} rental vacancy rates market analysis",
-            # Neighborhood analysis
-            f"{location} neighborhood walkability transit score",
-            f"{location} rental demand supply market conditions",
-            f"{location} property values rental yield analysis",
-            # Historical and seasonal data
-            f"{location} rental price history 12 months",
-            f"{location} seasonal rental pricing trends",
-            f"{location} rental market forecast 2025",
-        ]
+        # Single family homes use room rental queries
+        if self._is_single_family(property_data):
+            queries = [
+                # Room rental comparables
+                f"room for rent near {location}",
+                f"roommate rental {location} {beds} bedroom house",
+                f"{location} room rental prices monthly",
+                f"single room rent {location} shared house",
+                # Market data and trends
+                f"{location} room rental market 2024 2025",
+                f"{location} average room rent prices",
+                f"{location} roommate rental vacancy rates",
+                # Neighborhood analysis
+                f"{location} neighborhood walkability transit score",
+                f"{location} rental demand supply market conditions",
+                f"{location} property values rental yield analysis",
+                # Historical and seasonal data
+                f"{location} room rental price history 12 months",
+                f"{location} seasonal rental pricing trends",
+                f"{location} rental market forecast 2025",
+            ]
+        else:
+            # Multi-family queries
+            queries = [
+                # Comparable rental properties
+                f"{beds} bedroom {baths} bathroom rental near {location}",
+                f"duplex rental prices {location}"
+                if units == 2
+                else f"{units} unit rental {location}",
+                f"rental comps {location} {beds}bed {baths}bath",
+                # Market data and trends
+                f"{location} rental market report 2024 2025",
+                f"{location} average rent prices trends",
+                f"{location} rental vacancy rates market analysis",
+                # Neighborhood analysis
+                f"{location} neighborhood walkability transit score",
+                f"{location} rental demand supply market conditions",
+                f"{location} property values rental yield analysis",
+                # Historical and seasonal data
+                f"{location} rental price history 12 months",
+                f"{location} seasonal rental pricing trends",
+                f"{location} rental market forecast 2025",
+            ]
 
         return queries
 
@@ -182,72 +209,218 @@ class RentResearcher:
 
         return search_results
     
-    def _create_rent_comp_md_table(self, address1):
+    def _create_rent_comp_md_table(self, address1, is_single_family=False):
         table = ""
 
-        # get rent_estimates based on address1
-        response = self.supabase.table('rent_estimates').select('*').eq('address1', address1).execute()
+        if is_single_family:
+            # For single family, query property-level comparables
+            table += "Property Comparables (Single Family)\n"
 
-        if not hasattr(response, "data") or not response.data:
-            return "No rent estimates found for this property.\n"
-
-        for rent_estimate in response.data:
-            # Create section header for this unit
-            unit_config = f"{rent_estimate.get('beds', 'NA')}-bed {rent_estimate.get('baths', 'NA')}-bath"
-            unit_num = rent_estimate.get('unit_num', 'NA')
-            table += f"Unit {unit_num} - {unit_config}\n"
-            
-            # Query for comparables with smart filtering and ordering
-            query2 = (
+            query = (
                 self.supabase.table("comparable_rents")
-                .select("*, rent_comp_to_rent_estimate!inner(*)")
-                .eq("rent_comp_to_rent_estimate.estimate_id", rent_estimate['id'])
-                .gte("rent_comp_to_rent_estimate.correlation", 0.7)  # Filter by correlation > 0.7
-                .lte("rent_comp_to_rent_estimate.distance", 2.0)    # Filter by distance < 2 miles
-                .limit(15)  # Limit to top 15 comparables
+                .select("*, rent_comp_to_property!inner(*)")
+                .eq("rent_comp_to_property.address1", address1)
+                .gte("rent_comp_to_property.correlation", 0.7)
+                .lte("rent_comp_to_property.distance", 2.0)
+                .limit(15)
             )
-            response2 = query2.execute()
+            response = query.execute()
 
-            if not hasattr(response2, "data") or not response2.data:
-                table += "No comparable rents found for this unit.\n\n"
-                continue
-            
-            # Create markdown table header (optimized with 6 columns)
+            if not hasattr(response, "data") or not response.data:
+                return "No comparable rents found for this property.\n"
+
+            # Create markdown table header
             table += "| Address | Config | Sq Ft | Rent | Dist | Corr |\n"
             table += "|---------|--------|-------|------|------|------|\n"
-            
-            # Add each comparable as a table row
-            for comp in response2.data:
-                # Extract street name only from address (remove city/state)
+
+            for comp in response.data:
                 full_address = comp.get('address', 'NA')
                 if full_address != 'NA' and ',' in full_address:
                     address = full_address.split(',')[0].strip()
                 else:
                     address = full_address
-                
-                # Combine beds/baths into config format (e.g., "2/1")
+
                 beds = comp.get('beds', 'NA')
                 baths = comp.get('baths', 'NA')
                 config = f"{beds}/{baths}" if beds != 'NA' and baths != 'NA' else 'NA'
-                
+
                 square_feet = comp.get('square_feet', 'NA')
                 rent_price = comp.get('rent_price', 'NA')
-                
-                # Get distance and correlation from the many-to-many relationship
-                relationship_data = comp.get('rent_comp_to_rent_estimate', [])
+
+                relationship_data = comp.get('rent_comp_to_property', [])
                 if relationship_data and len(relationship_data) > 0:
                     distance = relationship_data[0].get('distance', 'NA')
                     correlation = relationship_data[0].get('correlation', 'NA')
                 else:
                     distance = 'NA'
                     correlation = 'NA'
-                
-                # Format the table row with optimized columns
+
                 table += f"| {address} | {config} | {square_feet} | {rent_price} | {distance} | {correlation} |\n"
-            
+
             table += "\n"
+        else:
+            # Multi-family: get rent_estimates based on address1
+            response = self.supabase.table('rent_estimates').select('*').eq('address1', address1).execute()
+
+            if not hasattr(response, "data") or not response.data:
+                return "No rent estimates found for this property.\n"
+
+            for rent_estimate in response.data:
+                # Create section header for this unit
+                unit_config = f"{rent_estimate.get('beds', 'NA')}-bed {rent_estimate.get('baths', 'NA')}-bath"
+                unit_num = rent_estimate.get('unit_num', 'NA')
+                table += f"Unit {unit_num} - {unit_config}\n"
+
+                # Query for comparables with smart filtering and ordering
+                query2 = (
+                    self.supabase.table("comparable_rents")
+                    .select("*, rent_comp_to_rent_estimate!inner(*)")
+                    .eq("rent_comp_to_rent_estimate.estimate_id", rent_estimate['id'])
+                    .gte("rent_comp_to_rent_estimate.correlation", 0.7)  # Filter by correlation > 0.7
+                    .lte("rent_comp_to_rent_estimate.distance", 2.0)    # Filter by distance < 2 miles
+                    .limit(15)  # Limit to top 15 comparables
+                )
+                response2 = query2.execute()
+
+                if not hasattr(response2, "data") or not response2.data:
+                    table += "No comparable rents found for this unit.\n\n"
+                    continue
+
+                # Create markdown table header (optimized with 6 columns)
+                table += "| Address | Config | Sq Ft | Rent | Dist | Corr |\n"
+                table += "|---------|--------|-------|------|------|------|\n"
+
+                # Add each comparable as a table row
+                for comp in response2.data:
+                    # Extract street name only from address (remove city/state)
+                    full_address = comp.get('address', 'NA')
+                    if full_address != 'NA' and ',' in full_address:
+                        address = full_address.split(',')[0].strip()
+                    else:
+                        address = full_address
+
+                    # Combine beds/baths into config format (e.g., "2/1")
+                    beds = comp.get('beds', 'NA')
+                    baths = comp.get('baths', 'NA')
+                    config = f"{beds}/{baths}" if beds != 'NA' and baths != 'NA' else 'NA'
+
+                    square_feet = comp.get('square_feet', 'NA')
+                    rent_price = comp.get('rent_price', 'NA')
+
+                    # Get distance and correlation from the many-to-many relationship
+                    relationship_data = comp.get('rent_comp_to_rent_estimate', [])
+                    if relationship_data and len(relationship_data) > 0:
+                        distance = relationship_data[0].get('distance', 'NA')
+                        correlation = relationship_data[0].get('correlation', 'NA')
+                    else:
+                        distance = 'NA'
+                        correlation = 'NA'
+
+                    # Format the table row with optimized columns
+                    table += f"| {address} | {config} | {square_feet} | {rent_price} | {distance} | {correlation} |\n"
+
+                table += "\n"
 
         return table
+
+    def _create_analysis_prompt_singlefamily(
+        self,
+        property_data: Dict[str, Any],
+        search_results: List[Dict[str, Any]],
+        room_configs: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        """Create analysis prompt for single family room rental properties"""
+        address = property_data.get("address1", "Unknown Address")
+        purchase_price = property_data.get("purchase_price", 0)
+        beds = property_data.get("beds", 0)
+        baths = property_data.get("baths", 0)
+        square_ft = property_data.get("square_ft", 0)
+        built_in = property_data.get("built_in", "Unknown")
+        sq_ft_per_bed = square_ft // beds if beds > 0 else 0
+
+        # markdown table with comparable rents
+        rent_comp_md_table = self._create_rent_comp_md_table(address1=address, is_single_family=True)
+
+        # Compile search data
+        search_data = "\n\n".join(
+            [
+                f"**Query**: {result['query']}\n**Source**: {result['title']} ({result['url']})\n**Content**: {result['content'][:1000]}..."
+                for result in search_results[:25]
+            ]
+        )
+
+        # Create room configuration details if available
+        room_details = ""
+        if room_configs:
+            room_details = f"\n\n# Room Configuration Details\n"
+            room_details += f"- **Total Rooms Available for Rent**: {beds} rooms (one per bedroom)\n"
+            room_details += f"- **Shared Bathrooms**: {baths}\n"
+            room_details += f"- **Strategy**: Live in one room, rent remaining {beds - 1} rooms to roommates\n"
+
+        prompt = f"""
+Analyze this single family home for room-by-room rental investment using the market research data. This property will be used for a roommate rental strategy where the owner lives in one room and rents the remaining rooms.
+
+# Property Details
+- **Address**: {address}
+- **Purchase Price**: ${purchase_price:,}
+- **Total Bedrooms**: {beds} | **Bathrooms**: {baths} | **Square Footage**: {square_ft:,} sq ft
+- **Avg Sq Ft Per Bedroom**: {sq_ft_per_bed:,} sq ft
+- **Type**: Single Family Home (Room Rental) | **Year Built**: {built_in}{room_details}
+
+# Market Research Data
+## Web search data
+{search_data}
+
+## Comparable rents (filtered by correlation >0.7, distance <2mi)
+{rent_comp_md_table}
+
+# Analysis Requirements
+
+## 1. Executive Summary
+- Key findings and actionable recommendations for room rental strategy
+- **Specific recommended per-room rent range with confidence level**
+- Market positioning and investment viability for roommate rentals
+
+## 2. Room Rental Market Analysis
+- Current market rates for room rentals in the area
+- Comparison with whole-house rentals (use 1.3x multiplier as baseline for room-by-room)
+- Per-room pricing benchmarks from comparable properties
+- **Specific rent ranges with justification for individual rooms**
+
+## 3. Historical Trends & Forecasting
+- 6-12 month room rental trend analysis
+- Year-over-year percentage changes in room rental market
+- **Quantified trend data with growth projections**
+
+## 4. Neighborhood & Location Analysis
+- Walkability, transit, accessibility impact on room rents
+- Proximity to universities, employment centers, and amenities
+- **Location-based rental premiums/discounts for roommate rentals**
+
+## 5. Competitive Positioning
+- Comparable room rentals with similar amenities
+- Shared vs private bathroom premiums
+- **Strategic room rental positioning recommendations**
+
+## 6. Per-Room Rent Recommendations
+- **Individual Room Rent Recommendations**: Specific dollar amounts for EACH room
+- All rooms should have similar rents (within ±5%) since we don't have individual room size data
+- Optimal lease terms for roommate rentals
+- Note: Room 1 is your room (owner-occupied), Rooms 2+ are rental rooms
+
+## 7. Risk Assessment & Performance Projections
+- Roommate vacancy and turnover risk factors
+- Shared living arrangement considerations
+- **Quantified risk factors and market performance rankings**
+
+# Output Requirements
+- Include specific dollar amounts and percentages throughout
+- Provide confidence levels for major recommendations
+- Focus on actionable, investment-grade insights for room rental strategy
+
+Generate a data-driven analysis with specific, actionable per-room rental pricing recommendations.
+"""
+        return prompt.strip()
 
     def _create_analysis_prompt(
         self,
@@ -255,6 +428,12 @@ class RentResearcher:
         search_results: List[Dict[str, Any]],
         unit_configs: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
+        # Branch to single family prompt if applicable
+        if self._is_single_family(property_data):
+            return self._create_analysis_prompt_singlefamily(
+                property_data, search_results, unit_configs
+            )
+
         address = property_data.get("address1", "Unknown Address")
         purchase_price = property_data.get("purchase_price", 0)
         beds = property_data.get("beds", 0)
@@ -346,9 +525,68 @@ Generate a data-driven analysis with specific, actionable rental pricing recomme
 """
         return prompt.strip()
 
-    def _create_estimate_extraction_prompt(
-        self, report: str, unit_configs: List[Dict[str, Any]]
+    def _create_estimate_extraction_prompt_singlefamily(
+        self, report: str, room_configs: List[Dict[str, Any]]
     ) -> str:
+        """Create extraction prompt for single family room rental properties"""
+        # Create room-specific field descriptions
+        room_descriptions = []
+        for config in room_configs:
+            for unit in config["units"]:
+                unit_num = unit["unit_num"]
+                config_key = config["config_key"]
+                base_name = f"unit_{unit_num}_{config_key}"
+
+                room_descriptions.append(f"""
+**Room {unit_num}**:
+- {base_name}_rent_estimate: Primary recommended monthly rent for this room
+- {base_name}_rent_estimate_high: Upper bound/optimistic rent for this room
+- {base_name}_rent_estimate_low: Lower bound/conservative rent for this room""")
+
+        room_instructions = "\n".join(room_descriptions)
+
+        prompt = f"""
+Analyze the following rental market research report and extract specific per-room rent estimates for each individual room in this single family home.
+
+# Research Report to Analyze:
+{report}
+
+# Room Configuration:
+This single family home has the following rooms that need individual rent estimates:
+{room_instructions}
+
+Note: Room 1 is typically the owner-occupied room, Rooms 2+ are rental rooms for roommates.
+
+# Extraction Instructions:
+You must provide rent estimates for EACH individual room listed above. Each room should have three values:
+1. **Primary Estimate (_rent_estimate)**: The most recommended monthly rent for that specific room
+2. **High Estimate (_rent_estimate_high)**: Upper bound/optimistic rent for that room
+3. **Low Estimate (_rent_estimate_low)**: Lower bound/conservative rent for that room
+
+# Analysis Requirements:
+- Provide only numeric values for monthly rental amounts (no dollar signs or commas)
+- Extract per-room estimates, NOT total property rent
+- All rooms MUST have rents within ±5% of each other since we don't have individual room data
+- Calculate a base room rent from the report, then apply minor variations (max ±5%) for realism
+- If ranges are provided (e.g., "$600-$800"), use the middle as _rent_estimate, upper as _rent_estimate_high, lower as _rent_estimate_low
+- If only one estimate is provided, create a reasonable range (±5-10% for high/low estimates)
+- Do NOT invent room-specific factors - we only have total bedroom/bathroom counts
+
+# Context for Analysis:
+- Focus on the most data-driven recommendations in the report
+- Prioritize estimates supported by comparable room rental analysis
+- Consider market conditions, property features, and location factors
+- Keep all room rents tightly clustered (within ±5% of base rent)
+"""
+        return prompt.strip()
+
+    def _create_estimate_extraction_prompt(
+        self, report: str, unit_configs: List[Dict[str, Any]], is_single_family: bool = False
+    ) -> str:
+        # Branch to single family prompt if applicable
+        if is_single_family:
+            return self._create_estimate_extraction_prompt_singlefamily(report, unit_configs)
+
         # Create unit-specific field descriptions
         unit_descriptions = []
         for config in unit_configs:
@@ -657,7 +895,7 @@ You must provide rent estimates for EACH individual unit listed above. Each unit
                     f"**Market Data Sources**: {len(search_results)} data points from {num_searches} searches\n"
                     f"**Reasoning Tokens**: {result['input_tokens']:,} input, {result['output_tokens']:,} output\n"
                     f"**Search Cost**: ${search_cost:.4f} ({num_searches} × $0.008)\n"
-                    f"**o1-mini Reasoning Cost**: ${reasoning_cost:.4f}\n"
+                    f"**{self.config.reasoning_model} Reasoning Cost**: ${reasoning_cost:.4f}\n"
                     f"**Total API Cost**: ${cost:.4f}\n"
                     f"**Report ID**: {report_id}",
                     title="Research Summary",
@@ -706,6 +944,19 @@ You must provide rent estimates for EACH individual unit listed above. Each unit
                 "cost": 0,
             }
 
+        # Fetch property data to determine if single family
+        try:
+            property_response = (
+                self.supabase.table("properties")
+                .select("units")
+                .eq("address1", property_id)
+                .single()
+                .execute()
+            )
+            is_single_family = property_response.data and property_response.data.get("units", 1) == 0
+        except Exception:
+            is_single_family = False
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -731,7 +982,7 @@ You must provide rent estimates for EACH individual unit listed above. Each unit
 
             # Create the extraction prompt with unit configurations
             extraction_prompt = self._create_estimate_extraction_prompt(
-                report_content, unit_configs
+                report_content, unit_configs, is_single_family
             )
 
             # Generate estimates using the reasoning model with dynamic response format

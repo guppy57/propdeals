@@ -54,11 +54,11 @@ white_style = Style([
 ])
 
 def load_assumptions():
-  global appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting, after_tax_monthly_income, state_tax_code, discount_rate
+  global appreciation_rate, mf_appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting, after_tax_monthly_income, state_tax_code, discount_rate
   console.print("[yellow]Reloading assumptions...[/yellow]")
   assumptions_get_response = supabase.table('assumptions').select('*').eq('id', 1).limit(1).single().execute()
   appreciation_rate = float(assumptions_get_response.data["appreciation_rate"])
-  multifamily_appreciation_rate = float(appreciation_rate - 0.01) # multi-family properties appreciate slower than single family
+  mf_appreciation_rate = float(appreciation_rate - 0.01) # multi-family properties appreciate slower than single family
   rent_appreciation_rate = float(assumptions_get_response.data["rent_appreciation_rate"])
   property_tax_rate = float(assumptions_get_response.data["property_tax_rate"])
   home_insurance_rate = float(assumptions_get_response.data["home_insurance_rate"])
@@ -193,7 +193,8 @@ def get_expected_gains(row, length_years):
         yearly_cashflow = y2_cashflow * ((1 + rent_appreciation_rate) ** (year - 2))
         cumulative_cashflow += yearly_cashflow
 
-    appreciation_gains = current_home_value * ((1 + appreciation_rate) ** length_years - 1)
+    rate = appreciation_rate if row["units"] == 0 else mf_appreciation_rate
+    appreciation_gains = current_home_value * ((1 + rate) ** length_years - 1)
     monthly_rate = apr_rate / 12
     num_payments = loan_length_years * 12
     total_payments_in_period = length_years * 12
@@ -236,8 +237,9 @@ def calculate_payback_period(row):
 
 def calculate_net_proceeds(row, years, selling_costs_rate=0.07, capital_gains_rate=0.15):
     """Calculate net proceeds from sale after N years"""
-    # Future property value
-    future_value = row["purchase_price"] * ((1 + appreciation_rate) ** years)
+    # Future property value (single family vs multi-family appreciation rates)
+    rate = appreciation_rate if row["units"] == 0 else mf_appreciation_rate
+    future_value = row["purchase_price"] * ((1 + rate) ** years)
 
     # Remaining loan balance
     loan_amount = row["loan_amount"]
@@ -375,7 +377,10 @@ def apply_calculations_on_dataframe(df):
     df["OpEx_Rent"] = df["operating_expenses"] / df["total_rent"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
     df["DSCR"] = df["total_rent"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
     df["ltv_ratio"] = df["loan_amount"] / df["purchase_price"] # Loan-to-Value ratio
-    df["price_per_door"] = df["purchase_price"] / df["units"] # Price per unit/door
+    df["price_per_door"] = df.apply(
+        lambda row: row["purchase_price"] / row["beds"] if row["units"] == 0 else row["purchase_price"] / row["units"],
+        axis=1
+    ) # Price per unit/door (or per bedroom for single family)
     df["rent_per_sqft"] = df["total_rent"] / df["square_ft"] # Monthly rent per square foot
     df["break_even_occupancy"] = df["total_monthly_cost"] / df["total_rent"] # Break-even occupancy rate
     df["break_even_vacancy"] = 1.0 - df["break_even_occupancy"]
@@ -392,9 +397,18 @@ def apply_calculations_on_dataframe(df):
     df["tax_savings_monthly"] = df["monthly_depreciation"] * combined_tax_rate
     df["after_tax_cash_flow_y1"] = df["monthly_cash_flow_y1"] + df["tax_savings_monthly"]
     df["after_tax_cash_flow_y2"] = df["monthly_cash_flow_y2"] + df["tax_savings_monthly"]
-    df["future_value_5yr"] = df["purchase_price"] * ((1 + appreciation_rate) ** 5)
-    df["future_value_10yr"] = df["purchase_price"] * ((1 + appreciation_rate) ** 10)
-    df["future_value_20yr"] = df["purchase_price"] * ((1 + appreciation_rate) ** 20)
+    df["future_value_5yr"] = df.apply(
+        lambda row: row["purchase_price"] * ((1 + (appreciation_rate if row["units"] == 0 else mf_appreciation_rate)) ** 5),
+        axis=1
+    )
+    df["future_value_10yr"] = df.apply(
+        lambda row: row["purchase_price"] * ((1 + (appreciation_rate if row["units"] == 0 else mf_appreciation_rate)) ** 10),
+        axis=1
+    )
+    df["future_value_20yr"] = df.apply(
+        lambda row: row["purchase_price"] * ((1 + (appreciation_rate if row["units"] == 0 else mf_appreciation_rate)) ** 20),
+        axis=1
+    )
     df["net_proceeds_5yr"] = df.apply(calculate_net_proceeds, axis=1, args=(5, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
     df["net_proceeds_10yr"] = df.apply(calculate_net_proceeds, axis=1, args=(10, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
     df["net_proceeds_20yr"] = df.apply(calculate_net_proceeds, axis=1, args=(20, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
@@ -1001,7 +1015,9 @@ def display_all_properties_info(properties_df):
 
     for _, row in dataframe.iterrows():
         units_value = int(row["units"])
-        if units_value == 2:
+        if units_value == 0:
+            units_display = "SFH"
+        elif units_value == 2:
             units_display = "duplex"
         elif units_value == 3:
             units_display = "triplex"
@@ -1068,28 +1084,47 @@ def analyze_property(property_id):
     table.add_column("Year 1 (Live-in)", justify="right", style="green")
     table.add_column("Year 2 (All Rent)", justify="right", style="blue")
     
+    units_value = int(row['units'])
+    if units_value == 0:
+        property_type_display = "Type: Single Family (Room Rental)"
+    elif units_value == 2:
+        property_type_display = "Type: Duplex"
+    elif units_value == 3:
+        property_type_display = "Type: Triplex"
+    elif units_value == 4:
+        property_type_display = "Type: Fourplex"
+    else:
+        property_type_display = f"Units: {units_value}"
+
     console.print(Panel(f"[bold cyan]Property Overview[/bold cyan]\n"
                       f"Address: {row['address1']}\n"
                       f"Purchase Price: {format_currency(row['purchase_price'])}\n"
                       f"Bedrooms: {int(row['beds'])} | Bathrooms: {int(row['baths'])} | Sq Ft: {format_number(row['square_ft'])}\n"
                       f"Built: {int(row['built_in'])} (Age: {int(row['home_age'])} years)\n"
-                      f"Units: {int(row['units'])}\n"
-                      f"Cost per Sq Ft: {format_currency(row['cost_per_sqrft'])}", 
+                      f"{property_type_display}\n"
+                      f"Cost per Sq Ft: {format_currency(row['cost_per_sqrft'])}",
                       title="Basic Info"))
     
     property_rents = rents[rents['address1'] == property_id]
     your_unit_index = property_rents['rent_estimate'].idxmin()
-    rent_table = Table(title="Unit Rent Estimates", show_header=True, header_style="bold green")
-    rent_table.add_column("Unit", style="cyan", justify="center")
+
+    # Use contextual labels for single family vs multi-family
+    is_single_family = units_value == 0
+    table_title = "Room Rent Estimates" if is_single_family else "Unit Rent Estimates"
+    unit_label = "Room" if is_single_family else "Unit"
+    your_unit_label = "[bold red]Your Room[/bold red]" if is_single_family else "[bold red]Your Unit[/bold red]"
+
+    rent_table = Table(title=table_title, show_header=True, header_style="bold green")
+    rent_table.add_column(unit_label, style="cyan", justify="center")
     rent_table.add_column("Configuration", style="yellow")
     rent_table.add_column("Monthly Rent", justify="right", style="green")
     rent_table.add_column("Status", style="magenta")
-    
+
     total_monthly_rent = 0
     for idx, rent_row in property_rents.iterrows():
         is_your_unit = idx == your_unit_index
         unit_config = f"{int(rent_row['beds'])}-bed {int(rent_row['baths'])}-bath"
-        status = "[bold red]Your Unit[/bold red]" if is_your_unit else "Rental"
+        status = your_unit_label if is_your_unit else "Rental"
         rent_style = "bold red" if is_your_unit else "green"
         
         rent_table.add_row(
