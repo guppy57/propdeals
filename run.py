@@ -464,8 +464,12 @@ load_assumptions()
 load_loan(LAST_USED_LOAN)
 reload_dataframe()
 
-def display_all_properties(properties_df, title, show_status=False, show_min_rent_data=False):
+def display_all_properties(properties_df, title, show_status=False, show_min_rent_data=False, show_prop_type=False, sort_by="units"):
     dataframe = df if properties_df is None else properties_df
+    if sort_by == "units":
+        dataframe = dataframe.sort_values(by="units")
+    elif sort_by == "y2_cf":
+        dataframe = dataframe.sort_values(by="monthly_cash_flow_y2")
     table = Table(title=title, show_header=True, header_style="bold magenta")
     mobility_75th_percentile = df["mobility_score"].quantile(0.75)
     mobility_25th_percentile = df["mobility_score"].quantile(0.25)
@@ -498,6 +502,10 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             return "red"
 
     table.add_column("Address", style="cyan", no_wrap=True)
+    
+    if show_prop_type:
+        table.add_column("Type", justify="right", style="bold white")
+
     table.add_column("Price", justify="right", no_wrap=True)
     table.add_column("Cash Needed", justify="right")
     table.add_column("Costs/mo", justify="right", style="yellow")
@@ -578,8 +586,16 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
 
         npv_style = "red" if row["npv_10yr"] <= 0 else "green" 
 
-        row_args = [
-            str(row["address1"]),
+        prop_types = { 0: "SFH", 2: "2PX", 3: "3PX", 4: "4PX" }
+        prop_type_styles = { 0: "yellow", 2: "red", 3: "blue", 4: "green" } 
+
+        row_args = [str(row["address1"])]
+
+        if show_prop_type:
+            pt_style = prop_type_styles[row["units"]]
+            row_args.append(f"[{pt_style}]{prop_types[row["units"]]}[/{pt_style}]")
+
+        row_args.extend([
             f"[{price_style}]{format_currency(row['purchase_price'])}[/{price_style}]",
             f"[{cash_style}]{format_currency(row['cash_needed'])}[/{cash_style}]",
             format_currency(row["total_monthly_cost"]),
@@ -598,7 +614,7 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]",
             f"[{irr_10yr_style}]{format_percentage(row['irr_10yr'])}[/{irr_10yr_style}]",
             f"[{npv_style}]{format_currency(row["npv_10yr"])}[/{npv_style}]"
-        ]
+        ])
 
         if show_status:
             row_args.append(row["status"])
@@ -1866,7 +1882,7 @@ def run_all_properties_options():
         elif option == "All properties - Active (FHA)":
             dataframe = df.query("status == 'active'")
             display_all_properties(
-                properties_df=dataframe, title="All active properties using FHA"
+                properties_df=dataframe, title="All active properties using FHA", show_prop_type=True
             )
         elif option == "Phase 1 - Qualifiers":
             display_all_phase1_qualifying_properties()
