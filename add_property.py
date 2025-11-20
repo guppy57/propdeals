@@ -73,7 +73,7 @@ def get_rental_estimations_singlefamily(property_details):
                 "bedrooms": property_details["beds"],
                 "bathrooms": property_details["baths"],
                 "squareFootage": property_details["square_ft"],
-                "maxRadius": 1,
+                "maxRadius": 7,
                 "compCount": 25,
             },
         )
@@ -852,8 +852,11 @@ def save_property_comps_to_db(comps, address1, supabase):
             print(f"Exception type: {type(e)} (save_property_comps_to_db)")
 
 def get_current_rent_estimates_count(supabase) -> int:
-    current_rents = supabase.table("rent_estimates").select("id").execute()
-    return len(current_rents.data)
+    """Get the maximum ID in rent_estimates table to avoid duplicate key errors"""
+    result = supabase.table("rent_estimates").select("id").order("id", desc=True).limit(1).execute()
+    if result.data:
+        return result.data[0]["id"]
+    return 0
 
 def add_rent_to_supabase(rent_comps, comparables, supabase) -> bool:
     current_count = get_current_rent_estimates_count(supabase) 
