@@ -54,23 +54,55 @@ white_style = Style([
 ])
 
 def load_assumptions():
-  global appreciation_rate, mf_appreciation_rate, rent_appreciation_rate, property_tax_rate, home_insurance_rate, vacancy_rate, repair_savings_rate, closing_costs_rate, live_in_unit_setting, after_tax_monthly_income, state_tax_code, discount_rate
-  console.print("[yellow]Reloading assumptions...[/yellow]")
-  assumptions_get_response = supabase.table('assumptions').select('*').eq('id', 1).limit(1).single().execute()
-  appreciation_rate = float(assumptions_get_response.data["appreciation_rate"])
-  mf_appreciation_rate = float(appreciation_rate - 0.01) # multi-family properties appreciate slower than single family
-  rent_appreciation_rate = float(assumptions_get_response.data["rent_appreciation_rate"])
-  property_tax_rate = float(assumptions_get_response.data["property_tax_rate"])
-  home_insurance_rate = float(assumptions_get_response.data["home_insurance_rate"])
-  vacancy_rate = float(assumptions_get_response.data["vacancy_rate"])
-  repair_savings_rate = float(assumptions_get_response.data["repair_savings_rate"])
-  closing_costs_rate = float(assumptions_get_response.data["closing_costs_rate"])
-  live_in_unit_setting = assumptions_get_response.data["live_in_unit_setting"]
-  gross_annual_income = assumptions_get_response.data["gross_annual_income"]
-  state_tax_code = assumptions_get_response.data["state_tax_code"]
-  after_tax_monthly_income = calculate_monthly_take_home(gross_annual_income, state_tax_code)
-  discount_rate = assumptions_get_response.data["discount_rate"]
-  console.print(f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]")
+    global \
+        appreciation_rate, \
+        mf_appreciation_rate, \
+        rent_appreciation_rate, \
+        property_tax_rate, \
+        home_insurance_rate, \
+        vacancy_rate, \
+        repair_savings_rate, \
+        closing_costs_rate, \
+        live_in_unit_setting, \
+        after_tax_monthly_income, \
+        state_tax_code, \
+        discount_rate, \
+        using_ia_fhb_prog
+    
+    console.print("[yellow]Reloading assumptions...[/yellow]")
+    assumptions_get_response = (
+        supabase.table("assumptions")
+        .select("*")
+        .eq("id", 1)
+        .limit(1)
+        .single()
+        .execute()
+    )
+    appreciation_rate = float(assumptions_get_response.data["appreciation_rate"])
+    mf_appreciation_rate = float(
+        appreciation_rate - 0.01
+    )  # multi-family properties appreciate slower than single family
+    rent_appreciation_rate = float(
+        assumptions_get_response.data["rent_appreciation_rate"]
+    )
+    property_tax_rate = float(assumptions_get_response.data["property_tax_rate"])
+    home_insurance_rate = float(assumptions_get_response.data["home_insurance_rate"])
+    vacancy_rate = float(assumptions_get_response.data["vacancy_rate"])
+    repair_savings_rate = float(assumptions_get_response.data["repair_savings_rate"])
+    closing_costs_rate = float(assumptions_get_response.data["closing_costs_rate"])
+    live_in_unit_setting = assumptions_get_response.data["live_in_unit_setting"]
+    gross_annual_income = assumptions_get_response.data["gross_annual_income"]
+    state_tax_code = assumptions_get_response.data["state_tax_code"]
+    after_tax_monthly_income = calculate_monthly_take_home(
+        gross_annual_income, state_tax_code
+    )
+    discount_rate = assumptions_get_response.data["discount_rate"]
+    using_ia_fhb_prog = assumptions_get_response.data[
+        "using_ia_fhb_prog"
+    ]  # Iowa FirstHome buyers program for Single Family properties
+    console.print(
+        f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]"
+    )
 
 def load_loan(loan_id):
   global interest_rate, apr_rate, down_payment_rate, loan_length_years, mip_upfront_rate, mip_annual_rate, lender_fees
@@ -246,10 +278,11 @@ def calculate_net_proceeds(row, years, selling_costs_rate=0.07, capital_gains_ra
     monthly_rate = apr_rate / 12
     num_payments = loan_length_years * 12
     total_payments_in_period = years * 12
-    remaining_balance = loan_amount * (
+    additional_loan = row["5_pct_loan"] if row["units"] == 0 and using_ia_fhb_prog else 0
+    remaining_balance = (loan_amount * (
         ((1 + monthly_rate) ** num_payments - (1 + monthly_rate) ** total_payments_in_period) /
         ((1 + monthly_rate) ** num_payments - 1)
-    )
+    )) + additional_loan
 
     # Selling costs (agent commission + closing costs)
     selling_costs = future_value * selling_costs_rate
@@ -338,6 +371,12 @@ def calculate_roe(row):
         return row["annual_cash_flow_y2"] / current_equity
     return 0
 
+def get_loan_amount(row):
+    if using_ia_fhb_prog and row["units"] == 0:
+        return row["purchase_price"] - row["down_payment"] + (row["purchase_price"] * mip_upfront_rate) - row["5_pct_loan"]
+    else:
+        return row["purchase_price"] - row["down_payment"] + (row["purchase_price"] * mip_upfront_rate)
+
 def apply_calculations_on_dataframe(df):
     state_rate = get_state_tax_rate(state_tax_code)
     combined_tax_rate = FEDERAL_TAX_RATE + state_rate
@@ -348,7 +387,8 @@ def apply_calculations_on_dataframe(df):
     df["home_age"] = 2025 - df["built_in"]
     df["closing_costs"] = (df["purchase_price"] * closing_costs_rate) + lender_fees
     df["down_payment"] = df["purchase_price"] * down_payment_rate
-    df["loan_amount"] = df["purchase_price"] - df["down_payment"] + (df["purchase_price"] * mip_upfront_rate)
+    df["5_pct_loan"] = df["purchase_price"] * 0.05
+    df["loan_amount"] = df.apply(get_loan_amount, axis=1)
     df["monthly_mortgage"] = df["loan_amount"].apply(lambda x: calculate_mortgage(x, apr_rate, loan_length_years))
     df["monthly_mip"] = (df["loan_amount"] * mip_annual_rate) / 12
     df["monthly_taxes"] = df.apply(get_monthly_taxes, axis=1)
@@ -841,9 +881,10 @@ def get_all_phase1_qualifying_properties(active=True):
       - Monthly Cashflow with cheapest unit not rented above -400 (house hacking)
       - Fully rented monthly cashflow above 400
       - Triplexes / Duplexes must pass FHA self-sufficiency test (Gross Rent * 0.75 >= PITI)
+      - Net Present Value in 10 years must be positive, thus beating the stock market
     """
     status_criteria = "status == 'active'" if active else "status != 'active'"
-    criteria = f"{status_criteria} & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400 & fha_self_sufficiency_ratio >= 1"
+    criteria = f"{status_criteria} & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400 & fha_self_sufficiency_ratio >= 1 & beats_market"
 
     filtered_df = df.copy()
     filtered_df = filtered_df.query(criteria)
