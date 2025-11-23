@@ -855,7 +855,11 @@ def get_current_rent_estimates_count(supabase) -> int:
     """Get the maximum ID in rent_estimates table to avoid duplicate key errors"""
     result = supabase.table("rent_estimates").select("id").order("id", desc=True).limit(1).execute()
     if result.data:
-        return result.data[0]["id"]
+        id_value = result.data[0]["id"]
+        # Handle case where id is returned as tuple
+        if isinstance(id_value, (tuple, list)):
+            return int(id_value[0])
+        return int(id_value)
     return 0
 
 def add_rent_to_supabase(rent_comps, comparables, supabase) -> bool:
