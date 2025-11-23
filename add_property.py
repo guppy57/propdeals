@@ -957,7 +957,6 @@ def run_add_property(supabase_client) -> dict:
     else:
         unit_configs_w_rent, comparables = get_rental_estimations_singlefamily(property_details)
         succeeded2 = add_rent_to_supabase_singlefamily(property_details["address1"], unit_configs_w_rent, comparables, supabase_client)
-      
 
     if not succeeded2:
         console.print("Something went wrong when adding rent comps", style="bold red")

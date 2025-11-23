@@ -342,11 +342,11 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, loan_info=
         pdf.ln()
 
     # Total score row
-    deal_rating = 'Excellent' if row['deal_score'] >= 20 else 'Good' if row['deal_score'] >= 15 else 'Poor'
+    deal_rating = 'Excellent' if row['deal_score'] >= 35 else 'Good' if row['deal_score'] >= 25 else 'Poor'
     pdf.set_font('Helvetica', 'B', 8)
     pdf.cell(criteria_col_widths[0], 6, 'TOTAL SCORE', border=1)
     pdf.cell(criteria_col_widths[1], 6, str(int(row['deal_score'])), border=1, align='C')
-    pdf.cell(criteria_col_widths[2], 6, '38', border=1, align='C')
+    pdf.cell(criteria_col_widths[2], 6, '43', border=1, align='C')
     pdf.cell(criteria_col_widths[3], 6, deal_rating, border=1)
     pdf.ln(8)
 

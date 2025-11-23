@@ -42,17 +42,6 @@ SELLING_COSTS_RATE = 0.07  # 7% selling costs (6% agent commission + 1% closing)
 CAPITAL_GAINS_RATE = 0.15  # 15% long-term capital gains tax
 DEPRECIATION_YEARS = 27.5  # Residential property depreciation period
 
-white_style = Style([
-    ('qmark', 'fg:white bold'),           # question mark
-    ('question', 'fg:white'),             # question text
-    ('answer', 'fg:white bold'),          # submitted answer
-    ('text', 'fg:white'),                 # input text
-    ('completion-menu', 'fg:white'),      # autocomplete menu
-    ('completion-menu.completion', 'fg:white'),  # autocomplete items
-    ('completion-menu.completion.current', 'fg:white bg:blue'),  # selected item
-    ('', 'fg:white')                      # fallback
-])
-
 def load_assumptions():
     global \
         appreciation_rate, \
@@ -133,8 +122,10 @@ def get_deal_score(row):
     score += (2 if row["DSCR"] >= 1.25 else 1 if row["DSCR"] >= 1.1 else 0)
     score += (2 if row["cash_needed"] < 20000 else 1 if row["cash_needed"] < 30000 else 0)
     score += (1 if row["GRM_y2"] < 12 else 0)  # Lower GRM is better
-    score += (2 if row["cost_per_sqrft"] < 100 else 1 if row["cost_per_sqrft"] < 150 else 0)
-    score += (2 if row["home_age"] < 20 else 0)
+    score += (3 if row["cost_per_sqrft"] < 80 else 2 if row["cost_per_sqrft"] < 100 else 1 if row["cost_per_sqrft"] < 150 else 0)
+    score += (3 if row["home_age"] < 10 else 2 if row["home_age"] < 20 else 1 if row["home_age"] < 30 else 0)
+    score += (1 if row["units"] > 0 else 0)  # Multi-family bonus
+    score += (2 if row["units"] == 0 else 1 if row["units"] == 2 else 0)  # Liquidity score
     score += (2 if row["irr_10yr"] >= 0.15 else 1 if row["irr_10yr"] >= 0.12 else 0)  # IRR 10yr
     score += (2 if row["after_tax_cash_flow_y2"] > 600 else 1 if row["after_tax_cash_flow_y2"] > 400 else 0)  # After-tax CF Y2
     score += (2 if row["payback_period_years"] < 7 and row["payback_period_years"] != float('inf') else
@@ -589,8 +580,8 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
 
         deal_score_style = (
             "green"
-            if row["deal_score"] >= 30
-            else ("yellow" if row["deal_score"] >= 20 else "red")
+            if row["deal_score"] >= 35
+            else ("yellow" if row["deal_score"] >= 25 else "red")
         )
 
         mobility_score_style = (
@@ -649,7 +640,7 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
             f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
             f"[{costs_to_income_style}]{format_percentage(row['costs_to_income'])}[/{costs_to_income_style}]",
-            f"[{deal_score_style}]{int(row['deal_score'])}/38[/{deal_score_style}]",
+            f"[{deal_score_style}]{int(row['deal_score'])}/43[/{deal_score_style}]",
             f"[{mobility_score_style}]{int(row['mobility_score'])}[/{mobility_score_style}]",
             f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]",
             f"[{irr_10yr_style}]{format_percentage(row['irr_10yr'])}[/{irr_10yr_style}]",
@@ -1343,8 +1334,10 @@ def analyze_property(property_id):
     dscr_score = (2 if row["DSCR"] >= 1.25 else 1 if row["DSCR"] >= 1.1 else 0)
     cash_score = (2 if row["cash_needed"] < 20000 else 1 if row["cash_needed"] < 30000 else 0)
     grm_score = (1 if row["GRM_y2"] < 12 else 0)
-    sqft_score = (2 if row["cost_per_sqrft"] < 100 else 1 if row["cost_per_sqrft"] < 150 else 0)
-    age_score = (2 if row["home_age"] < 20 else 0)
+    sqft_score = (3 if row["cost_per_sqrft"] < 80 else 2 if row["cost_per_sqrft"] < 100 else 1 if row["cost_per_sqrft"] < 150 else 0)
+    age_score = (3 if row["home_age"] < 10 else 2 if row["home_age"] < 20 else 1 if row["home_age"] < 30 else 0)
+    multi_family_score = (1 if row["units"] > 0 else 0)
+    liquidity_score = (2 if row["units"] == 0 else 1 if row["units"] == 2 else 0)
 
     # New scoring metrics
     irr_score = (2 if row["irr_10yr"] >= 0.15 else 1 if row["irr_10yr"] >= 0.12 else 0)
@@ -1360,7 +1353,7 @@ def analyze_property(property_id):
     proceeds_score = (1 if row["net_proceeds_10yr"] > 100000 else 0)
     npv_score = (1 if row["npv_10yr"] > 20000 else 0)
 
-    deal_score_style = ("green" if row['deal_score'] >= 20 else "yellow" if row['deal_score'] >= 15 else "red")
+    deal_score_style = ("green" if row['deal_score'] >= 35 else "yellow" if row['deal_score'] >= 25 else "red")
     
     criteria_table.add_row("Cash Flow Y2", f"[white]{cf_y2_score}[/white]", "3", f"${row['monthly_cash_flow_y2']:.0f}/month")
     criteria_table.add_row("Cash Flow Y1 Bonus", f"[white]{cf_y1_bonus}[/white]", "3", f"${row['monthly_cash_flow_y1']:.0f}/month")
@@ -1371,8 +1364,12 @@ def analyze_property(property_id):
     criteria_table.add_row("DSCR", f"[white]{dscr_score}[/white]", "2", f"{row['DSCR']:.2f}")
     criteria_table.add_row("Cash Needed", f"[white]{cash_score}[/white]", "2", f"${row['cash_needed']:,.0f}")
     criteria_table.add_row("GRM", f"[white]{grm_score}[/white]", "1", f"{row['GRM_y2']:.1f}")
-    criteria_table.add_row("Cost per Sqft", f"[white]{sqft_score}[/white]", "2", f"${row['cost_per_sqrft']:.0f}")
-    criteria_table.add_row("Property Age", f"[white]{age_score}[/white]", "2", f"{row['home_age']:.0f} years")
+    criteria_table.add_row("Cost per Sqft", f"[white]{sqft_score}[/white]", "3", f"${row['cost_per_sqrft']:.0f}")
+    criteria_table.add_row("Property Age", f"[white]{age_score}[/white]", "3", f"{row['home_age']:.0f} years")
+    property_type = "SFH" if row["units"] == 0 else f"{row["units"]}-Unit"
+    criteria_table.add_row("Multi-Family Bonus", f"[white]{multi_family_score}[/white]", "1", property_type)
+    liquidity_label = "SFH" if row["units"] == 0 else "Duplex" if row["units"] == 2 else "3/4-Plex"
+    criteria_table.add_row("Liquidity Score", f"[white]{liquidity_score}[/white]", "2", liquidity_label)
     criteria_table.add_row("IRR (10yr)", f"[white]{irr_score}[/white]", "2", f"{row['irr_10yr']:.1%}")
     criteria_table.add_row("After-Tax CF Y2", f"[white]{at_cf_score}[/white]", "2", f"${row['after_tax_cash_flow_y2']:.0f}/month")
     payback_display = f"{row['payback_period_years']:.1f} yrs" if row['payback_period_years'] != float('inf') else "Never"
@@ -1385,8 +1382,8 @@ def analyze_property(property_id):
     criteria_table.add_row("Break-Even Occupancy", f"[white]{breakeven_score}[/white]", "1", f"{row['break_even_occupancy']:.1%}")
     criteria_table.add_row("Net Proceeds (10yr)", f"[white]{proceeds_score}[/white]", "1", f"${row['net_proceeds_10yr']:,.0f}")
     criteria_table.add_row("NPV (10yr)", f"[white]{npv_score}[/white]", "1", f"${row['npv_10yr']:,.0f}")
-    criteria_table.add_row("[bold]TOTAL SCORE[/bold]", f"[bold {deal_score_style}]{int(row['deal_score'])}[/bold {deal_score_style}]", "[bold]38[/bold]",
-                          f"[bold {deal_score_style}]{'Excellent' if row['deal_score'] >= 20 else 'Good' if row['deal_score'] >= 15 else 'Poor'}[/bold {deal_score_style}]")
+    criteria_table.add_row("[bold]TOTAL SCORE[/bold]", f"[bold {deal_score_style}]{int(row['deal_score'])}[/bold {deal_score_style}]", "[bold]43[/bold]",
+                          f"[bold {deal_score_style}]{'Excellent' if row['deal_score'] >= 35 else 'Good' if row['deal_score'] >= 25 else 'Poor'}[/bold {deal_score_style}]")
     
     console.print(criteria_table)
 
@@ -1434,14 +1431,26 @@ def analyze_property(property_id):
     cost_table.add_row("Electricity (est.)", format_currency(row['annual_electricity_cost_est'] / 12), format_currency(row['annual_electricity_cost_est']))
     
     console.print(cost_table)
-    
-    console.print(Panel(f"[bold green]Investment Summary[/bold green]\n"
-                      f"Down Payment: {format_currency(row['down_payment'])}\n"
-                      f"Closing Costs: {format_currency(row['closing_costs'])}\n"
-                      f"[bold]Total Cash Needed: {format_currency(row['cash_needed'])}[/bold]\n"
-                      f"Loan Amount: {format_currency(row['loan_amount'])}", 
-                      title="Investment Requirements"))
-    
+
+    investment_summary = (
+        f"[bold green]Investment Summary[/bold green]\n"
+        f"Down Payment: {format_currency(row['down_payment'])}\n"
+        f"Closing Costs: {format_currency(row['closing_costs'])}\n"
+        f"[bold]Total Cash Needed: {format_currency(row['cash_needed'])}[/bold]\n"
+        f"Loan Amount: {format_currency(row['loan_amount'])}"
+    )
+
+    if using_ia_fhb_prog and row["units"] == 0:
+        investment_summary += (
+            f"\n\n[bold yellow]Iowa First-Time Homebuyer Program:[/bold yellow]\n"
+            f"5% Forgivable Loan: {format_currency(row['5_pct_loan'])}\n"
+            f"Primary Mortgage: {format_currency(row['loan_amount'])}\n"
+            f"Total Financing: {format_currency(row['loan_amount'] + row['5_pct_loan'])}\n"
+            f"[dim](5% loan due at sale or refinance)[/dim]"
+        )
+
+    console.print(Panel(investment_summary, title="Investment Requirements"))
+
     console.print("\n")
     research_choice = questionary.select(
         "Would you like to generate or view rental market research for this property?",
@@ -1685,6 +1694,27 @@ def display_rent_estimates_comparison(property_id: str, estimates: dict, existin
     ).ask()
     
     return update_database
+
+def display_new_property_qualification(address1):
+    current, contingent, creative = get_all_phase1_qualifying_properties()
+
+    current_result = current.query(f'address1 == "{address1}"')
+    contingent_result = contingent.query(f'address1 == "{address1}"')
+    creative_result = creative.query(f'address1 == "{address1}"')
+
+    current_msg = "Disqualified: Phase 1 Current" if current_result.empty else "Qualified: Phase 1 Current"
+    contingent_msg = "Disqualified: Phase 1 Contingent" if contingent_result.empty else "Qualified: Phase 1 Contingent"
+    creative_msg = "Disqualified: Phase 1 Creative" if creative_result.empty else "Qualified: Phase 1 Creative"
+    cur_style = "red" if current_result.empty else "green"
+    con_style = "red" if contingent_result.empty else "green"
+    cre_style = "red" if creative_result.empty else "green"
+
+    console.print(Panel(
+        f"[{cur_style}]{current_msg}[/{cur_style}]\n"
+        f"[{con_style}]{contingent_msg}[/{con_style}]\n"
+        f"[{cre_style}]{creative_msg}[/{cre_style}]",
+        title="Phase 1 Qualification Results"
+    ))
 
 def is_property_maps_done(row) -> bool:
     places = ['gas_station', 'school', 'university', 'grocery_or_supermarket', 'hospital', 'park', 'transit_station']
@@ -2016,6 +2046,7 @@ if __name__ == "__main__":
       property_details = run_add_property(supabase_client=supabase)
       handle_rent_research_after_add(property_details['address1'])
       reload_dataframe()
+      display_new_property_qualification(property_details['address1'])
     elif option == "Loans":
       run_loans_options()
     elif option == "Refresh data":
