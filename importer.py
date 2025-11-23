@@ -188,21 +188,17 @@ def import_properties(csv_filepath: str, generate_research: bool = True) -> Dict
                         researcher = RentResearcher(supabase, console)
 
                         # Generate research report
-                        report_result = researcher.generate_rent_research(
+                        report_id = researcher.generate_rent_research(
                             property_details["address1"]
                         )
 
-                        if report_result:
+                        if report_id:
                             console.print("  [green]✓[/green] Research report generated")
-
-                            # Track API cost
-                            if "api_cost" in report_result:
-                                stats["total_api_cost"] += report_result["api_cost"]
 
                             # Generate rent estimates from report
                             console.print("  [cyan]→[/cyan] Extracting rent estimates from report...")
                             researcher.generate_rent_estimates_from_report(
-                                property_details["address1"]
+                                report_id
                             )
                             console.print("  [green]✓[/green] Estimates extracted from research")
                         else:
@@ -273,7 +269,7 @@ def display_import_summary(stats: Dict[str, Any]):
 
 if __name__ == "__main__":
     # Configuration
-    csv_file = "docs/bulk-test.csv"
+    csv_file = "docs/dsm-250-to-300k.csv"
     generate_research_reports = True
 
     try:

@@ -118,12 +118,12 @@ def get_deal_score(row):
               1 if row["CoC_y2"] > 0.08 else 0)
     score += (1 if row["cap_rate_y2"] > 0.06 else 0)
     score += (2 if row["MGR_PP"] >= 0.01 else 1 if row["MGR_PP"] >= 0.008 else 0)  # 1% rule
-    score += (2 if 0.4 <= row["OpEx_Rent"] <= 0.6 else 1 if 0.3 <= row["OpEx_Rent"] <= 0.7 else 0)  # 50% rule  
+    score += (2 if 0.4 <= row["OpEx_Rent"] <= 0.6 else 1 if 0.3 <= row["OpEx_Rent"] <= 0.7 else 0)  # 50% rule
     score += (2 if row["DSCR"] >= 1.25 else 1 if row["DSCR"] >= 1.1 else 0)
     score += (2 if row["cash_needed"] < 20000 else 1 if row["cash_needed"] < 30000 else 0)
     score += (1 if row["GRM_y2"] < 12 else 0)  # Lower GRM is better
     score += (3 if row["cost_per_sqrft"] < 80 else 2 if row["cost_per_sqrft"] < 100 else 1 if row["cost_per_sqrft"] < 150 else 0)
-    score += (3 if row["home_age"] < 10 else 2 if row["home_age"] < 20 else 1 if row["home_age"] < 30 else 0)
+    score += (3 if pd.notna(row["home_age"]) and row["home_age"] < 10 else 2 if pd.notna(row["home_age"]) and row["home_age"] < 20 else 1 if pd.notna(row["home_age"]) and row["home_age"] < 30 else 0)
     score += (1 if row["units"] > 0 else 0)  # Multi-family bonus
     score += (2 if row["units"] == 0 else 1 if row["units"] == 2 else 0)  # Liquidity score
     score += (2 if row["irr_10yr"] >= 0.15 else 1 if row["irr_10yr"] >= 0.12 else 0)  # IRR 10yr
@@ -375,7 +375,7 @@ def apply_calculations_on_dataframe(df):
     df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
     df[cols] = df[cols].fillna(0)
     df["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
-    df["home_age"] = 2025 - df["built_in"]
+    df["home_age"] = 2025 - df["built_in"].fillna(2025)
     df["closing_costs"] = (df["purchase_price"] * closing_costs_rate) + lender_fees
     df["down_payment"] = df["purchase_price"] * down_payment_rate
     df["5_pct_loan"] = df["purchase_price"] * 0.05
@@ -1034,8 +1034,8 @@ def display_all_properties_info(properties_df):
         header_style="bold magenta",
     )
 
-    built_75th_percentile = dataframe["built_in"].quantile(0.75)
-    built_25th_percentile = dataframe["built_in"].quantile(0.25)
+    built_75th_percentile = dataframe["built_in"].quantile(0.75, skipna=True)
+    built_25th_percentile = dataframe["built_in"].quantile(0.25, skipna=True)
     sqft_75th_percentile = dataframe["square_ft"].quantile(0.75)
     sqft_25th_percentile = dataframe["square_ft"].quantile(0.25)
     walk_75th_percentile = dataframe["walk_score"].quantile(0.75)
@@ -1078,8 +1078,8 @@ def display_all_properties_info(properties_df):
 
         built_in_style = (
             "green"
-            if row["home_age"] <= built_25th_percentile
-            else ("yellow" if row["home_age"] <= built_75th_percentile else "red")
+            if pd.notna(row["home_age"]) and row["home_age"] <= built_25th_percentile
+            else ("yellow" if pd.notna(row["home_age"]) and row["home_age"] <= built_75th_percentile else "red")
         )
         walk_style = (
             "green"
@@ -1110,13 +1110,13 @@ def display_all_properties_info(properties_df):
             row["county"],
             row["school_district"],
             f"[{sqft_style}]{int(row['square_ft']):,}[/{sqft_style}]",
-            f"[{built_in_style}]{int(row['built_in'])}[/{built_in_style}]",
+            f"[{built_in_style}]{int(row['built_in']) if pd.notna(row['built_in']) else 'N/A'}[/{built_in_style}]",
             units_display,
             f"[{walk_style}]{int(row['walk_score'])}[/{walk_style}]",
             f"[{transit_style}]{int(row['transit_score'])}[/{transit_style}]",
             f"[{bike_style}]{int(row['bike_score'])}[/{bike_style}]",
             f"[{elec_style}]{format_currency(row['annual_electricity_cost_est'])}[/{elec_style}]",
-            row['listed_date'],
+            row['listed_date'] if pd.notna(row['listed_date']) else 'N/A',
             str(row["has_reduced_price"]),
             str(row["has_tenants"]),
         )
@@ -1148,7 +1148,7 @@ def analyze_property(property_id):
                       f"Address: {row['address1']}\n"
                       f"Purchase Price: {format_currency(row['purchase_price'])}\n"
                       f"Bedrooms: {int(row['beds'])} | Bathrooms: {int(row['baths'])} | Sq Ft: {format_number(row['square_ft'])}\n"
-                      f"Built: {int(row['built_in'])} (Age: {int(row['home_age'])} years)\n"
+                      f"Built: {int(row['built_in']) if pd.notna(row['built_in']) else 'N/A'} (Age: {int(row['home_age']) if pd.notna(row['home_age']) else 'N/A'} years)\n"
                       f"{property_type_display}\n"
                       f"Cost per Sq Ft: {format_currency(row['cost_per_sqrft'])}",
                       title="Basic Info"))
@@ -1335,7 +1335,7 @@ def analyze_property(property_id):
     cash_score = (2 if row["cash_needed"] < 20000 else 1 if row["cash_needed"] < 30000 else 0)
     grm_score = (1 if row["GRM_y2"] < 12 else 0)
     sqft_score = (3 if row["cost_per_sqrft"] < 80 else 2 if row["cost_per_sqrft"] < 100 else 1 if row["cost_per_sqrft"] < 150 else 0)
-    age_score = (3 if row["home_age"] < 10 else 2 if row["home_age"] < 20 else 1 if row["home_age"] < 30 else 0)
+    age_score = (3 if pd.notna(row["home_age"]) and row["home_age"] < 10 else 2 if pd.notna(row["home_age"]) and row["home_age"] < 20 else 1 if pd.notna(row["home_age"]) and row["home_age"] < 30 else 0)
     multi_family_score = (1 if row["units"] > 0 else 0)
     liquidity_score = (2 if row["units"] == 0 else 1 if row["units"] == 2 else 0)
 
@@ -1365,7 +1365,7 @@ def analyze_property(property_id):
     criteria_table.add_row("Cash Needed", f"[white]{cash_score}[/white]", "2", f"${row['cash_needed']:,.0f}")
     criteria_table.add_row("GRM", f"[white]{grm_score}[/white]", "1", f"{row['GRM_y2']:.1f}")
     criteria_table.add_row("Cost per Sqft", f"[white]{sqft_score}[/white]", "3", f"${row['cost_per_sqrft']:.0f}")
-    criteria_table.add_row("Property Age", f"[white]{age_score}[/white]", "3", f"{row['home_age']:.0f} years")
+    criteria_table.add_row("Property Age", f"[white]{age_score}[/white]", "3", f"{row['home_age']:.0f} years" if pd.notna(row['home_age']) else 'N/A')
     property_type = "SFH" if row["units"] == 0 else f"{row["units"]}-Unit"
     criteria_table.add_row("Multi-Family Bonus", f"[white]{multi_family_score}[/white]", "1", property_type)
     liquidity_label = "SFH" if row["units"] == 0 else "Duplex" if row["units"] == 2 else "3/4-Plex"
