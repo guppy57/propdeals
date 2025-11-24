@@ -7,7 +7,6 @@ import pandas as pd
 import questionary
 from dotenv import load_dotenv
 from InquirerPy import inquirer
-from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -386,16 +385,33 @@ def apply_calculations_on_dataframe(df):
     df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
     df["cash_needed"] = df["closing_costs"] + df["down_payment"]
     df["annual_rent_y1"] = df["net_rent_y1"] * 12
+    # Year 1 operating expenses (before changing total_rent for SFH)
+    # For SFH: uses aggregated per-room rent (house-hacking scenario)
+    # For multi-family: uses total rent from all units
+    df["monthly_vacancy_costs_y1"] = df["total_rent"] * vacancy_rate
+    df["monthly_repair_costs_y1"] = df["total_rent"] * repair_savings_rate
+    df["operating_expenses_y1"] = df["monthly_vacancy_costs_y1"] + df["monthly_repair_costs_y1"] + df["monthly_taxes"] + df["monthly_insurance"]
+    # For single family homes (units == 0): switch total_rent from aggregated per-room to whole-property rent
+    # This affects all Year 2 calculations and Y2-based metrics below
+    # Only update where rent_estimate is not null; otherwise keep aggregated per-room rent
+    mask = (df["units"] == 0) & (df["rent_estimate"].notna())
+    df.loc[mask, "total_rent"] = df.loc[mask, "rent_estimate"].astype(float)
     df["annual_rent_y2"] = df["total_rent"] * 12
-    df["monthly_vacancy_costs"] = df["total_rent"] * vacancy_rate
-    df["monthly_repair_costs"] = df["total_rent"] * repair_savings_rate
-    df["operating_expenses"] = df["monthly_vacancy_costs"] + df["monthly_repair_costs"] + df["monthly_taxes"] + df["monthly_insurance"]
-    df["total_monthly_cost"] = df["monthly_mortgage"] + df["monthly_mip"] + df["operating_expenses"]
-    df["monthly_NOI"] = df["total_rent"] - df["operating_expenses"]
-    df["annual_NOI_y1"] = (df["net_rent_y1"] - df["operating_expenses"]) * 12
-    df["annual_NOI_y2"] = df["monthly_NOI"] * 12
-    df["monthly_cash_flow_y1"] = df["net_rent_y1"] - df["total_monthly_cost"]
-    df["monthly_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost"]
+    # Year 2 operating expenses (after changing total_rent for SFH)
+    # For SFH: uses whole-property rent (full rental scenario)
+    # For multi-family: uses total rent from all units (same as Y1)
+    df["monthly_vacancy_costs_y2"] = df["total_rent"] * vacancy_rate
+    df["monthly_repair_costs_y2"] = df["total_rent"] * repair_savings_rate
+    df["operating_expenses_y2"] = df["monthly_vacancy_costs_y2"] + df["monthly_repair_costs_y2"] + df["monthly_taxes"] + df["monthly_insurance"]
+    # Total monthly cost uses Y2 operating expenses (conservative for Y1, accurate for Y2)
+    df["total_monthly_cost_y1"] = df["monthly_mortgage"] + df["monthly_mip"] + df["operating_expenses_y1"]
+    df["total_monthly_cost_y2"] = df["monthly_mortgage"] + df["monthly_mip"] + df["operating_expenses_y2"]
+    df["monthly_NOI_y2"] = df["total_rent"] - df["operating_expenses_y2"]
+    df["monthly_NOI_y1"] = df["net_rent_y1"] - df["operating_expenses_y1"]
+    df["annual_NOI_y1"] = df["monthly_NOI_y1"] * 12
+    df["annual_NOI_y2"] = df["monthly_NOI_y2"] * 12
+    df["monthly_cash_flow_y1"] = df["net_rent_y1"] - df["total_monthly_cost_y1"]
+    df["monthly_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost_y2"]
     df["annual_cash_flow_y1"] = df["monthly_cash_flow_y1"] * 12
     df["annual_cash_flow_y2"] = df["monthly_cash_flow_y2"] * 12
     df["cap_rate_y1"] = df["annual_NOI_y1"] / df["purchase_price"]
@@ -404,19 +420,21 @@ def apply_calculations_on_dataframe(df):
     df["CoC_y2"] = df["annual_cash_flow_y2"] / df["cash_needed"]
     df["GRM_y1"] = df["purchase_price"] / df["annual_rent_y1"] # Gross Rent Multiplier (lower = better)
     df["GRM_y2"] = df["purchase_price"] / df["annual_rent_y2"]
+    # Industry-standard metrics using Year 2 assumptions (whole-property rent for SFH, total units for multi-family)
+    # These are used for property evaluation, lender analysis, and market comparisons
     df["MGR_PP"] = df["total_rent"] / df["purchase_price"] # Monthly Gross Rent : Purchase Price, goal is for it to be greater than 0.01
-    df["OpEx_Rent"] = df["operating_expenses"] / df["total_rent"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
+    df["OpEx_Rent"] = df["operating_expenses_y2"] / df["total_rent"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
     df["DSCR"] = df["total_rent"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
     df["ltv_ratio"] = df["loan_amount"] / df["purchase_price"] # Loan-to-Value ratio
     df["price_per_door"] = df.apply(
         lambda row: row["purchase_price"] / row["beds"] if row["units"] == 0 else row["purchase_price"] / row["units"],
         axis=1
     ) # Price per unit/door (or per bedroom for single family)
-    df["rent_per_sqft"] = df["total_rent"] / df["square_ft"] # Monthly rent per square foot
-    df["break_even_occupancy"] = df["total_monthly_cost"] / df["total_rent"] # Break-even occupancy rate
+    df["rent_per_sqft"] = df["total_rent"] / df["square_ft"] # Monthly rent per square foot (Y2 for SFH)
+    df["break_even_occupancy"] = df["total_monthly_cost_y2"] / df["total_rent"] # Break-even occupancy rate
     df["break_even_vacancy"] = 1.0 - df["break_even_occupancy"]
-    df["oer"] = df["operating_expenses"] / df["total_rent"] # Operating Expense Ratio (standard industry metric)
-    df["egi"] = df["total_rent"] - df["monthly_vacancy_costs"] # Effective Gross Income
+    df["oer"] = df["operating_expenses_y2"] / df["total_rent"] # Operating Expense Ratio (standard industry metric)
+    df["egi"] = df["total_rent"] - df["monthly_vacancy_costs_y2"] # Effective Gross Income
     df["debt_yield"] = df["annual_NOI_y2"] / df["loan_amount"] # Debt Yield (lender metric)
     df["5y_forecast"] = df.apply(get_expected_gains, axis=1, args=(5,))
     df["10y_forecast"] = df.apply(get_expected_gains, axis=1, args=(10,))
@@ -465,10 +483,10 @@ def apply_calculations_on_dataframe(df):
     df["value_gap_pct_10yr"] = (df["npv_10yr"] / df["cash_needed"]) * 100
     df["value_gap_pct_20yr"] = (df["npv_20yr"] / df["cash_needed"]) * 100
     df["beats_market"] = df["npv_10yr"] > 0
-    df["cash_flow_y1_downside_10pct"] = (df["net_rent_y1"] * 0.9) - df["total_monthly_cost"]
-    df["cash_flow_y2_downside_10pct"] = (df["total_rent"] * 0.9) - df["total_monthly_cost"]
+    df["cash_flow_y1_downside_10pct"] = (df["net_rent_y1"] * 0.9) - df["total_monthly_cost_y1"]
+    df["cash_flow_y2_downside_10pct"] = (df["total_rent"] * 0.9) - df["total_monthly_cost_y2"]
     df["deal_score"] = df.apply(get_deal_score, axis=1)
-    df["fha_self_sufficiency_ratio"] = (df["total_rent"] * 0.75) / df["piti"]
+    df["fha_self_sufficiency_ratio"] = (df["total_rent"] * 0.75) / df["piti"]  # Uses Y2 rent (whole-property for SFH)
     return df
 
 def reload_dataframe():
@@ -568,7 +586,7 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
         cf_y1_style = "red" if row["monthly_cash_flow_y1"] < 0 else "green"
         cf_y2_style = "red" if row["monthly_cash_flow_y2"] < 0 else "green"
 
-        noi_style = "red" if row["monthly_NOI"] < 0 else "green"
+        noi_style = "red" if row["monthly_NOI_y2"] < 0 else "green"
 
         opex_rent_style = (
             "green"
@@ -629,10 +647,10 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
         row_args.extend([
             f"[{price_style}]{format_currency(row['purchase_price'])}[/{price_style}]",
             f"[{cash_style}]{format_currency(row['cash_needed'])}[/{cash_style}]",
-            format_currency(row["total_monthly_cost"]),
+            format_currency(row["total_monthly_cost_y2"]),
             f"[{cf_y1_style}]{format_currency(row['monthly_cash_flow_y1'])}[/{cf_y1_style}]",
             f"[{cf_y2_style}]{format_currency(row['monthly_cash_flow_y2'])}[/{cf_y2_style}]",
-            f"[{noi_style}]{format_currency(row['monthly_NOI'])}[/{noi_style}]",
+            f"[{noi_style}]{format_currency(row['monthly_NOI_y2'])}[/{noi_style}]",
             format_percentage(row["cap_rate_y1"]),
             format_percentage(row["cap_rate_y2"]),
             format_percentage(row["CoC_y2"]),
@@ -1009,9 +1027,9 @@ def get_additional_room_rental_df():
     df2 = dataframe.query('min_rent_unit_beds > 1').copy()
     df2["additional_room_rent"] = df2.apply(calculate_additional_room_rent, axis=1)
     df2["net_rent_y1"] = df2["net_rent_y1"] + df2["additional_room_rent"]
-    df2["monthly_cash_flow_y1"] = df2["net_rent_y1"] - df2["total_monthly_cost"]
+    df2["monthly_cash_flow_y1"] = df2["net_rent_y1"] - df2["total_monthly_cost_y1"]
     df2["annual_cash_flow_y1"] = df2["monthly_cash_flow_y1"] * 12
-    df2["annual_NOI_y1"] = (df2["net_rent_y1"] - df2["operating_expenses"]) * 12
+    df2["annual_NOI_y1"] = (df2["net_rent_y1"] - df2["operating_expenses_y1"]) * 12
     df2["cap_rate_y1"] = df2["annual_NOI_y1"] / df2["purchase_price"]
     df2["CoC_y1"] = df2["annual_cash_flow_y1"] / df2["cash_needed"]
     df2["GRM_y1"] = df2["purchase_price"] / df2["annual_rent_y1"]
@@ -1198,25 +1216,54 @@ def analyze_property(property_id):
                       f"[bold]Net Monthly Income (Year 1): {format_currency(row['net_rent_y1'])}[/bold]\n"
                       f"[bold]Full Rental Income (Year 2): {format_currency(row['total_rent'])}[/bold]\n\n"
                       f"[bold yellow]Operating Expenses:[/bold yellow]\n"
-                      f"Monthly Operating Expenses: {format_currency(row['operating_expenses'])} ({format_currency(row['operating_expenses'] * 12)} annually)\n\n"
+                      f"Monthly Operating Expenses Y1: {format_currency(row['operating_expenses_y1'])} ({format_currency(row['operating_expenses_y1'] * 12)} annually)\n"
+                      f"Monthly Operating Expenses Y2: {format_currency(row['operating_expenses_y2'])} ({format_currency(row['operating_expenses_y2'] * 12)} annually)\n\n"
                       f"[bold green]Net Operating Income (NOI):[/bold green]\n"
-                      f"NOI Year 1 (Live-in): {format_currency(row['net_rent_y1'] - row['operating_expenses'])} ({format_currency(row['annual_NOI_y1'])} annually)\n"
-                      f"NOI Year 2 (All Rent): {format_currency(row['monthly_NOI'])} ({format_currency(row['annual_NOI_y2'])} annually)\n\n"
+                      f"NOI Year 1 (Live-in): {format_currency(row['monthly_NOI_y1'])} ({format_currency(row['annual_NOI_y1'])} annually)\n"
+                      f"NOI Year 2 (All Rent): {format_currency(row['monthly_NOI_y2'])} ({format_currency(row['annual_NOI_y2'])} annually)\n\n"
                       f"[bold cyan]Personal Income & Housing Costs:[/bold cyan]\n"
                       f"After-Tax Monthly Income: {format_currency(after_tax_monthly_income)}\n"
                       f"Housing Cost to Income Ratio: {format_percentage(row['costs_to_income'])}",
                       title="Income Breakdown"))
-    
-    table.add_row("Monthly Cash Flow", 
-                  f"[{'red' if row['monthly_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['monthly_cash_flow_y1'])}[/]",
-                  f"[{'red' if row['monthly_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['monthly_cash_flow_y2'])}[/]")
-    table.add_row("Annual Cash Flow",
-                  f"[{'red' if row['annual_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['annual_cash_flow_y1'])}[/]",
-                  f"[{'red' if row['annual_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['annual_cash_flow_y2'])}[/]")
+
+    if is_single_family:
+        # For single family homes, update table title to clarify the comparison
+        table.title = f"Investment Metrics: {property_id}"
+        table.columns[1].header = "Year 1 (House Hacking)"
+        table.columns[2].header = "Year 2 (Full Rental)"
+
+    # Add common comparison rows
+    table.add_row("Annual Rent",
+                  format_currency(row['annual_rent_y1']),
+                  format_currency(row['annual_rent_y2']))
+
+    if is_single_family:
+        table.add_row("Monthly Rent",
+                      format_currency(row['net_rent_y1']) + " (net)",
+                      format_currency(row['total_rent']))
+
+    table.add_row("Operating Expenses",
+                  format_currency(row['operating_expenses_y1']),
+                  format_currency(row['operating_expenses_y2']))
+    table.add_row("Total Monthly Cost",
+                  format_currency(row['total_monthly_cost_y1']),
+                  format_currency(row['total_monthly_cost_y2']))
+    table.add_row("Monthly NOI",
+                  format_currency(row['monthly_NOI_y1']),
+                  format_currency(row['monthly_NOI_y2']))
+    table.add_row("Annual NOI",
+                  format_currency(row['annual_NOI_y1']),
+                  format_currency(row['annual_NOI_y2']))
+    table.add_row("[bold]Monthly Cash Flow[/bold]",
+                  f"[bold {'red' if row['monthly_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['monthly_cash_flow_y1'])}[/]",
+                  f"[bold {'red' if row['monthly_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['monthly_cash_flow_y2'])}[/]")
+    table.add_row("[bold]Annual Cash Flow[/bold]",
+                  f"[bold {'red' if row['annual_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['annual_cash_flow_y1'])}[/]",
+                  f"[bold {'red' if row['annual_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['annual_cash_flow_y2'])}[/]")
     table.add_row("After-Tax Cash Flow",
                   format_currency(row['after_tax_cash_flow_y1']),
                   format_currency(row['after_tax_cash_flow_y2']))
-    table.add_row("Cap Rate", 
+    table.add_row("Cap Rate",
                   format_percentage(row['cap_rate_y1']),
                   format_percentage(row['cap_rate_y2']))
     table.add_row("Cash on Cash Return",
@@ -1225,37 +1272,55 @@ def analyze_property(property_id):
     table.add_row("Gross Rent Multiplier",
                   format_number(row['GRM_y1']),
                   format_number(row['GRM_y2']))
-    table.add_row("Annual Rent",
-                  format_currency(row['annual_rent_y1']),
-                  format_currency(row['annual_rent_y2']))
-    mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
-    opex_rent_style = "green" if 0.45 <= row['OpEx_Rent'] <= 0.55 else ("yellow" if 0.35 <= row['OpEx_Rent'] <= 0.65 else "red")
-    dscr_style = "green" if row['DSCR'] >= 1.25 else "red"
-    fha_style = "green" if row["fha_self_sufficiency_ratio"] >= 1 else "red"
-    table.add_row("1% Rule (MGR/PP)","",f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]")
-    table.add_row("50% Rule (OpEx/Rent)","",f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]")
-    table.add_row("DSCR (Rent/Mortgage)","",f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]")
-    table.add_row("FHA Self Sufficiency Ratio","",f"[{fha_style}]{format_percentage(row["fha_self_sufficiency_ratio"])}[/{fha_style}]")
-    table.add_row("LTV Ratio","",format_percentage(row['ltv_ratio']))
-    table.add_row("Price Per Door","",format_currency(row['price_per_door']))
-    table.add_row("Rent Per Sqft","",format_currency(row['rent_per_sqft']))
-    table.add_row("Break-Even Occupancy","",format_percentage(row['break_even_occupancy']))
-    table.add_row("Break-Even Vacancy","",express_percent_as_months_and_days(row["break_even_vacancy"]))
-    table.add_row("Operating Expense Ratio","",format_percentage(row['oer']))
-    table.add_row("Effective Gross Income","",format_currency(row['egi']))
-    table.add_row("Debt Yield","",format_percentage(row['debt_yield']))
-    table.add_row("Monthly Depreciation Deduction","",format_currency(row['monthly_depreciation']))
-    table.add_row("Monthly Tax Savings","",format_currency(row['tax_savings_monthly']))
-    
-    table.add_row("Return on Equity (ROE) Y2","",format_percentage(row['roe_y2']))
-    table.add_row("Leverage Benefit","",format_percentage(row['leverage_benefit']))
-    payback_display = f"{row['payback_period_years']:.1f} years" if row['payback_period_years'] != float('inf') else "Never"
-    table.add_row("Payback Period","",payback_display)
+
     downside_y1_style = "green" if row['cash_flow_y1_downside_10pct'] > 0 else "red"
     downside_y2_style = "green" if row['cash_flow_y2_downside_10pct'] > 0 else "red"
     table.add_row("Cash Flow (10% Rent Drop)",
                   f"[{downside_y1_style}]{format_currency(row['cash_flow_y1_downside_10pct'])}[/{downside_y1_style}]",
                   f"[{downside_y2_style}]{format_currency(row['cash_flow_y2_downside_10pct'])}[/{downside_y2_style}]")
+
+    # Industry-standard metrics (primarily Y2-based for SFH)
+    mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
+    opex_rent_style = "green" if 0.45 <= row['OpEx_Rent'] <= 0.55 else ("yellow" if 0.35 <= row['OpEx_Rent'] <= 0.65 else "red")
+    dscr_style = "green" if row['DSCR'] >= 1.25 else "red"
+    fha_style = "green" if row["fha_self_sufficiency_ratio"] >= 1 else "red"
+
+    if is_single_family:
+        # For SFH, show OER and break-even for both years
+        oer_y1 = row['operating_expenses_y1'] / row['total_rent'] if row['total_rent'] > 0 else 0
+        break_even_y1 = row['total_monthly_cost_y1'] / row['total_rent'] if row['total_rent'] > 0 else 0
+        oer_y1_style = "green" if 0.45 <= oer_y1 <= 0.55 else ("yellow" if 0.35 <= oer_y1 <= 0.65 else "red")
+
+        table.add_row("Operating Expense Ratio",
+                      f"[{oer_y1_style}]{format_percentage(oer_y1)}[/{oer_y1_style}]",
+                      f"[{opex_rent_style}]{format_percentage(row['oer'])}[/{opex_rent_style}]")
+        table.add_row("Break-Even Occupancy",
+                      format_percentage(break_even_y1),
+                      format_percentage(row['break_even_occupancy']))
+    else:
+        table.add_row("Operating Expense Ratio","",f"[{opex_rent_style}]{format_percentage(row['oer'])}[/{opex_rent_style}]")
+        table.add_row("Break-Even Occupancy","",format_percentage(row['break_even_occupancy']))
+
+    table.add_row("1% Rule (MGR/PP)","",f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]")
+    table.add_row("50% Rule (OpEx/Rent)","",f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]")
+    table.add_row("DSCR (Rent/Mortgage)","",f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]")
+    table.add_row("FHA Self Sufficiency Ratio","",f"[{fha_style}]{format_percentage(row['fha_self_sufficiency_ratio'])}[/{fha_style}]")
+    table.add_row("Rent Per Sqft","",format_currency(row['rent_per_sqft']))
+    table.add_row("Break-Even Vacancy","",express_percent_as_months_and_days(row["break_even_vacancy"]))
+    table.add_row("Effective Gross Income","",format_currency(row['egi']))
+    table.add_row("Debt Yield","",format_percentage(row['debt_yield']))
+
+    # Property-level metrics (same for both years)
+    table.add_row("LTV Ratio","",format_percentage(row['ltv_ratio']))
+    price_per_label = "Price Per Bedroom" if is_single_family else "Price Per Door"
+    table.add_row(price_per_label,"",format_currency(row['price_per_door']))
+    table.add_row("Monthly Depreciation Deduction","",format_currency(row['monthly_depreciation']))
+    table.add_row("Monthly Tax Savings","",format_currency(row['tax_savings_monthly']))
+    table.add_row("Return on Equity (ROE) Y2","",format_percentage(row['roe_y2']))
+    table.add_row("Leverage Benefit","",format_percentage(row['leverage_benefit']))
+    payback_display = f"{row['payback_period_years']:.1f} years" if row['payback_period_years'] != float('inf') else "Never"
+    table.add_row("Payback Period","",payback_display)
+
     console.print(table)
     projections_table = Table(title="Investment Projections", show_header=True, header_style="bold cyan")
     projections_table.add_column("Metric", style="yellow", no_wrap=True)
@@ -1425,9 +1490,12 @@ def analyze_property(property_id):
     cost_table.add_row("MIP (Insurance)", format_currency(row['monthly_mip']), format_currency(row['monthly_mip'] * 12))
     cost_table.add_row("Property Taxes", format_currency(row['monthly_taxes']), format_currency(row['monthly_taxes'] * 12))
     cost_table.add_row("Home Insurance", format_currency(row['monthly_insurance']), format_currency(row['monthly_insurance'] * 12))
-    cost_table.add_row("Vacancy Reserve", format_currency(row['monthly_vacancy_costs']), format_currency(row['monthly_vacancy_costs'] * 12))
-    cost_table.add_row("Repair Reserve", format_currency(row['monthly_repair_costs']), format_currency(row['monthly_repair_costs'] * 12))
-    cost_table.add_row("[bold]Total Monthly Cost[/bold]", f"[bold red]{format_currency(row['total_monthly_cost'])}[/bold red]", f"[bold red]{format_currency(row['total_monthly_cost'] * 12)}[/bold red]")
+    cost_table.add_row("Vacancy Reserve Y1", format_currency(row['monthly_vacancy_costs_y1']), format_currency(row['monthly_vacancy_costs_y1'] * 12))
+    cost_table.add_row("Vacancy Reserve Y2", format_currency(row['monthly_vacancy_costs_y2']), format_currency(row['monthly_vacancy_costs_y2'] * 12))
+    cost_table.add_row("Repair Reserve Y1", format_currency(row['monthly_repair_costs_y1']), format_currency(row['monthly_repair_costs_y1'] * 12))
+    cost_table.add_row("Repair Reserve Y2", format_currency(row['monthly_repair_costs_y2']), format_currency(row['monthly_repair_costs_y2'] * 12))
+    cost_table.add_row("[bold]Total Monthly Cost Y1[/bold]", f"[bold red]{format_currency(row['total_monthly_cost_y1'])}[/bold red]", f"[bold red]{format_currency(row['total_monthly_cost_y1'] * 12)}[/bold red]")
+    cost_table.add_row("[bold]Total Monthly Cost Y2[/bold]", f"[bold red]{format_currency(row['total_monthly_cost_y2'])}[/bold red]", f"[bold red]{format_currency(row['total_monthly_cost_y2'] * 12)}[/bold red]")
     cost_table.add_row("Electricity (est.)", format_currency(row['annual_electricity_cost_est'] / 12), format_currency(row['annual_electricity_cost_est']))
     
     console.print(cost_table)
