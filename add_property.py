@@ -851,32 +851,16 @@ def save_property_comps_to_db(comps, address1, supabase):
             print(f"Exception: {e} (save_property_comps_to_db)")
             print(f"Exception type: {type(e)} (save_property_comps_to_db)")
 
-def get_current_rent_estimates_count(supabase) -> int:
-    """Get the maximum ID in rent_estimates table to avoid duplicate key errors"""
-    result = supabase.table("rent_estimates").select("id").order("id", desc=True).limit(1).execute()
-    if result.data:
-        id_value = result.data[0]["id"]
-        # Handle case where id is returned as tuple
-        if isinstance(id_value, (tuple, list)):
-            return int(id_value[0])
-        return int(id_value)
-    return 0
-
 def add_rent_to_supabase(rent_comps, comparables, supabase) -> bool:
-    current_count = get_current_rent_estimates_count(supabase) 
     new_ids = []
 
-    # Insert all rent estimates first
-    for i, rent_comp in enumerate(rent_comps):
-        new_id = current_count + 1 + i
-        rent_comp["id"] = new_id
-        new_ids.append(new_id)
-
+    for rent_comp in rent_comps:
         try:
             query = supabase.table("rent_estimates").insert(rent_comp)
             response = query.execute()
             if hasattr(response, "data"):
                 print(f"Response data: {response.data}")
+                new_ids.append(response.data["id"])
             else:
                 print("Response has no 'data' attribute")
                 return False
@@ -885,7 +869,6 @@ def add_rent_to_supabase(rent_comps, comparables, supabase) -> bool:
             print(f"Exception type: {type(e)}")
             return False
 
-    # Save comparables for each unit (if we have them structured per unit)
     for i, unit_comparables in enumerate(comparables):
         if unit_comparables:  # Only save if there are comparables
             rent_estimate_id = new_ids[i]
@@ -894,12 +877,7 @@ def add_rent_to_supabase(rent_comps, comparables, supabase) -> bool:
     return True
 
 def add_rent_to_supabase_singlefamily(address1, unit_configs_w_rent, property_comparables, supabase) -> bool:
-    current_count = get_current_rent_estimates_count(supabase)
-
-    for i, unit_config in enumerate(unit_configs_w_rent):
-        new_id = current_count + 1 + i
-        unit_config["id"] = new_id 
-
+    for unit_config in unit_configs_w_rent:
         try:
             query = supabase.table("rent_estimates").insert(unit_config)
             response = query.execute()
@@ -913,7 +891,6 @@ def add_rent_to_supabase_singlefamily(address1, unit_configs_w_rent, property_co
             print(f"Exception type: {type(e)}")
             return False
     
-    # Save comparables for the entire property
     save_property_comps_to_db(property_comparables, address1, supabase)
     return True
 
