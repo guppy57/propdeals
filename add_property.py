@@ -87,10 +87,19 @@ def get_rental_estimations_singlefamily(property_details):
         )
         return None, None
 
+    property_rent = {}
+
     try:
-        mid = int(float(data["rent"]) * 1.3)
-        low = int(float(data["rentRangeLow"]) * 1.3)
-        high = int(float(data["rentRangeHigh"]) * 1.3)
+        mid = int(float(data["rent"]))
+        low = int(float(data["rentRangeLow"]))
+        high = int(float(data["rentRangeHigh"]))
+
+        property_rent = {
+            "rent_estimate": mid,
+            "rent_estimate_low": low,
+            "rent_estimate_high": high,
+        }
+
         comparables = data["comparables"]
     except KeyError as e:
         console.print(f"Missing expected field in API response: {e}", style="bold red")
@@ -110,13 +119,13 @@ def get_rental_estimations_singlefamily(property_details):
             "unit_num": i + 1,
             "beds": 1,
             "baths": 0,
-            "rent_estimate": math.ceil(mid / total_beds),
-            "rent_estimate_low": math.ceil(low / total_beds),
-            "rent_estimate_high": math.ceil(high / total_beds),
+            "rent_estimate": math.ceil((mid * 1.3) / total_beds),
+            "rent_estimate_low": math.ceil((low * 1.3) / total_beds),
+            "rent_estimate_high": math.ceil((high * 1.3) / total_beds),
             "estimated_sqrft": 0
         })
 
-    return rent_comps, comparables 
+    return rent_comps, comparables, property_rent
 
 def get_political_districts(address):
     pass
@@ -876,7 +885,20 @@ def add_rent_to_supabase(rent_comps, comparables, supabase) -> bool:
 
     return True
 
-def add_rent_to_supabase_singlefamily(address1, unit_configs_w_rent, property_comparables, supabase) -> bool:
+def add_rent_to_supabase_singlefamily(address1, unit_configs_w_rent, property_comparables, property_rent, supabase) -> bool:
+    try:
+        query = supabase.table("properties").update(property_rent).eq("address1", address1)
+        response = query.execute()
+        if hasattr(response, "data"):
+            print(f"Response data: {response.data}")
+        else:
+            print("Response has no 'data' attribute (update call)")
+            return False
+    except Exception as e:
+        print(f"Exception: {e}")
+        print(f"Exception type: {type(e)}")
+        return False
+
     for unit_config in unit_configs_w_rent:
         try:
             query = supabase.table("rent_estimates").insert(unit_config)
@@ -884,7 +906,7 @@ def add_rent_to_supabase_singlefamily(address1, unit_configs_w_rent, property_co
             if hasattr(response, "data"):
                 print(f"Response data: {response.data}")
             else:
-                print("Response has no 'data' attribute")
+                print("Response has no 'data' attribute (insert call)")
                 return False
         except Exception as e:
             print(f"Exception: {e}")
@@ -936,8 +958,8 @@ def run_add_property(supabase_client) -> dict:
         rent_comps, comparables = get_rental_estimations_multifamily(property_details, unit_configs)
         succeeded2 = add_rent_to_supabase(rent_comps, comparables, supabase_client)
     else:
-        unit_configs_w_rent, comparables = get_rental_estimations_singlefamily(property_details)
-        succeeded2 = add_rent_to_supabase_singlefamily(property_details["address1"], unit_configs_w_rent, comparables, supabase_client)
+        unit_configs_w_rent, comparables, property_rent = get_rental_estimations_singlefamily(property_details)
+        succeeded2 = add_rent_to_supabase_singlefamily(property_details["address1"], unit_configs_w_rent, comparables, property_rent, supabase_client)
 
     if not succeeded2:
         console.print("Something went wrong when adding rent comps", style="bold red")

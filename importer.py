@@ -170,12 +170,12 @@ def import_properties(csv_filepath: str, generate_research: bool = True) -> Dict
 
                     # Step 2: Get rental estimations
                     console.print("  [cyan]→[/cyan] Generating rent estimates...")
-                    unit_configs_w_rent, comparables = get_rental_estimations_singlefamily(property_details)
+                    unit_configs_w_rent, comparables, property_rent = get_rental_estimations_singlefamily(property_details)
                     console.print("  [green]✓[/green] Rent estimates generated")
 
                     # Step 3: Add rent estimates to Supabase
                     console.print("  [cyan]→[/cyan] Saving rent estimates to database...")
-                    add_rent_to_supabase_singlefamily(property_details["address1"], unit_configs_w_rent, comparables, supabase)
+                    add_rent_to_supabase_singlefamily(property_details["address1"], unit_configs_w_rent, comparables, property_rent, supabase)
                     console.print("  [green]✓[/green] Rent estimates saved")
                 else:
                     console.print("[yellow]⊘ Property exists - skipping property/rent import[/yellow]")
