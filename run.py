@@ -1520,23 +1520,36 @@ def analyze_property(property_id):
     console.print(Panel(investment_summary, title="Investment Requirements"))
 
     console.print("\n")
+
+    # Build menu choices based on property type
+    research_menu_choices = [
+        "Generate new rent research (AI-powered)",
+        "View existing research reports",
+        "Generate rent estimates from report",
+    ]
+
+    # Add property-wide research option for single family homes only
+    if is_single_family:
+        research_menu_choices.append("Generate property-wide rent research (GPT-5)")
+
+    research_menu_choices.extend([
+        "Export property analysis to PDF",
+        "Skip - return to main menu"
+    ])
+
     research_choice = questionary.select(
         "Would you like to generate or view rental market research for this property?",
-        choices=[
-            "Generate new rent research (AI-powered)",
-            "View existing research reports",
-            "Generate rent estimates from report",
-            "Export property analysis to PDF",
-            "Skip - return to main menu"
-        ]
+        choices=research_menu_choices
     ).ask()
-    
+
     if research_choice == "Generate new rent research (AI-powered)":
         handle_rent_research_generation(property_id)
     elif research_choice == "View existing research reports":
         handle_view_research_reports(property_id)
     elif research_choice == "Generate rent estimates from report":
         handle_generate_rent_estimates(property_id)
+    elif research_choice == "Generate property-wide rent research (GPT-5)":
+        handle_property_wide_research_generation(property_id)
     elif research_choice == "Export property analysis to PDF":
         downloads_folder = os.getenv("DOWNLOADS_FOLDER", ".")
         safe_address = property_id.replace(' ', '_').replace(',', '').replace('.', '')
@@ -1568,6 +1581,40 @@ def analyze_property(property_id):
 
         result_path = export_property_analysis(row, rents, after_tax_monthly_income, loan_info, assumptions, output_path)
         console.print(f"[green]PDF exported successfully to: {result_path}[/green]")
+
+def handle_property_wide_research_generation(property_id: str):
+    """Generate property-wide rent research for single family homes (whole-house rental analysis)"""
+    researcher = RentResearcher(supabase, console)
+
+    try:
+        report_id = researcher.generate_property_wide_research(property_id)
+
+        if report_id:
+            console.print(f"[green]✅ Property-wide research completed! Report ID: {report_id}[/green]")
+
+            view_now = questionary.confirm("Would you like to view the report now?").ask()
+
+            if view_now:
+                report_data = researcher.get_report_by_id(report_id)
+                if report_data:
+                    researcher.display_report(report_data['report_content'])
+
+            extract_estimates = questionary.confirm(
+                "Would you like to extract property-wide rent estimates and update the properties table?"
+            ).ask()
+
+            if extract_estimates:
+                property_wide_result = researcher.extract_property_wide_estimates(report_id)
+
+                if property_wide_result:
+                    console.print("\n[bold green]✅ Property-wide rent estimates successfully extracted and saved![/bold green]")
+                else:
+                    console.print("\n[bold red]❌ Failed to extract property-wide estimates.[/bold red]")
+        else:
+            console.print("[red]❌ Property-wide research generation failed.[/red]")
+
+    except Exception as e:
+        console.print(f"[red]Error during property-wide research generation: {str(e)}[/red]")
 
 def handle_rent_research_generation(property_id: str):
     researcher = RentResearcher(supabase, console)
@@ -1946,22 +1993,30 @@ def handle_generate_rent_estimates(property_id: str, report_id: str = None):
 
 def handle_rent_research_after_add(property_id):
     researcher = RentResearcher(supabase, console)
-    property_id = property_details['address1']
+
+    # Fetch property data to check if it's single family
+    try:
+        property_response = supabase.table("properties").select("units").eq("address1", property_id).single().execute()
+        is_single_family = property_response.data and property_response.data.get("units", 1) == 0
+    except Exception:
+        is_single_family = False
+
+    # Generate per-room rent research (for single family, this is roommate strategy)
     report_id = researcher.generate_rent_research(property_id)
 
     try:
         result = researcher.generate_rent_estimates_from_report(report_id)
-        
+
         if result["success"]:
             estimates = result["estimates"]
             existing_estimates = result.get("existing_estimates", {})
             unit_configs = result.get("unit_configs", [])
-            
+
             display_rent_estimates_comparison(
-                property_id, estimates, existing_estimates, unit_configs, 
-                result['cost'], "Report we just made" 
+                property_id, estimates, existing_estimates, unit_configs,
+                result['cost'], "Report we just made"
             )
-            
+
             update_success = researcher._update_rent_estimates_in_db(
                 property_id, unit_configs, estimates
             )
@@ -1972,9 +2027,34 @@ def handle_rent_research_after_add(property_id):
                 console.print("\n[bold red]❌ Database update failed. See details above.[/bold red]")
         else:
             console.print(f"[red]Failed to generate estimates: {result['error']}[/red]")
-            
+
     except Exception as e:
         console.print(f"[red]Error generating estimates: {str(e)}[/red]")
+
+    # For single family homes, offer property-wide research option
+    if is_single_family:
+        console.print("\n[bold cyan]🏠 Single Family Home Detected[/bold cyan]")
+        console.print("You can also generate property-wide rent research to compare traditional rental vs roommate strategy.\n")
+
+        do_property_wide = questionary.confirm(
+            "Generate property-wide rent research (GPT-5)?",
+            default=False
+        ).ask()
+
+        if do_property_wide:
+            # Generate property-wide research
+            property_wide_report_id = researcher.generate_property_wide_research(property_id)
+
+            if property_wide_report_id:
+                # Extract estimates from property-wide research
+                property_wide_result = researcher.extract_property_wide_estimates(property_wide_report_id)
+
+                if property_wide_result:
+                    console.print("\n[bold green]✅ Property-wide rent estimates saved to properties table![/bold green]")
+                else:
+                    console.print("\n[bold red]❌ Failed to extract property-wide estimates.[/bold red]")
+            else:
+                console.print("\n[bold red]❌ Property-wide research generation failed.[/bold red]")
 
 def handle_changing_loan():
   loan_provider = LoansProvider(supabase_client=supabase, console=console)

@@ -41,6 +41,15 @@ class RentEstimates(BaseModel):
     rent_estimate_low: float
 
 
+class PropertyWideRentEstimates(BaseModel):
+    """Pydantic model for property-wide rent estimate outputs with confidence"""
+
+    rent_estimate: float
+    rent_estimate_high: float
+    rent_estimate_low: float
+    confidence_score: float
+
+
 class RentResearcher:
     """Handles rent research operations using Tavily + o1-mini"""
 
@@ -131,6 +140,38 @@ class RentResearcher:
                 f"{location} seasonal rental pricing trends",
                 f"{location} rental market forecast 2025",
             ]
+
+        return queries
+
+    def _generate_property_wide_search_queries(self, property_data: Dict[str, Any]) -> List[str]:
+        """Generate targeted search queries for whole-property rental analysis (not per-room)"""
+
+        address = property_data.get("address1", "Unknown Address")
+        beds = property_data.get("beds", 0)
+        baths = property_data.get("baths", 0)
+        square_ft = property_data.get("square_ft", 0)
+
+        # Extract city/area from address for location-based searches
+        location = address.split(",")[0] if "," in address else address
+
+        queries = [
+            # Whole-house rental comparables
+            f"{beds} bedroom house for rent near {location}",
+            f"{location} single family rental prices {beds}bed {baths}bath",
+            f"rent {beds} bedroom house {location} monthly",
+            f"{location} single family home rental market",
+            # Market data and trends
+            f"{location} rental market report 2024 2025 single family",
+            f"{location} average rent prices {beds} bedroom house",
+            f"{location} single family rental vacancy rates trends",
+            # Neighborhood and location
+            f"{location} neighborhood rental demand single family",
+            f"{location} single family rental market analysis",
+            f"{location} rental yield single family homes",
+            # Historical and forecasting
+            f"{location} single family rental price history 12 months",
+            f"{location} rental market forecast 2025 single family",
+        ]
 
         return queries
 
@@ -525,6 +566,113 @@ Generate a data-driven analysis with specific, actionable rental pricing recomme
 """
         return prompt.strip()
 
+    def _create_property_wide_analysis_prompt(
+        self,
+        property_data: Dict[str, Any],
+        search_results: List[Dict[str, Any]],
+        property_rent: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Create analysis prompt for property-wide rental (whole house, not per-room)"""
+        address = property_data.get("address1", "Unknown Address")
+        purchase_price = property_data.get("purchase_price", 0)
+        beds = property_data.get("beds", 0)
+        baths = property_data.get("baths", 0)
+        square_ft = property_data.get("square_ft", 0)
+        built_in = property_data.get("built_in", "Unknown")
+        walk_score = property_data.get("walk_score", "N/A")
+        transit_score = property_data.get("transit_score", "N/A")
+        bike_score = property_data.get("bike_score", "N/A")
+
+        # Get RentCast baseline if available
+        rentcast_baseline = ""
+        if property_rent:
+            rent_mid = property_rent.get("rent_estimate", 0)
+            rent_low = property_rent.get("rent_estimate_low", 0)
+            rent_high = property_rent.get("rent_estimate_high", 0)
+            rentcast_baseline = f"""
+# RentCast API Baseline (Whole-Property Estimate)
+- **RentCast Mid Estimate**: ${rent_mid:,}/month
+- **RentCast Range**: ${rent_low:,} - ${rent_high:,}/month
+"""
+
+        # Get comparable rents markdown table
+        rent_comp_md_table = self._create_rent_comp_md_table(address1=address, is_single_family=True)
+
+        # Compile search data
+        search_data = "\n\n".join(
+            [
+                f"**Query**: {result['query']}\n**Source**: {result['title']} ({result['url']})\n**Content**: {result['content'][:1000]}..."
+                for result in search_results[:25]
+            ]
+        )
+
+        prompt = f"""
+Analyze this single family home for WHOLE-PROPERTY rental (traditional rental strategy where you rent the entire house to one tenant/family, NOT room-by-room roommate rental).
+
+# Property Details
+- **Address**: {address}
+- **Purchase Price**: ${purchase_price:,}
+- **Configuration**: {beds} bed, {baths} bath | {square_ft:,} sq ft
+- **Year Built**: {built_in}
+- **Walkability**: Walk {walk_score}, Transit {transit_score}, Bike {bike_score}
+{rentcast_baseline}
+# Market Research Data
+## Web Search Results
+{search_data}
+
+## Property-Level Comparable Rents
+{rent_comp_md_table}
+
+# Research Objectives
+
+## 1. Whole-Property Rental Analysis
+Analyze this property for traditional whole-house rental (single tenant/family rents the entire property):
+- Current market rates for comparable whole-house rentals in the area
+- Rent per square foot benchmarks from similar properties
+- Property features that impact rent (size, condition, location, amenities)
+- **Provide specific whole-property monthly rent recommendation (mid/high/low estimates)**
+
+## 2. Rental Strategy Comparison
+Compare two rental strategies:
+- **Strategy A - Traditional Rental**: Rent entire property to one tenant/family
+- **Strategy B - Roommate Rental**: Owner lives in one room, rents others individually
+
+Financial comparison:
+- Monthly income from each strategy
+- Risk factors (vacancy, turnover, management complexity)
+- Which strategy is better for this property and WHY
+
+## 3. Market Positioning & Trends
+- Current rental market conditions for single family homes in this area
+- 6-12 month trend analysis (is market going up, down, or stable?)
+- Competitive positioning vs comparable properties
+- Optimal lease terms for whole-property rental
+
+## 4. Whole-Property Rent Recommendations
+Provide three specific estimates for whole-house rental:
+- **Primary Estimate**: Most likely monthly rent for entire property
+- **High Estimate**: Optimistic scenario (premium tenant, excellent condition, hot market)
+- **Low Estimate**: Conservative scenario (quick fill needed, market downturn, or property issues)
+
+For each estimate, explain the reasoning and confidence level.
+
+## 5. Risk Assessment
+- Vacancy risk factors specific to this property
+- Market sensitivity (economic changes, seasonality)
+- Property-specific risks (age, location, competition)
+- **Quantified risk factors where possible**
+
+# Output Requirements
+- Include specific dollar amounts and percentages throughout
+- Provide confidence levels (0-100%) for major recommendations
+- Focus on actionable, investment-grade insights for whole-property rental
+- Compare traditional rental vs roommate strategy with clear ROI analysis
+- Generate a professional, data-driven analysis
+
+Provide comprehensive analysis with specific whole-property rent recommendations.
+"""
+        return prompt.strip()
+
     def _create_estimate_extraction_prompt_singlefamily(
         self, report: str, room_configs: List[Dict[str, Any]]
     ) -> str:
@@ -904,6 +1052,304 @@ You must provide rent estimates for EACH individual unit listed above. Each unit
             )
 
             return report_id
+
+    def generate_property_wide_research(self, property_id: str) -> Optional[str]:
+        """Generate property-wide rental research for single family homes (whole-house rental, not per-room)"""
+        try:
+            property_response = (
+                self.supabase.table("properties")
+                .select("*")
+                .eq("address1", property_id)
+                .single()
+                .execute()
+            )
+            if not property_response.data:
+                self.console.print(f"[red]Property not found: {property_id}[/red]")
+                return None
+            property_data = property_response.data
+
+            # Verify it's a single family home
+            if property_data.get("units", 1) != 0:
+                self.console.print(f"[red]Property-wide research is only for single family homes (units must be 0)[/red]")
+                return None
+
+        except Exception as e:
+            self.console.print(f"[red]Error fetching property data: {str(e)}[/red]")
+            return None
+
+        # Create progress display
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task(
+                "[cyan]Initializing property-wide rental research...", total=None
+            )
+
+            # Generate property-wide search queries (different from per-room queries)
+            progress.update(task, description="[cyan]Generating whole-property search queries...")
+            queries = self._generate_property_wide_search_queries(property_data)
+
+            # Perform web searches
+            progress.update(
+                task,
+                description=f"[cyan]Searching whole-property rental market ({len(queries)} queries)...",
+            )
+            search_results = self._perform_searches(queries)
+
+            if not search_results:
+                progress.update(task, description="[red]No search results found!")
+                self.console.print("[red]No market data found for property-wide analysis.[/red]")
+                self._store_report(
+                    property_id,
+                    "No market data found for property-wide analysis",
+                    "NA",
+                    Decimal("0.0000"),
+                    "failed",
+                )
+                return None
+
+            progress.update(
+                task,
+                description=f"[cyan]Deep reasoning analysis with {self.config.reasoning_model} ({len(search_results)} data points)...",
+            )
+
+            # Get RentCast property-level estimates if available
+            property_rent = {
+                "rent_estimate": property_data.get("rent_estimate"),
+                "rent_estimate_low": property_data.get("rent_estimate_low"),
+                "rent_estimate_high": property_data.get("rent_estimate_high"),
+            } if property_data.get("rent_estimate") else None
+
+            analysis_prompt = self._create_property_wide_analysis_prompt(
+                property_data, search_results, property_rent
+            )
+            result = self._analyze_with_reasoning_model(analysis_prompt)
+
+            if not result["success"]:
+                progress.update(task, description="[red]Analysis failed!")
+                error_msg = result.get("error", "Unknown error")
+                self.console.print(f"[red]Analysis failed: {error_msg}[/red]")
+                self._store_report(
+                    property_id,
+                    f"Analysis failed: {error_msg}",
+                    analysis_prompt,
+                    Decimal("0.0000"),
+                    "failed",
+                )
+                return None
+
+            # Calculate total cost
+            num_searches = len(queries)
+            cost = self._calculate_cost(
+                num_searches, result["input_tokens"], result["output_tokens"]
+            )
+
+            progress.update(task, description="[green]Storing property-wide research report...")
+
+            # Store successful report with research_type = 'property_wide_rental'
+            try:
+                sanitized_content = self._sanitize_content(result["content"])
+                sanitized_prompt = self._sanitize_content(analysis_prompt)
+
+                report_result = (
+                    self.supabase.table("research_reports")
+                    .insert(
+                        {
+                            "property_id": property_id,
+                            "report_content": sanitized_content,
+                            "prompt_used": sanitized_prompt,
+                            "status": "completed",
+                            "api_cost": float(cost),
+                            "research_type": "property_wide_rental",  # Different from per-room research
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    )
+                    .execute()
+                )
+
+                if report_result.data:
+                    report_id = report_result.data[0]["id"]
+                else:
+                    self.console.print("[red]Failed to store report[/red]")
+                    return None
+
+            except Exception as e:
+                self.console.print(f"[red]Error storing report: {str(e)}[/red]")
+                return None
+
+            progress.update(task, description="[green]Property-wide research completed successfully!")
+
+            # Display cost information
+            search_cost = num_searches * self.config.search_cost_per_query
+            reasoning_cost = cost - Decimal(str(search_cost))
+
+            self.console.print(
+                Panel(
+                    f"[green]Property-wide research completed successfully![/green]\n\n"
+                    f"**Research Type**: Whole-property rental analysis\n"
+                    f"**Market Data Sources**: {len(search_results)} data points from {num_searches} searches\n"
+                    f"**Reasoning Tokens**: {result['input_tokens']:,} input, {result['output_tokens']:,} output\n"
+                    f"**Search Cost**: ${search_cost:.4f} ({num_searches} × $0.008)\n"
+                    f"**{self.config.reasoning_model} Reasoning Cost**: ${reasoning_cost:.4f}\n"
+                    f"**Total API Cost**: ${cost:.4f}\n"
+                    f"**Report ID**: {report_id}",
+                    title="Property-Wide Research Summary",
+                    border_style="green",
+                )
+            )
+
+            return report_id
+
+    def extract_property_wide_estimates(self, report_id: str) -> Optional[Dict[str, Any]]:
+        """Extract property-wide rent estimates from a research report and update properties table"""
+        try:
+            # Fetch the report
+            result = (
+                self.supabase.table("research_reports")
+                .select("*")
+                .eq("id", report_id)
+                .single()
+                .execute()
+            )
+            if not result.data:
+                self.console.print(f"[red]Report not found: {report_id}[/red]")
+                return None
+
+            report_data = result.data
+            report_content = report_data["report_content"]
+            property_id = report_data["property_id"]
+            research_type = report_data.get("research_type")
+
+            # Verify it's a property-wide research report
+            if research_type != "property_wide_rental":
+                self.console.print(f"[red]Report is not a property-wide rental research (type: {research_type})[/red]")
+                return None
+
+        except Exception as e:
+            self.console.print(f"[red]Error fetching report: {str(e)}[/red]")
+            return None
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task(
+                "[cyan]Extracting property-wide rent estimates...", total=None
+            )
+
+            # Create extraction prompt
+            extraction_prompt = f"""Analyze the following property-wide rental market research report and extract the recommended whole-property rent estimates.
+
+# Research Report to Analyze:
+{report_content}
+
+# Extraction Instructions:
+Extract the PRIMARY recommended monthly rent estimate for renting the ENTIRE property to a single tenant/family (not room-by-room).
+
+You must provide:
+1. **rent_estimate**: The primary/mid-range recommended monthly rent for the entire property
+2. **rent_estimate_high**: The upper bound/optimistic rent estimate for the entire property
+3. **rent_estimate_low**: The lower bound/conservative rent estimate for the entire property
+4. **confidence_score**: Your confidence in these estimates (0.0 to 1.0), where 1.0 is highest confidence
+
+# Analysis Requirements:
+- Provide only numeric values for monthly rental amounts (no dollar signs or commas)
+- Extract WHOLE-PROPERTY estimates (traditional rental), NOT per-room estimates
+- Focus on the report's "Whole-Property Rent Recommendations" or similar section
+- If the report provides a range (e.g., "$2,400-$2,800"), use the middle as rent_estimate, upper as rent_estimate_high, lower as rent_estimate_low
+- If only one estimate is provided, create a reasonable range (±10% for high/low estimates)
+- Base your confidence_score on:
+  * Quality and quantity of comparable data mentioned
+  * Consistency across different market indicators
+  * Strength of the neighborhood analysis
+  * Recency and reliability of data sources
+
+# Context:
+- Focus on the "Traditional Rental" or "Strategy A" recommendations (whole-house rental)
+- Prioritize estimates supported by comparable whole-property rental analysis
+- Consider market conditions, property features, and location factors mentioned in the report"""
+
+            # Call GPT-5 with structured outputs
+            progress.update(task, description="[cyan]Analyzing report with GPT-5...")
+            extraction_result = self._generate_rent_estimates_with_reasoning_model(
+                extraction_prompt, PropertyWideRentEstimates
+            )
+
+            if not extraction_result["success"]:
+                progress.update(task, description="[red]Extraction failed!")
+                self.console.print(f"[red]Failed to extract estimates: {extraction_result.get('error', 'Unknown error')}[/red]")
+                return None
+
+            estimates = extraction_result["estimates"]
+
+            # Calculate cost
+            reasoning_cost = self._calculate_cost(
+                0,
+                extraction_result["input_tokens"],
+                extraction_result["output_tokens"],
+            )
+
+            progress.update(task, description="[cyan]Updating properties table...")
+
+            # Update the properties table with the extracted estimates
+            try:
+                # Convert to integers (rents are typically whole numbers)
+                rent_estimate_int = int(round(estimates["rent_estimate"]))
+                rent_estimate_high_int = int(round(estimates["rent_estimate_high"]))
+                rent_estimate_low_int = int(round(estimates["rent_estimate_low"]))
+
+                update_result = (
+                    self.supabase.table("properties")
+                    .update({
+                        "rent_estimate": rent_estimate_int,
+                        "rent_estimate_high": rent_estimate_high_int,
+                        "rent_estimate_low": rent_estimate_low_int,
+                    })
+                    .eq("address1", property_id)
+                    .execute()
+                )
+
+                if not update_result.data:
+                    self.console.print("[red]Failed to update properties table[/red]")
+                    return None
+
+            except Exception as e:
+                self.console.print(f"[red]Error updating properties table: {str(e)}[/red]")
+                return None
+
+            progress.update(task, description="[green]Extraction completed!")
+
+            # Display results
+            self.console.print(
+                Panel(
+                    f"[green]Property-wide rent estimates extracted and saved![/green]\n\n"
+                    f"**Primary Estimate**: ${rent_estimate_int:,}/month\n"
+                    f"**Estimate Range**: ${rent_estimate_low_int:,} - ${rent_estimate_high_int:,}/month\n"
+                    f"**Confidence Score**: {estimates['confidence_score']:.1%}\n"
+                    f"**Reasoning Tokens**: {extraction_result['input_tokens']:,} input, {extraction_result['output_tokens']:,} output\n"
+                    f"**API Cost**: ${reasoning_cost:.4f}\n"
+                    f"**Updated**: properties.rent_estimate for {property_id}",
+                    title="Property-Wide Estimate Extraction",
+                    border_style="green",
+                )
+            )
+
+            return {
+                "rent_estimate": rent_estimate_int,
+                "rent_estimate_high": rent_estimate_high_int,
+                "rent_estimate_low": rent_estimate_low_int,
+                "confidence_score": estimates["confidence_score"],
+                "cost": float(reasoning_cost),
+                "tokens_used": {
+                    "input": extraction_result["input_tokens"],
+                    "output": extraction_result["output_tokens"],
+                },
+            }
 
     def generate_rent_estimates_from_report(self, report_id: str) -> Dict[str, Any]:
         """Generate rent estimates from an existing research report"""
