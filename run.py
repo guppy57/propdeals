@@ -1053,6 +1053,22 @@ def get_reduced_pp_df(reduction_factor):
     dataframe = apply_calculations_on_dataframe(df=dataframe)
     return dataframe
 
+def handle_price_cut(property_id, current_price):
+    amount = questionary.text("Price cut amount").ask()
+    new_price = current_price - int(amount)
+    try:
+      query = supabase.table("properties").update({
+          "purchase_price": new_price,
+          "has_reduced_price": True
+      })
+      response = query.execute()
+      if hasattr(response, "data"):
+          print(f"Updated property data with new reduced price: {response.data}")
+      else:
+          print("Update response has no 'data' attribute")
+    except Exception as e:
+        print(f"Reducing price for {property_id} failed: {str(e)}")
+
 def display_all_properties_info(properties_df):
     """Display all properties with basic info: address, sqft, age, units, mobility scores, and electricity cost"""
     dataframe = df if properties_df is None else properties_df
@@ -1537,6 +1553,7 @@ def analyze_property(property_id):
 
     # Build menu choices based on property type
     research_menu_choices = [
+        "Record price cut",
         "Generate new rent research",
         "View existing research reports",
         "Generate rent estimates from report",
@@ -1563,6 +1580,10 @@ def analyze_property(property_id):
         handle_generate_rent_estimates(property_id)
     elif research_choice == "Generate property-wide rent research":
         handle_property_wide_research_generation(property_id)
+    elif research_choice == "Record price cut":
+        handle_price_cut(property_id, row["purchase_price"])
+        reload_dataframe()
+        display_new_property_qualification(property_id)
     elif research_choice == "Export property analysis to PDF":
         downloads_folder = os.getenv("DOWNLOADS_FOLDER", ".")
         safe_address = property_id.replace(' ', '_').replace(',', '').replace('.', '')
