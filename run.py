@@ -2091,6 +2091,275 @@ def handle_changing_loan():
 
 using_application = True
 
+def calculate_property_type_statistics(df_active, metric_column):
+    """
+    Calculate average, min, and max for a metric grouped by property type.
+
+    Args:
+        df_active: DataFrame filtered to active properties
+        metric_column: Column name to calculate statistics for
+
+    Returns:
+        Dictionary with property types as keys (0=SFH, 2=2PX, 3=3PX, 4=4PX)
+        Each value is a dict with 'avg', 'min', 'max', 'count'
+    """
+    stats = {}
+
+    for units in [0, 2, 3, 4]:
+        prop_type_df = df_active[df_active['units'] == units]
+
+        if len(prop_type_df) > 0 and metric_column in prop_type_df.columns:
+            # Filter out NaN values
+            values = prop_type_df[metric_column].dropna()
+
+            if len(values) > 0:
+                stats[units] = {
+                    'avg': values.mean(),
+                    'min': values.min(),
+                    'max': values.max(),
+                    'count': len(values)
+                }
+            else:
+                stats[units] = {'avg': None, 'min': None, 'max': None, 'count': 0}
+        else:
+            stats[units] = {'avg': None, 'min': None, 'max': None, 'count': 0}
+
+    return stats
+
+def display_market_summary_table(df_active):
+    """Display high-level summary table with most critical metrics by property type."""
+    console.print("\n[bold cyan]═" * 80 + "[/bold cyan]")
+    console.print("[bold cyan]MARKET SUMMARY - Active Properties by Type[/bold cyan]")
+    console.print("[bold cyan]═" * 80 + "[/bold cyan]\n")
+
+    table = Table(show_header=True, header_style="bold magenta", title="Key Market Metrics")
+
+    # Define columns
+    table.add_column("Metric", style="cyan", no_wrap=True)
+    table.add_column("SFH", justify="right", style="yellow")
+    table.add_column("Duplex", justify="right", style="red")
+    table.add_column("Triplex", justify="right", style="blue")
+    table.add_column("Fourplex", justify="right", style="green")
+
+    # Property type labels
+    prop_type_labels = {0: "SFH", 2: "Duplex", 3: "Triplex", 4: "Fourplex"}
+
+    # Metrics to display
+    metrics = [
+        ("Count", "units", "count", format_number, False),
+        ("Avg Price", "purchase_price", "avg", format_currency, True),
+        ("Avg Cash Needed", "cash_needed", "avg", format_currency, True),
+        ("Avg Monthly CF Y2", "monthly_cash_flow_y2", "avg", format_currency, True),
+        ("Avg Cap Rate Y2", "cap_rate_y2", "avg", format_percentage, True),
+        ("Phase 1 Qualified %", None, "phase1_pct", format_percentage, False),
+        ("Avg Deal Score", "deal_score", "avg", format_number, True),
+    ]
+
+    # Get Phase 1 qualifiers for percentage calculation
+    phase1_df = get_combined_phase1_qualifiers(active=True)
+
+    for metric_label, metric_col, stat_type, format_func, show_range in metrics:
+        row = [metric_label]
+
+        for units in [0, 2, 3, 4]:
+            prop_type_df = df_active[df_active['units'] == units]
+            count = len(prop_type_df)
+
+            if count == 0:
+                row.append("[dim]N/A[/dim]")
+                continue
+
+            if stat_type == "count":
+                row.append(str(count))
+            elif stat_type == "phase1_pct":
+                phase1_count = len(phase1_df[phase1_df['units'] == units])
+                pct = (phase1_count / count) * 100 if count > 0 else 0
+                row.append(format_percentage(pct / 100))
+            else:
+                stats = calculate_property_type_statistics(df_active, metric_col)
+
+                if stats[units]['avg'] is None:
+                    row.append("[dim]N/A[/dim]")
+                else:
+                    avg_val = stats[units]['avg']
+                    if show_range:
+                        min_val = stats[units]['min']
+                        max_val = stats[units]['max']
+                        cell = f"{format_func(avg_val)}\n[dim]({format_func(min_val)}-{format_func(max_val)})[/dim]"
+                    else:
+                        cell = format_func(avg_val)
+                    row.append(cell)
+
+        table.add_row(*row)
+
+    console.print(table)
+    console.print()
+
+def display_category_table(df_active, category_name, metrics_config):
+    """
+    Display detailed statistics table for a specific category.
+
+    Args:
+        df_active: DataFrame filtered to active properties
+        category_name: Name of the category
+        metrics_config: List of tuples (label, column_name, format_function, invert_for_best)
+    """
+    console.print(f"\n[bold cyan]{'═' * 80}[/bold cyan]")
+    console.print(f"[bold cyan]{category_name}[/bold cyan]")
+    console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
+
+    table = Table(show_header=True, header_style="bold magenta", title=category_name)
+
+    table.add_column("Metric", style="cyan", no_wrap=True)
+    table.add_column("SFH", justify="right")
+    table.add_column("Duplex", justify="right")
+    table.add_column("Triplex", justify="right")
+    table.add_column("Fourplex", justify="right")
+
+    for metric_label, metric_col, format_func, invert_for_best in metrics_config:
+        row = [metric_label]
+        values_by_type = {}
+
+        # Calculate stats for each property type
+        for units in [0, 2, 3, 4]:
+            stats = calculate_property_type_statistics(df_active, metric_col)
+
+            if stats[units]['avg'] is None:
+                values_by_type[units] = None
+            else:
+                values_by_type[units] = {
+                    'avg': stats[units]['avg'],
+                    'min': stats[units]['min'],
+                    'max': stats[units]['max']
+                }
+
+        # Find best and worst (for color coding)
+        valid_avgs = {k: v['avg'] for k, v in values_by_type.items() if v is not None}
+
+        best_units = None
+        worst_units = None
+        if valid_avgs:
+            if invert_for_best:
+                # Lower is better (e.g., costs, risk metrics)
+                best_units = min(valid_avgs, key=valid_avgs.get)
+                worst_units = max(valid_avgs, key=valid_avgs.get)
+            else:
+                # Higher is better (e.g., returns, cash flow)
+                best_units = max(valid_avgs, key=valid_avgs.get)
+                worst_units = min(valid_avgs, key=valid_avgs.get)
+
+        # Build row with color coding
+        for units in [0, 2, 3, 4]:
+            if values_by_type[units] is None:
+                row.append("[dim]N/A[/dim]")
+            else:
+                avg_val = values_by_type[units]['avg']
+                min_val = values_by_type[units]['min']
+                max_val = values_by_type[units]['max']
+
+                # Format the cell
+                formatted_avg = format_func(avg_val)
+                formatted_min = format_func(min_val)
+                formatted_max = format_func(max_val)
+
+                # Apply color coding
+                if units == best_units:
+                    cell = f"[bold green]{formatted_avg}[/bold green]\n[dim]({formatted_min}-{formatted_max})[/dim]"
+                elif units == worst_units:
+                    cell = f"[bold red]{formatted_avg}[/bold red]\n[dim]({formatted_min}-{formatted_max})[/dim]"
+                else:
+                    cell = f"{formatted_avg}\n[dim]({formatted_min}-{formatted_max})[/dim]"
+
+                row.append(cell)
+
+        table.add_row(*row)
+
+    console.print(table)
+    console.print()
+
+def run_market_analysis_by_property_type():
+    """Main function to display market analysis with summary and drill-down categories."""
+    df_active = df.query("status == 'active'")
+
+    # Display summary table first
+    display_market_summary_table(df_active)
+
+    # Show drill-down menu
+    categories = {
+        "Market Overview": [
+            ("Property Count", "units", format_number, False),
+            ("Avg Property Age (years)", "built_in", lambda x: format_number(2025 - x), True),
+            ("Avg Square Footage", "square_ft", format_number, False),
+            ("% Beat Market (NPV>0)", "beats_market", lambda x: format_percentage(x), False),
+        ],
+        "Pricing & Investment Requirements": [
+            ("Purchase Price", "purchase_price", format_currency, False),
+            ("Cash Needed", "cash_needed", format_currency, True),
+            ("Down Payment", "down_payment", format_currency, False),
+            ("Closing Costs", "closing_costs", format_currency, True),
+            ("Price per Door/Bed", "price_per_door", format_currency, True),
+            ("Cost per Sq Ft", "purchase_price", lambda x: format_currency(x), False),
+        ],
+        "Income Analysis": [
+            ("Total Monthly Rent Y2", "total_rent", format_currency, False),
+            ("Net Rent Y1 (House-hack)", "net_rent_y1", format_currency, False),
+            ("Rent per Sq Ft", "rent_per_sqft", format_currency, False),
+            ("MGR/PP (1% Rule)", "MGR_PP", format_percentage, False),
+        ],
+        "Cash Flow Performance": [
+            ("Monthly CF Y1", "monthly_cash_flow_y1", format_currency, False),
+            ("Monthly CF Y2", "monthly_cash_flow_y2", format_currency, False),
+            ("After-Tax CF Y2", "after_tax_cash_flow_y2", format_currency, False),
+            ("Annual CF Y2", "annual_cash_flow_y2", format_currency, False),
+            ("CF Y2 (10% Rent Drop)", "cash_flow_y2_downside_10pct", format_currency, False),
+        ],
+        "Returns & Investment Performance": [
+            ("Cap Rate Y2", "cap_rate_y2", format_percentage, False),
+            ("Cash-on-Cash Y2", "CoC_y2", format_percentage, False),
+            ("IRR (10-year)", "irr_10yr", format_percentage, False),
+            ("NPV (10-year)", "npv_10yr", format_currency, False),
+            ("Equity Multiple (10yr)", "equity_multiple_10yr", format_number, False),
+            ("Avg Annual Return % (10yr)", "avg_annual_return_10yr", format_percentage, False),
+        ],
+        "Risk & Qualification Metrics": [
+            ("DSCR", "DSCR", format_number, False),
+            ("FHA Self-Sufficiency", "fha_self_sufficiency_ratio", format_percentage, False),
+            ("Operating Expense Ratio", "oer", format_percentage, True),
+            ("Break-Even Occupancy %", "break_even_occupancy", format_percentage, True),
+            ("OpEx to Rent (50% Rule)", "OpEx_Rent", format_percentage, True),
+            ("Housing Cost to Income", "costs_to_income", format_percentage, True),
+        ],
+        "Quality & Location Scores": [
+            ("Deal Score (out of 43)", "deal_score", format_number, False),
+            ("Mobility Score", "mobility_score", format_number, False),
+            ("Walk Score", "walk_score", format_number, False),
+            ("Transit Score", "transit_score", format_number, False),
+            ("Bike Score", "bike_score", format_number, False),
+        ],
+        "Long-Term Value (10-year)": [
+            ("Net Proceeds", "net_proceeds_10yr", format_currency, False),
+            ("Future Value", "future_value_10yr", format_currency, False),
+            ("Investment Gain", "5y_forecast", format_currency, False),
+            ("Return on Equity Y2", "roe_y2", format_percentage, False),
+            ("Leverage Benefit", "leverage_benefit", format_percentage, False),
+            ("Payback Period (years)", "payback_period_years", format_number, True),
+        ],
+    }
+
+    using_market_analysis = True
+    choices = list(categories.keys()) + ["Go back"]
+
+    while using_market_analysis:
+        option = questionary.select(
+            "Select a category to view detailed breakdown:",
+            choices=choices
+        ).ask()
+
+        if option == "Go back":
+            using_market_analysis = False
+        else:
+            display_category_table(df_active, option, categories[option])
+
 def run_all_properties_options():
     using_all_properties = True
     choices = [
@@ -2102,6 +2371,7 @@ def run_all_properties_options():
         "All properties - Creative Pricing",
         "All properties - Investment Metrics",
         "All properties - Sold / Passed (FHA)",
+        "Market Analysis by Property Type",
         "Go back",
     ]
 
@@ -2141,6 +2411,8 @@ def run_all_properties_options():
             )
         elif option == "Phase 2 - Qualifiers":
             display_all_phase2_qualifying_properties()
+        elif option == "Market Analysis by Property Type":
+            run_market_analysis_by_property_type()
 
 def run_loans_options():
   using_loans = True
