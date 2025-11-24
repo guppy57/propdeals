@@ -515,6 +515,10 @@ def reload_dataframe():
     rent_summary = rent_summary.merge(min_rent_units, on="address1", how="left")
     rent_summary["net_rent_y1"] = rent_summary["total_rent"] - rent_summary["min_rent"]
     df = df.merge(rent_summary, on="address1", how="left")
+
+
+
+
     df = apply_calculations_on_dataframe(df=df)
     console.print("[green]Property data reloaded successfully![/green]")
 
