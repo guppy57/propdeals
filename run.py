@@ -1947,6 +1947,7 @@ def get_phase2_data_checklist():
             "has_property_assessment": is_property_assessment_done(row),
             "has_zillow_link": True if row["zillow_link"] is not None else False,
             "has_built_in_year": True if row["built_in"] is not None else False,
+            "has_neighborhood": True if row["neighborhood"] is not None else False
         }
     
     return checklist

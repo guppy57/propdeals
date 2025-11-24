@@ -598,8 +598,8 @@ def add_property_to_supabase(property_details, supabase) -> bool:
     property_details["lat"] = geocode["lat"]
     property_details["lon"] = geocode["lon"]
     property_details["annual_electricity_cost_est"] = electricity_costs
-    property_details["neighborhood"] = geocode["neighborhood"]
     property_details["county"] = geocode["county"]
+
 
     # Add POI proximity data
     property_details.update(poi_data)
@@ -615,6 +615,13 @@ def add_property_to_supabase(property_details, supabase) -> bool:
         else:
             print("Response has no 'data' attribute")
             return False
+
+        # instead of this:
+        # property_details["neighborhood"] = geocode["neighborhood"]
+        # lets check if the neighborhood exists, if it does make a new many-to-many relationship
+        # if not create the neighborhood and then make the many to many
+        # implement all normalizing we are doing in backfill_neighborhoods
+
 
     except Exception as e:
         print(f"Exception: {e}")
