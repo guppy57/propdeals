@@ -40,6 +40,7 @@ FEDERAL_TAX_RATE = 0.22  # 22% federal tax bracket
 SELLING_COSTS_RATE = 0.07  # 7% selling costs (6% agent commission + 1% closing)
 CAPITAL_GAINS_RATE = 0.15  # 15% long-term capital gains tax
 DEPRECIATION_YEARS = 27.5  # Residential property depreciation period
+IA_FIRSTHOME_GRANT_AMT = 2500
 
 def load_assumptions():
     global \
@@ -55,7 +56,8 @@ def load_assumptions():
         after_tax_monthly_income, \
         state_tax_code, \
         discount_rate, \
-        using_ia_fhb_prog
+        using_ia_fhb_prog, \
+        ia_fhb_prog_upfront_option
     
     console.print("[yellow]Reloading assumptions...[/yellow]")
     assumptions_get_response = (
@@ -81,30 +83,37 @@ def load_assumptions():
     live_in_unit_setting = assumptions_get_response.data["live_in_unit_setting"]
     gross_annual_income = assumptions_get_response.data["gross_annual_income"]
     state_tax_code = assumptions_get_response.data["state_tax_code"]
-    after_tax_monthly_income = calculate_monthly_take_home(
-        gross_annual_income, state_tax_code
-    )
+    after_tax_monthly_income = calculate_monthly_take_home(gross_annual_income, state_tax_code)
     discount_rate = assumptions_get_response.data["discount_rate"]
-    using_ia_fhb_prog = assumptions_get_response.data[
-        "using_ia_fhb_prog"
-    ]  # Iowa FirstHome buyers program for Single Family properties
+    # Iowa FirstHome buyers program for Single Family properties
+    using_ia_fhb_prog = assumptions_get_response.data["using_ia_fhb_prog"] 
+    ia_fhb_prog_upfront_option = assumptions_get_response.data["ia_fhb_prog_upfront_option"]
     console.print(
         f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]"
     )
 
 def load_loan(loan_id):
-  global interest_rate, apr_rate, down_payment_rate, loan_length_years, mip_upfront_rate, mip_annual_rate, lender_fees
-  console.print("[yellow]Reloading FHA loan data...[/yellow]")
-  loan_provider = LoansProvider(supabase_client=supabase, console=console)
-  loan = loan_provider.get_loan_by_id(loan_id)
-  interest_rate = loan.interest_rate
-  apr_rate = loan.apr_rate
-  down_payment_rate = loan.down_payment_rate
-  loan_length_years = loan.years
-  mip_upfront_rate = loan.mip_upfront_rate
-  mip_annual_rate = loan.mip_annual_rate
-  lender_fees = loan.lender_fees
-  console.print("[green]FHA loan data reloaded successfully![/green]")
+    global \
+        interest_rate, \
+        apr_rate, \
+        down_payment_rate, \
+        loan_length_years, \
+        mip_upfront_rate, \
+        mip_annual_rate, \
+        lender_fees, \
+        upfront_discounts
+    console.print("[yellow]Reloading FHA loan data...[/yellow]")
+    loan_provider = LoansProvider(supabase_client=supabase, console=console)
+    loan = loan_provider.get_loan_by_id(loan_id)
+    interest_rate = loan.interest_rate
+    apr_rate = loan.apr_rate
+    down_payment_rate = loan.down_payment_rate
+    loan_length_years = loan.years
+    mip_upfront_rate = loan.mip_upfront_rate
+    mip_annual_rate = loan.mip_annual_rate
+    lender_fees = loan.lender_fees
+    upfront_discounts = loan.upfront_discounts
+    console.print("[green]FHA loan data reloaded successfully![/green]")
 
 def get_deal_score(row):
     score = 0
@@ -268,7 +277,7 @@ def calculate_net_proceeds(row, years, selling_costs_rate=0.07, capital_gains_ra
     monthly_rate = apr_rate / 12
     num_payments = loan_length_years * 12
     total_payments_in_period = years * 12
-    additional_loan = row["5_pct_loan"] if row["units"] == 0 and using_ia_fhb_prog else 0
+    additional_loan = row["5_pct_loan"] if (row["units"] == 0 and using_ia_fhb_prog and ia_fhb_prog_upfront_option == "LOAN") else 0
     remaining_balance = (loan_amount * (
         ((1 + monthly_rate) ** num_payments - (1 + monthly_rate) ** total_payments_in_period) /
         ((1 + monthly_rate) ** num_payments - 1)
@@ -362,7 +371,7 @@ def calculate_roe(row):
     return 0
 
 def get_loan_amount(row):
-    if using_ia_fhb_prog and row["units"] == 0:
+    if using_ia_fhb_prog and ia_fhb_prog_upfront_option == "LOAN" and row["units"] == 0:
         return row["purchase_price"] - row["down_payment"] + (row["purchase_price"] * mip_upfront_rate) - row["5_pct_loan"]
     else:
         return row["purchase_price"] - row["down_payment"] + (row["purchase_price"] * mip_upfront_rate)
@@ -383,7 +392,7 @@ def apply_calculations_on_dataframe(df):
     df["monthly_mip"] = (df["loan_amount"] * mip_annual_rate) / 12
     df["monthly_taxes"] = df.apply(get_monthly_taxes, axis=1)
     df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
-    df["cash_needed"] = df["closing_costs"] + df["down_payment"]
+    df["cash_needed"] = df["closing_costs"] + df["down_payment"] - upfront_discounts - (IA_FIRSTHOME_GRANT_AMT if ia_fhb_prog_upfront_option == "GRANT" else 0)
     df["annual_rent_y1"] = df["net_rent_y1"] * 12
     # Year 1 operating expenses (before changing total_rent for SFH)
     # For SFH: uses aggregated per-room rent (house-hacking scenario)
@@ -1500,15 +1509,19 @@ def analyze_property(property_id):
     
     console.print(cost_table)
 
+    grant = format_currency(IA_FIRSTHOME_GRANT_AMT) if ia_fhb_prog_upfront_option == "GRANT" else "[dim]Not using grant option for Iowa First Home[/dim]"
+
     investment_summary = (
         f"[bold green]Investment Summary[/bold green]\n"
         f"Down Payment: {format_currency(row['down_payment'])}\n"
         f"Closing Costs: {format_currency(row['closing_costs'])}\n"
+        f"Lender Discounts: {format_currency(upfront_discounts)}\n"
+        f"IA FirstHome Grant: {grant}\n"
         f"[bold]Total Cash Needed: {format_currency(row['cash_needed'])}[/bold]\n"
         f"Loan Amount: {format_currency(row['loan_amount'])}"
     )
 
-    if using_ia_fhb_prog and row["units"] == 0:
+    if using_ia_fhb_prog and ia_fhb_prog_upfront_option == "LOAN" and row["units"] == 0:
         investment_summary += (
             f"\n\n[bold yellow]Iowa First-Time Homebuyer Program:[/bold yellow]\n"
             f"5% Forgivable Loan: {format_currency(row['5_pct_loan'])}\n"
