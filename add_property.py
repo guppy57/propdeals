@@ -869,7 +869,7 @@ def add_rent_to_supabase(rent_comps, comparables, supabase) -> bool:
             response = query.execute()
             if hasattr(response, "data"):
                 print(f"Response data: {response.data}")
-                new_ids.append(response.data["id"])
+                new_ids.append(response.data[0]["id"])
             else:
                 print("Response has no 'data' attribute")
                 return False

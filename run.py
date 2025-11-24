@@ -503,7 +503,7 @@ def reload_dataframe():
     console.print("[yellow]Reloading property data...[/yellow]")
     properties_get_response = supabase.table('properties').select('*').execute()
     df = pd.DataFrame(properties_get_response.data)
-    df = df.drop(["zillow_link", "full_address"], axis=1)
+    df = df.drop(["full_address"], axis=1)
     rents_get_response = supabase.table('rent_estimates').select('*').execute()
     rents = pd.DataFrame(rents_get_response.data)
     rents = rents.drop(['id'], axis=1)
@@ -1055,12 +1055,12 @@ def get_reduced_pp_df(reduction_factor):
 
 def handle_price_cut(property_id, current_price):
     amount = questionary.text("Price cut amount").ask()
-    new_price = current_price - int(amount)
+    new_price = int(int(current_price) - int(amount))
     try:
       query = supabase.table("properties").update({
           "purchase_price": new_price,
           "has_reduced_price": True
-      })
+      }).eq("address1", property_id)
       response = query.execute()
       if hasattr(response, "data"):
           print(f"Updated property data with new reduced price: {response.data}")
@@ -1068,6 +1068,20 @@ def handle_price_cut(property_id, current_price):
           print("Update response has no 'data' attribute")
     except Exception as e:
         print(f"Reducing price for {property_id} failed: {str(e)}")
+
+def handle_status_change(property_id): 
+    options = ["pending sale", "active", "passed", "sold"]
+    new_status = questionary.select("Price cut amount", options=options).ask()
+    try:
+      query = supabase.table("properties").update({ "status": new_status }).eq("address1", property_id)
+      response = query.execute()
+      if hasattr(response, "data"):
+          print(f"Updated property data with status: {response.data}")
+      else:
+          print("Update response has no 'data' attribute")
+    except Exception as e:
+        print(f"Changing statusfor {property_id} failed: {str(e)}")
+
 
 def display_all_properties_info(properties_df):
     """Display all properties with basic info: address, sqft, age, units, mobility scores, and electricity cost"""
@@ -1554,6 +1568,7 @@ def analyze_property(property_id):
     # Build menu choices based on property type
     research_menu_choices = [
         "Record price cut",
+        "Change status",
         "Generate new rent research",
         "View existing research reports",
         "Generate rent estimates from report",
@@ -1584,6 +1599,9 @@ def analyze_property(property_id):
         handle_price_cut(property_id, row["purchase_price"])
         reload_dataframe()
         display_new_property_qualification(property_id)
+    elif research_choice == "Change status":
+        handle_status_change(property_id)
+        reload_dataframe()
     elif research_choice == "Export property analysis to PDF":
         downloads_folder = os.getenv("DOWNLOADS_FOLDER", ".")
         safe_address = property_id.replace(' ', '_').replace(',', '').replace('.', '')
@@ -1927,6 +1945,8 @@ def get_phase2_data_checklist():
             "has_taxes": row["annual_tax_amount"] is not None,
             "has_seller_circumstances": row["seller_circumstances"] is not None,
             "has_property_assessment": is_property_assessment_done(row),
+            "has_zillow_link": True if row["zillow_link"] is not None else False,
+            "has_built_in_year": True if row["built_in"] is not None else False,
         }
     
     return checklist
