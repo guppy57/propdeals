@@ -1536,14 +1536,13 @@ def analyze_property(property_id):
 
     # Build menu choices based on property type
     research_menu_choices = [
-        "Generate new rent research (AI-powered)",
+        "Generate new rent research",
         "View existing research reports",
         "Generate rent estimates from report",
     ]
 
-    # Add property-wide research option for single family homes only
     if is_single_family:
-        research_menu_choices.append("Generate property-wide rent research (GPT-5)")
+        research_menu_choices.append("Generate property-wide rent research")
 
     research_menu_choices.extend([
         "Export property analysis to PDF",
@@ -1555,13 +1554,13 @@ def analyze_property(property_id):
         choices=research_menu_choices
     ).ask()
 
-    if research_choice == "Generate new rent research (AI-powered)":
+    if research_choice == "Generate new rent research":
         handle_rent_research_generation(property_id)
     elif research_choice == "View existing research reports":
         handle_view_research_reports(property_id)
     elif research_choice == "Generate rent estimates from report":
         handle_generate_rent_estimates(property_id)
-    elif research_choice == "Generate property-wide rent research (GPT-5)":
+    elif research_choice == "Generate property-wide rent research":
         handle_property_wide_research_generation(property_id)
     elif research_choice == "Export property analysis to PDF":
         downloads_folder = os.getenv("DOWNLOADS_FOLDER", ".")
@@ -1620,6 +1619,7 @@ def handle_property_wide_research_generation(property_id: str):
                 property_wide_result = researcher.extract_property_wide_estimates(report_id)
 
                 if property_wide_result:
+                    reload_dataframe()
                     console.print("\n[bold green]✅ Property-wide rent estimates successfully extracted and saved![/bold green]")
                 else:
                     console.print("\n[bold red]❌ Failed to extract property-wide estimates.[/bold red]")

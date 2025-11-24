@@ -17,6 +17,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
 from supabase import Client
 from tavily import TavilyClient
 
@@ -1296,6 +1297,21 @@ You must provide:
 
             progress.update(task, description="[cyan]Updating properties table...")
 
+            # Fetch current rent_estimate before update
+            try:
+                current_property = (
+                    self.supabase.table("properties")
+                    .select("rent_estimate")
+                    .eq("address1", property_id)
+                    .single()
+                    .execute()
+                )
+                current_rent = current_property.data.get("rent_estimate", 0) if current_property.data else 0
+                current_rent = current_rent or 0  # Handle None case
+            except Exception as e:
+                self.console.print(f"[yellow]Could not fetch current rent, defaulting to $0: {str(e)}[/yellow]")
+                current_rent = 0
+
             # Update the properties table with the extracted estimates
             try:
                 # Convert to integers (rents are typically whole numbers)
@@ -1324,20 +1340,54 @@ You must provide:
 
             progress.update(task, description="[green]Extraction completed!")
 
-            # Display results
-            self.console.print(
-                Panel(
-                    f"[green]Property-wide rent estimates extracted and saved![/green]\n\n"
-                    f"**Primary Estimate**: ${rent_estimate_int:,}/month\n"
-                    f"**Estimate Range**: ${rent_estimate_low_int:,} - ${rent_estimate_high_int:,}/month\n"
-                    f"**Confidence Score**: {estimates['confidence_score']:.1%}\n"
-                    f"**Reasoning Tokens**: {extraction_result['input_tokens']:,} input, {extraction_result['output_tokens']:,} output\n"
-                    f"**API Cost**: ${reasoning_cost:.4f}\n"
-                    f"**Updated**: properties.rent_estimate for {property_id}",
-                    title="Property-Wide Estimate Extraction",
-                    border_style="green",
-                )
+            # Calculate comparison metrics
+            difference = rent_estimate_int - current_rent
+            if current_rent > 0:
+                change_percent = (difference / current_rent) * 100
+            else:
+                change_percent = 0
+
+            # Determine color and symbol based on difference
+            if difference > 0:
+                diff_style = "green"
+                diff_symbol = "+"
+                change_style = "green"
+            elif difference < 0:
+                diff_style = "red"
+                diff_symbol = ""
+                change_style = "red"
+            else:
+                diff_style = "white"
+                diff_symbol = ""
+                change_style = "white"
+
+            # Format change percent
+            if change_percent != 0:
+                change_percent_formatted = f"{diff_symbol}{abs(change_percent):.1f}%"
+            else:
+                change_percent_formatted = "0.0%"
+
+            # Display results in table format
+            estimates_table = Table(
+                title="Property-Wide Rent Estimate Comparison",
+                show_header=True,
+                header_style="bold green"
             )
+            estimates_table.add_column("Property", style="cyan", width=25)
+            estimates_table.add_column("Current Rent", justify="right", style="white", width=14)
+            estimates_table.add_column("New Primary", justify="right", style="green", width=14)
+            estimates_table.add_column("Difference", justify="right", style="bold", width=14)
+            estimates_table.add_column("Change %", justify="right", style="bold", width=12)
+
+            estimates_table.add_row(
+                property_id,
+                f"${current_rent:,.0f}",
+                f"[bold]${rent_estimate_int:,.0f}[/bold]",
+                f"[{diff_style}]{diff_symbol}${abs(difference):,.0f}[/{diff_style}]",
+                f"[{change_style}]{change_percent_formatted}[/{change_style}]"
+            )
+
+            self.console.print(estimates_table)
 
             return {
                 "rent_estimate": rent_estimate_int,
