@@ -896,13 +896,14 @@ def get_all_phase1_qualifying_properties(active=True):
       - 50% rule (operating expenses must be 50% or lower than gross rent)
       - Cash needed must be below $25,000
       - Debt Service Coverage Ratio should be above 1.25
-      - Monthly Cashflow with cheapest unit not rented above -400 (house hacking)
-      - Fully rented monthly cashflow above 400
-      - Triplexes / Duplexes must pass FHA self-sufficiency test (Gross Rent * 0.75 >= PITI)
+      - SFH/MF: Monthly Cashflow with cheapest unit not rented above -400 (house hacking)
+      - MF: Fully rented monthly cashflow above 400
+      - SFH: Fully rented monthly cashflow above -50
+      - Triplexes / Fourplexes must pass FHA self-sufficiency test (Gross Rent * 0.75 >= PITI)
       - Net Present Value in 10 years must be positive, thus beating the stock market
     """
     status_criteria = "status == 'active'" if active else "status != 'active'"
-    criteria = f"{status_criteria} & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400 & fha_self_sufficiency_ratio >= 1 & beats_market"
+    criteria = f"{status_criteria} & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & ((units == 0 & monthly_cash_flow_y2 >= -50) | (units > 0 & monthly_cash_flow_y2 >= 400)) & ((units >= 3 & fha_self_sufficiency_ratio >= 1) | (units < 3)) & beats_market"
 
     filtered_df = df.copy()
     filtered_df = filtered_df.query(criteria)

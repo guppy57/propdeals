@@ -19,7 +19,12 @@ from add_property import (
     get_rental_estimations_singlefamily,
     add_rent_to_supabase_singlefamily
 )
-from rent_research import RentResearcher
+from run import (
+    load_assumptions,
+    load_loan,
+    reload_dataframe,
+    get_combined_phase1_qualifiers
+)
 
 # Initialize
 load_dotenv()
@@ -120,13 +125,50 @@ def csv_row_to_property_details(row: pd.Series) -> Dict[str, Any]:
     return property_details
 
 
-def import_properties(csv_filepath: str, generate_research: bool = True) -> Dict[str, Any]:
+def generate_output_csv_path(input_filepath: str) -> str:
+    """
+    Generate output CSV filename from input CSV filename.
+    Example: "docs/dsm-250-to-300k.csv" -> "docs/dsm-250-to-300k.out.csv"
+
+    Args:
+        input_filepath: Path to input CSV file
+
+    Returns:
+        Path to output CSV file
+    """
+    if input_filepath.endswith('.csv'):
+        return input_filepath[:-4] + '.out.csv'
+    else:
+        return input_filepath + '.out.csv'
+
+
+def write_qualifying_addresses_to_csv(addresses: list, output_filepath: str):
+    """
+    Write qualifying addresses to output CSV file.
+
+    Args:
+        addresses: List of address1 strings
+        output_filepath: Path to output CSV file
+
+    Returns:
+        None
+    """
+    try:
+        with open(output_filepath, 'w', newline='') as csvfile:
+            csvfile.write("address1\n")
+            for address in addresses:
+                csvfile.write(f"{address}\n")
+        console.print(f"[green]✓[/green] Wrote {len(addresses)} qualifying addresses to {output_filepath}")
+    except Exception as e:
+        console.print(f"[red]✗ Error writing output CSV: {e}[/red]")
+
+
+def import_properties(csv_filepath: str) -> Dict[str, Any]:
     """
     Import properties from CSV file into Supabase.
 
     Args:
         csv_filepath: Path to CSV file
-        generate_research: Whether to generate AI-powered rent research reports
 
     Returns:
         Dictionary with import statistics
@@ -137,9 +179,13 @@ def import_properties(csv_filepath: str, generate_research: bool = True) -> Dict
         "successful": 0,
         "skipped": 0,
         "errors": 0,
+        "phase1_qualified": 0,
         "total_api_cost": 0.0,
         "error_details": []
     }
+
+    # Track all imported addresses for Phase 1 qualification checking
+    imported_addresses = []
 
     try:
         # Load CSV
@@ -152,17 +198,16 @@ def import_properties(csv_filepath: str, generate_research: bool = True) -> Dict
         for property_num, (_, row) in enumerate(df.iterrows(), start=1):
             full_address = row["Full Address"]
 
-            console.print(f"Processing property {property_num}")
             console.print(f"[bold]Property {property_num}/{stats['total']}:[/bold] {full_address}")
 
             try:
+                # Convert CSV row to property_details format
+                property_details = csv_row_to_property_details(row)
+
                 # Check for duplicates
                 property_exists = check_if_property_exists(supabase, full_address)
 
                 if not property_exists:
-                    # Convert CSV row to property_details format
-                    property_details = csv_row_to_property_details(row)
-
                     # Step 1: Add property to Supabase (with enrichment)
                     console.print("  [cyan]→[/cyan] Adding property with enrichment data...")
                     add_property_to_supabase(property_details, supabase)
@@ -177,42 +222,16 @@ def import_properties(csv_filepath: str, generate_research: bool = True) -> Dict
                     console.print("  [cyan]→[/cyan] Saving rent estimates to database...")
                     add_rent_to_supabase_singlefamily(property_details["address1"], unit_configs_w_rent, comparables, property_rent, supabase)
                     console.print("  [green]✓[/green] Rent estimates saved")
-                else:
-                    console.print("[yellow]⊘ Property exists - skipping property/rent import[/yellow]")
-                    property_details = csv_row_to_property_details(row)
 
-                # Step 4: Generate AI research report (always run, even for existing properties)
-                if generate_research:
-                    console.print("  [cyan]→[/cyan] Generating AI-powered rent research report...")
-                    try:
-                        researcher = RentResearcher(supabase, console)
-
-                        # Generate research report
-                        report_id = researcher.generate_rent_research(
-                            property_details["address1"]
-                        )
-
-                        if report_id:
-                            console.print("  [green]✓[/green] Research report generated")
-
-                            # Generate rent estimates from report
-                            console.print("  [cyan]→[/cyan] Extracting rent estimates from report...")
-                            researcher.generate_rent_estimates_from_report(
-                                report_id
-                            )
-                            console.print("  [green]✓[/green] Estimates extracted from research")
-                        else:
-                            console.print("  [yellow]⚠ Research report generation returned no result[/yellow]")
-                    except Exception as e:
-                        console.print(f"  [yellow]⚠ Research generation failed: {e}[/yellow]")
-                        # Don't fail the entire import if research fails
-
-                if not property_exists:
                     console.print("[bold green]✓ Successfully imported![/bold green]\n")
                     stats["successful"] += 1
                 else:
-                    console.print("[bold yellow]✓ Research updated for existing property![/bold yellow]\n")
+                    console.print("[yellow]⊘ Property exists - skipping property/rent import[/yellow]")
+                    console.print("[bold yellow]⊘ Property already exists - skipped[/bold yellow]\n")
                     stats["skipped"] += 1
+
+                # Track address for Phase 1 qualification checking
+                imported_addresses.append(property_details["address1"])
 
             except Exception as e:
                 console.print(f"[bold red]✗ Error: {e}[/bold red]\n")
@@ -222,6 +241,45 @@ def import_properties(csv_filepath: str, generate_research: bool = True) -> Dict
                     "error": str(e)
                 })
                 continue
+
+        # Phase 1 Qualification Checking
+        console.print(f"\n[bold cyan]Checking Phase 1 qualifications for imported properties...[/bold cyan]\n")
+
+        if imported_addresses:
+            try:
+                # Initialize run.py data (assumptions, loan, and property dataframe)
+                console.print("  [cyan]→[/cyan] Loading assumptions and loan data...")
+                load_assumptions()
+                load_loan(1)  # Load default loan (ID 1)
+
+                # Reload dataframe to get all properties with calculated metrics
+                console.print("  [cyan]→[/cyan] Reloading property data with Phase 1 metrics...")
+                reload_dataframe()
+
+                # Get Phase 1 qualifying properties
+                console.print("  [cyan]→[/cyan] Fetching Phase 1 qualifiers...")
+                phase1_df = get_combined_phase1_qualifiers(active=True)
+                qualifying_addresses = phase1_df["address1"].tolist()
+
+                # Find intersection: addresses that were imported AND qualify for Phase 1
+                phase1_qualified_addresses = [addr for addr in imported_addresses if addr in qualifying_addresses]
+                stats["phase1_qualified"] = len(phase1_qualified_addresses)
+
+                console.print(f"  [green]✓[/green] Found {stats['phase1_qualified']} Phase 1 qualifiers from imported properties")
+
+                # Write qualifying addresses to output CSV
+                if phase1_qualified_addresses:
+                    output_csv_path = generate_output_csv_path(csv_filepath)
+                    console.print(f"  [cyan]→[/cyan] Writing qualifiers to {output_csv_path}...")
+                    write_qualifying_addresses_to_csv(phase1_qualified_addresses, output_csv_path)
+                else:
+                    console.print("  [yellow]No properties qualified for Phase 1[/yellow]")
+
+            except Exception as e:
+                console.print(f"  [red]✗ Error during Phase 1 checking: {e}[/red]")
+                console.print("  [yellow]Continuing with import summary...[/yellow]")
+        else:
+            console.print("  [yellow]No addresses to check (all imports failed)[/yellow]")
 
         return stats
 
@@ -251,6 +309,7 @@ def display_import_summary(stats: Dict[str, Any]):
     table.add_row("Successfully imported", f"[green]{stats['successful']}[/green]")
     table.add_row("Skipped (duplicates)", f"[yellow]{stats['skipped']}[/yellow]")
     table.add_row("Errors", f"[red]{stats['errors']}[/red]")
+    table.add_row("Phase 1 Qualifiers", f"[bold green]{stats['phase1_qualified']}[/bold green]")
 
     if stats["total_api_cost"] > 0:
         table.add_row("Total API cost (research)", f"${stats['total_api_cost']:.2f}")
@@ -269,20 +328,19 @@ def display_import_summary(stats: Dict[str, Any]):
 
 if __name__ == "__main__":
     # Configuration
-    csv_file = "docs/dsm-250-to-300k.csv"
-    generate_research_reports = True
+    csv_file = "docs/dsm-3bd.csv"
 
     try:
         # Display banner
         console.print(Panel.fit(
             "[bold cyan]Property CSV Importer[/bold cyan]\n"
-            "Bulk import properties with enrichment & rent research",
+            "Bulk import properties with enrichment & rent estimates",
             border_style="cyan"
         ))
         console.print()
 
         # Run import
-        stats = import_properties(csv_file, generate_research=generate_research_reports)
+        stats = import_properties(csv_file)
 
         # Display summary
         display_import_summary(stats)
