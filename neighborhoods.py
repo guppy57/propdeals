@@ -402,6 +402,21 @@ class NeighborhoodsClient():
 
         return result
 
+    def is_neighborhood_assessment_complete_batch(
+        self, address1_list: List[str]
+    ) -> Dict[str, bool]:
+        """
+        Batch check if neighborhood assessments are complete for multiple properties.
+
+        Args:
+            address1_list: List of property addresses to check
+
+        Returns:
+            Dictionary mapping address1 -> bool (currently always False)
+        """
+        # For now, return False for all addresses
+        return {address: False for address in address1_list}
+
     def get_neighborhoods_dataframe(self, supabase):
         """
         Fetch neighborhoods for all properties from the property_neighborhood many-to-many table.

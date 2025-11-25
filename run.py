@@ -945,9 +945,6 @@ def get_combined_phase1_qualifiers(active=True):
     ).drop_duplicates(subset=["address1"], keep="first") 
     return combined
 
-def new_get_all_phase2_properties():
-
-
 def get_all_phase2_properties():
     """
     This method filters phase 1 qualifiers based property condition, rentability, and affordability 
@@ -2083,6 +2080,8 @@ def get_phase2_data_checklist():
     combined_df = get_combined_phase1_qualifiers()
     unique_neighborhoods = combined_df["neighborhood"].dropna().unique().tolist()
     neighborhood_analysis_cache = neighborhoods.has_neighborhood_analysis_batch(unique_neighborhoods)
+    unique_addresses = combined_df["address1"].dropna().unique().tolist()
+    neighborhood_assessment_cache = neighborhoods.is_neighborhood_assessment_complete_batch(unique_addresses)
     combined_df = combined_df.assign(
         _has_listing=combined_df["listed_date"].notna(),
         _has_taxes=combined_df["annual_tax_amount"].notna(),
@@ -2099,6 +2098,9 @@ def get_phase2_data_checklist():
             if pd.notna(n)
             else False
         ),
+        _has_neighborhood_assessment=combined_df["address1"].map(
+            lambda addr: neighborhood_assessment_cache.get(addr, False)
+        ),
     )
 
     checklist = {
@@ -2108,6 +2110,7 @@ def get_phase2_data_checklist():
             "has_maps_data": has_maps_data,
             "has_rent_dd": has_rent_dd,
             "has_neighborhood_analysis": has_neighborhood_analysis,
+            "has_neighborhood_assessment": has_neighborhood_assessment,
             "has_taxes": has_taxes,
             "has_seller_circumstances": has_seller_circumstances,
             "has_property_assessment": has_property_assessment,
@@ -2116,7 +2119,7 @@ def get_phase2_data_checklist():
             "has_neighborhood": has_neighborhood
         }
         for address, has_listing, has_inspection_done, has_maps_data, has_rent_dd,
-            has_neighborhood_analysis, has_taxes, has_seller_circumstances,
+            has_neighborhood_analysis, has_neighborhood_assessment, has_taxes, has_seller_circumstances,
             has_property_assessment, has_zillow_link, has_built_in_year, has_neighborhood
         in zip(
             combined_df["address1"],
@@ -2125,6 +2128,7 @@ def get_phase2_data_checklist():
             combined_df["_has_maps_data"],
             combined_df["_has_rent_dd"],
             combined_df["_has_neighborhood_analysis"],
+            combined_df["_has_neighborhood_assessment"],
             combined_df["_has_taxes"],
             combined_df["_has_seller_circumstances"],
             combined_df["_has_property_assessment"],
