@@ -355,40 +355,33 @@ class NeighborhoodsClient():
         Properties without neighborhoods will not be in the dataframe (handled by left merge)
     """
     try:
-      # Query property_neighborhood with a join to neighborhoods table
-      # Supabase syntax: table.select('col1, col2, foreign_table(foreign_col)')
       response = supabase.table('property_neighborhood')\
-        .select('address1, neighborhoods(name)')\
+        .select('address1, neighborhoods(name, letter_grade)')\
         .execute()
 
       if not response.data:
-        # No neighborhoods found, return empty dataframe with correct columns
-        return pd.DataFrame(columns=['address1', 'neighborhood'])
+        return pd.DataFrame(columns=['address1', 'neighborhood', 'neighborhood_letter_grade'])
 
-      # Convert to dataframe
       neighborhoods_df = pd.DataFrame(response.data)
 
-      # Handle the nested structure from Supabase join
-      # The 'neighborhoods' column contains a dict like {'name': 'downtown'}
       if 'neighborhoods' in neighborhoods_df.columns:
         neighborhoods_df['neighborhood'] = neighborhoods_df['neighborhoods'].apply(
           lambda x: x['name'] if x and isinstance(x, dict) and 'name' in x else None
         )
-        # Keep only the columns we need
-        neighborhoods_df = neighborhoods_df[['address1', 'neighborhood']]
+        neighborhoods_df['neighborhood_letter_grade'] = neighborhoods_df['neighborhoods'].apply(
+          lambda x: x['letter_grade'] if x and isinstance(x, dict) and 'letter_grade' in x else None
+        )
+        neighborhoods_df = neighborhoods_df[['address1', 'neighborhood', 'neighborhood_letter_grade']]
       else:
-        # Fallback if structure is different
-        return pd.DataFrame(columns=['address1', 'neighborhood'])
+        return pd.DataFrame(columns=['address1', 'neighborhood', 'neighborhood_letter_grade'])
 
-      # Remove any rows where neighborhood is None
       neighborhoods_df = neighborhoods_df.dropna(subset=['neighborhood'])
-
       return neighborhoods_df
 
     except Exception as e:
       print(f"Error fetching neighborhoods: {e}")
       # Return empty dataframe on error
-      return pd.DataFrame(columns=['address1', 'neighborhood'])
+      return pd.DataFrame(columns=['address1', 'neighborhood', 'neighborhood_letter_grade'])
 
   def _calculate_cost(self, num_searches: int, input_tokens: int, output_tokens: int) -> Decimal:
     """Calculate the total cost of searches + reasoning"""

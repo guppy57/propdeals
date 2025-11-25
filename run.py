@@ -925,18 +925,14 @@ def get_all_phase1_qualifying_properties(active=True):
     base_df = df.copy()
     filtered_df = base_df.query(criteria).copy()
     filtered_df.loc[:, "qualification_type"] = "current"
-
     qualifier_address1s = filtered_df["address1"].tolist()
-
     reduced_df = get_reduced_pp_df(0.10)
     reduced_df = reduced_df.query(criteria).copy()
     reduced_df.loc[:, "qualification_type"] = "contingent"
     reduced_df = reduced_df[~reduced_df["address1"].isin(qualifier_address1s)].copy()
-
     creative_df = get_additional_room_rental_df()
     creative_df = creative_df.query(criteria).copy()
     creative_df.loc[:, "qualification_type"] = "creative"
-    
     return filtered_df, reduced_df, creative_df 
 
 def get_combined_phase1_qualifiers(active=True):
@@ -1223,7 +1219,8 @@ def analyze_property(property_id):
                       f"Bedrooms: {int(row['beds'])} | Bathrooms: {int(row['baths'])} | Sq Ft: {format_number(row['square_ft'])}\n"
                       f"Built: {int(row['built_in']) if pd.notna(row['built_in']) else 'N/A'} (Age: {int(row['home_age']) if pd.notna(row['home_age']) else 'N/A'} years)\n"
                       f"{property_type_display}\n"
-                      f"Cost per Sq Ft: {format_currency(row['cost_per_sqrft'])}",
+                      f"Cost per Sq Ft: {format_currency(row['cost_per_sqrft'])}\n"
+                      f"Neighborhood: {row["neighborhood"]} (rated: {row["neighborhood_letter_grade"]})",
                       title="Basic Info"))
     
     property_rents = rents[rents['address1'] == property_id]
