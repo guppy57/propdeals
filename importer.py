@@ -328,7 +328,7 @@ def display_import_summary(stats: Dict[str, Any]):
 
 if __name__ == "__main__":
     # Configuration
-    csv_file = "docs/dsm-3bd.csv"
+    csv_file = "docs/dsm-2bd.csv"
 
     try:
         # Display banner
