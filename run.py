@@ -909,6 +909,7 @@ def get_all_phase1_qualifying_properties(active=True):
       - Triplexes / Fourplexes must pass FHA self-sufficiency test (Gross Rent * 0.75 >= PITI)
       - Net Present Value in 10 years must be positive, thus beating the stock market
       - Square Feet must be greater than or equal to 1000
+      - Neighborhood Letter Grade must be C or higher
     """
     status_criteria = "status == 'active'" if active else "status != 'active'"
     criteria = (
@@ -921,7 +922,8 @@ def get_all_phase1_qualifying_properties(active=True):
         "& monthly_cash_flow_y1 >= -400 "
         "& ((units == 0 & monthly_cash_flow_y2 >= -50) | (units > 0 & monthly_cash_flow_y2 >= 400)) "
         "& ((units >= 3 & fha_self_sufficiency_ratio >= 1) | (units < 3)) "
-        "& beats_market"
+        "& beats_market "
+        "& neighborhood_letter_grade in ['A', 'B', 'C']"
     )
 
     base_df = df.copy()
