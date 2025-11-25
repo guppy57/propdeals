@@ -669,66 +669,18 @@ def add_property_to_supabase(property_details, supabase) -> bool:
     property_details["lon"] = geocode["lon"]
     property_details["annual_electricity_cost_est"] = electricity_costs
     property_details["county"] = geocode["county"]
-
-    # Add POI proximity data
     property_details.update(poi_data)
 
     try:
         query = supabase.table("properties").insert(property_details)
         response = query.execute()
 
-        # Check if response has data
         if hasattr(response, "data"):
             print(f"Response data: {response.data}")
-
-            # Handle neighborhood creation and relationship
-            if geocode.get("neighborhood"):
-                try:
-                    # Get or create the neighborhood
-                    neighborhood_id, was_created = get_or_create_neighborhood(
-                        geocode["neighborhood"],
-                        supabase
-                    )
-
-                    if neighborhood_id:
-                        if was_created:
-                            normalized_name = normalize_neighborhood_name(geocode["neighborhood"])
-                            console.print(f"[green]Created neighborhood: {normalized_name}[/green]")
-
-                        # Check if relationship already exists
-                        existing_relationship = supabase.table('property_neighborhood')\
-                            .select('*')\
-                            .eq('neighborhood_id', neighborhood_id)\
-                            .eq('address1', property_details["address1"])\
-                            .limit(1)\
-                            .execute()
-
-                        if not existing_relationship.data or len(existing_relationship.data) == 0:
-                            # Create the many-to-many relationship
-                            relationship_response = supabase.table('property_neighborhood').insert({
-                                'neighborhood_id': neighborhood_id,
-                                'address1': property_details["address1"]
-                            }).execute()
-
-                            if relationship_response.data:
-                                console.print(f"[green]Created property-neighborhood relationship[/green]")
-                            else:
-                                console.print(f"[yellow]Warning: Failed to create property-neighborhood relationship[/yellow]")
-                        else:
-                            console.print(f"[yellow]Property-neighborhood relationship already exists[/yellow]")
-                    else:
-                        console.print(f"[yellow]Warning: Failed to create/fetch neighborhood[/yellow]")
-
-                except Exception as neighborhood_error:
-                    # Don't fail property creation if neighborhood handling fails
-                    console.print(f"[yellow]Warning: Error handling neighborhood: {neighborhood_error}[/yellow]")
-
             return response.data[0]["address1"] == property_details["address1"]
         else:
             print("Response has no 'data' attribute")
             return False
-
-
     except Exception as e:
         print(f"Exception: {e}")
         print(f"Exception type: {type(e)}")
