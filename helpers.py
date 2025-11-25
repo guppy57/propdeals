@@ -50,7 +50,7 @@ def calculate_principal_from_payment(monthly_payment, annual_rate, years):
 def convert_numpy_types(obj):
     """Convert numpy types to native Python types for JSON serialization"""
     import numpy as np
-    
+
     if isinstance(obj, dict):
         return {k: convert_numpy_types(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -58,9 +58,18 @@ def convert_numpy_types(obj):
     elif isinstance(obj, np.integer):
         return int(obj)
     elif isinstance(obj, np.floating):
-        return float(obj)
+        val = float(obj)
+        # Replace inf/-inf with 0 for JSON compatibility
+        if math.isinf(val):
+            return 0
+        return val
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
+    elif isinstance(obj, float):
+        # Handle regular Python floats too
+        if math.isinf(obj):
+            return 0
+        return obj
     else:
         return obj
 
