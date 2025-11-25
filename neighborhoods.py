@@ -8,10 +8,12 @@ from typing import Any, Dict, List, Optional
 
 import openai
 import pandas as pd
+from pydantic import BaseModel
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.prompt import Confirm, Prompt
+from rich.table import Table
 from supabase import Client
 from tavily import TavilyClient
 
@@ -20,12 +22,20 @@ from tavily import TavilyClient
 class NeighborhoodResearchConfig:
     """Configuration for neighborhood research operations"""
 
-    reasoning_model: str = "gpt-5"
+    reasoning_model: str = "gpt-5.1"
+    instant_model: str = "gpt-5-nano"
+    effort: str = "high"
     max_tokens: int = 120000
     search_cost_per_query: float = 0.008  # Tavily cost
     reasoning_cost_per_input_token: float = 1.25 / 1000000
     reasoning_cost_per_output_token: float = 10 / 1000000
     searches_per_neighborhood: int = 6
+
+
+class NeighborhoodLetterGrade(BaseModel):
+    """Pydantic model for neighborhood letter grade extraction"""
+    letter_grade: str
+    confidence_score: float
 
 
 class NeighborhoodsClient():
@@ -484,6 +494,7 @@ class NeighborhoodsClient():
         model=self.config.reasoning_model,
         messages=[{"role": "user", "content": prompt}],
         max_completion_tokens=self.config.max_tokens,
+        reasoning_effort=self.config.effort
       )
 
       content = response.choices[0].message.content
@@ -504,6 +515,57 @@ class NeighborhoodsClient():
         "output_tokens": 0,
         "success": False,
         "error": str(e),
+      }
+
+  def _extract_letter_grade_with_reasoning_model(self, prompt: str) -> Dict[str, Any]:
+    """Extract letter grade using structured outputs with Pydantic"""
+    try:
+      response = self.openai_client.beta.chat.completions.parse(
+        model=self.config.instant_model,
+        messages=[{"role": "user", "content": prompt}],
+        response_format=NeighborhoodLetterGrade,
+        max_completion_tokens=4000,
+      )
+
+      input_tokens = response.usage.prompt_tokens
+      output_tokens = response.usage.completion_tokens
+
+      # Check for refusal
+      if response.choices[0].message.refusal:
+        return {
+          "grade": None,
+          "input_tokens": input_tokens,
+          "output_tokens": output_tokens,
+          "success": False,
+          "error": f"Model refused to extract grade: {response.choices[0].message.refusal}",
+        }
+
+      # Get the parsed result
+      grade_data = response.choices[0].message.parsed
+      if grade_data:
+        return {
+          "grade": grade_data.letter_grade,
+          "confidence_score": grade_data.confidence_score,
+          "input_tokens": input_tokens,
+          "output_tokens": output_tokens,
+          "success": True,
+        }
+      else:
+        return {
+          "grade": None,
+          "input_tokens": input_tokens,
+          "output_tokens": output_tokens,
+          "success": False,
+          "error": "Failed to parse structured response",
+        }
+
+    except Exception as e:
+      return {
+        "grade": None,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "success": False,
+        "error": f"API call failed: {str(e)}",
       }
 
   def _sanitize_content(self, content: str) -> str:
@@ -771,6 +833,9 @@ You are a real estate investment analyst. Generate a concise neighborhood report
 - **Median Household Income:** $X
 - **Crime Rate vs City Avg:** X% higher/lower
 
+## Letter Grade Justification
+[2-3 sentences explaining why this specific letter grade was assigned. Reference specific data points from Quick Stats that support the grade. Example: "Grade C assigned due to flat price appreciation (1% YoY), average crime rate, and mixed market signals. While rent growth is positive at 4%, high vacancy rate of 10% and limited catalysts prevent a higher grade."]
+
 ## Demand Drivers
 [2-3 sentences on what drives rental demand: proximity to employers, universities, hospitals, transit, downtown, etc.]
 
@@ -791,8 +856,48 @@ You are a real estate investment analyst. Generate a concise neighborhood report
 **Rules:**
 - Use ONLY information from the search results. If data is unavailable, write "Data unavailable"
 - Be specific with numbers—no vague language like "relatively high"
-- Keep total length under 400 words
-- Grade criteria: A = strong appreciation + low crime + high demand; B = solid fundamentals; C = mixed signals; D = significant concerns; F = avoid
+- Keep total length under 500 words
+
+**Grading Rubric** (evaluate holistically across all factors):
+
+**Grade A (Strong Buy):**
+- Home prices appreciating 5%+ annually
+- Crime rate <20% below city average
+- Vacancy rate <5%
+- Rent-to-price ratio >0.8%
+- Strong catalysts (new development, employers, transit)
+- No significant risk factors
+
+**Grade B (Buy):**
+- Home prices stable or appreciating 2-5% annually
+- Crime rate within 20% of city average
+- Vacancy rate 5-8%
+- Rent-to-price ratio 0.6-0.8%
+- Some positive catalysts
+- Minor risk factors that are manageable
+
+**Grade C (Hold):**
+- Home prices flat or minimal appreciation (0-2%)
+- Crime rate 20-40% above city average
+- Vacancy rate 8-12%
+- Rent-to-price ratio 0.5-0.6%
+- Mixed signals on market trend
+- Moderate risks present
+
+**Grade D (Caution):**
+- Home prices declining or stagnant
+- Crime rate >40% above city average
+- Vacancy rate >12%
+- Rent-to-price ratio <0.5%
+- Negative market trends
+- Significant risk factors (population decline, major employer exodus)
+
+**Grade F (Avoid):**
+- Severe price declines
+- Extremely high crime
+- Very high vacancy (>15%)
+- Multiple severe risk factors with no catalysts
+- Fundamentally distressed market
 """.strip()
 
       result = self._analyze_with_reasoning_model(analysis_prompt)
@@ -882,4 +987,370 @@ You are a real estate investment analyst. Generate a concise neighborhood report
           border_style="cyan",
           padding=(1, 2),
         )
-      ) 
+      )
+
+  def extract_neighborhood_grade(self, report_id: str, show_progress: bool = True) -> Optional[Dict[str, Any]]:
+    """
+    Extract letter grade from a neighborhood research report and update the neighborhoods table.
+
+    Args:
+        report_id: ID of the research report to extract grade from
+        show_progress: Whether to show progress spinner (disable when called from batch operations)
+
+    Returns:
+        Dict with letter_grade, confidence_score, cost, and tokens_used if successful, None if failed
+    """
+    # Fetch the report
+    try:
+      result = (
+        self.supabase.table("research_reports")
+        .select("*")
+        .eq("id", report_id)
+        .single()
+        .execute()
+      )
+      if not result.data:
+        self.console.print(f"[red]Report not found: {report_id}[/red]")
+        return None
+
+      report_data = result.data
+      report_content = report_data["report_content"]
+      research_type = report_data.get("research_type", "")
+      status = report_data.get("status", "")
+
+      # Verify it's a neighborhood report
+      if not research_type.endswith("_neighborhood_report"):
+        self.console.print(f"[red]Report is not a neighborhood report (type: {research_type})[/red]")
+        return None
+
+      # Verify status is completed
+      if status != "completed":
+        self.console.print(f"[red]Report is not completed (status: {status})[/red]")
+        return None
+
+    except Exception as e:
+      self.console.print(f"[red]Error fetching report: {str(e)}[/red]")
+      return None
+
+    # Extract neighborhood name from research_type
+    neighborhood_name = research_type.replace("_neighborhood_report", "")
+
+    # Debug: Report details
+    self.console.print(f"[dim]    Report verified: neighborhood='{neighborhood_name}', status='{status}'[/dim]")
+
+    # Create extraction prompt
+    extraction_prompt = f"""Analyze the following neighborhood research report and extract the letter grade.
+
+# Research Report:
+{report_content}
+
+# Extraction Instructions:
+The report contains an "Overall Grade" in the format: **Overall Grade:** [A/B/C/D/F]
+
+Extract:
+1. **letter_grade**: Single letter (A, B, C, D, or F) representing the neighborhood grade
+2. **confidence_score**: Your confidence in this extraction (0.0 to 1.0)
+
+Base your confidence on:
+- Clarity of the grade in the report
+- Whether the grade is explicitly stated vs implied
+- Consistency throughout the report
+
+Provide only the letter grade (A, B, C, D, or F) without any additional text.
+"""
+
+    # Call GPT-5 with structured outputs
+    if show_progress:
+      self.console.print("[cyan]Analyzing report with GPT-5...[/cyan]")
+    extraction_result = self._extract_letter_grade_with_reasoning_model(extraction_prompt)
+
+    if not extraction_result["success"]:
+      self.console.print(f"[red]Failed to extract grade: {extraction_result.get('error', 'Unknown error')}[/red]")
+      return None
+
+    letter_grade = extraction_result["grade"]
+    confidence_score = extraction_result["confidence_score"]
+
+    # Debug: Extraction result
+    self.console.print(f"[dim]    Extraction successful: grade='{letter_grade}', confidence={confidence_score:.2f}[/dim]")
+
+    # Calculate cost
+    reasoning_cost = self._calculate_cost(
+      0,
+      extraction_result["input_tokens"],
+      extraction_result["output_tokens"],
+    )
+
+    if show_progress:
+      self.console.print("[cyan]Updating neighborhoods table...[/cyan]")
+
+    # Get neighborhood by name to check for existing grade
+    try:
+      neighborhood_response = (
+        self.supabase.table("neighborhoods")
+        .select("id, name, letter_grade")
+        .eq("name", neighborhood_name)
+        .single()
+        .execute()
+      )
+
+      if not neighborhood_response.data:
+        self.console.print(f"[red]Neighborhood not found in database: {neighborhood_name}[/red]")
+        return None
+
+      neighborhood_id = neighborhood_response.data["id"]
+      previous_grade = neighborhood_response.data.get("letter_grade")
+
+      # Debug: Database lookup
+      self.console.print(f"[dim]    Found neighborhood in DB: id={neighborhood_id}, previous_grade={previous_grade}[/dim]")
+
+      # Update with new grade (always overwrites)
+      update_result = (
+        self.supabase.table("neighborhoods")
+        .update({"letter_grade": letter_grade})
+        .eq("id", neighborhood_id)
+        .execute()
+      )
+
+      if not update_result.data:
+        self.console.print("[red]Failed to update neighborhoods table[/red]")
+        return None
+
+    except Exception as e:
+      self.console.print(f"[red]Error updating neighborhoods table: {str(e)}[/red]")
+      return None
+
+    if show_progress:
+      self.console.print("[green]Extraction completed![/green]")
+
+      # Determine grade color styling
+      if letter_grade in ["A", "B"]:
+        grade_style = "green"
+      elif letter_grade == "C":
+        grade_style = "yellow"
+      else:  # D or F
+        grade_style = "red"
+
+      # Display results in table format
+      results_table = Table(
+        title="Neighborhood Letter Grade Extraction",
+        show_header=True,
+        header_style="bold cyan"
+      )
+      results_table.add_column("Neighborhood", style="cyan", width=25)
+      results_table.add_column("Previous Grade", justify="center", width=14)
+      results_table.add_column("New Grade", justify="center", width=14)
+      results_table.add_column("Confidence", justify="right", width=12)
+      results_table.add_column("API Cost", justify="right", width=12)
+
+      results_table.add_row(
+        neighborhood_name,
+        previous_grade if previous_grade else "None",
+        f"[{grade_style}]{letter_grade}[/{grade_style}]",
+        f"{confidence_score:.1%}",
+        f"${reasoning_cost:.4f}"
+      )
+
+      self.console.print(results_table)
+
+    # Always return results, regardless of show_progress
+    return {
+      "letter_grade": letter_grade,
+      "confidence_score": confidence_score,
+      "cost": float(reasoning_cost),
+      "tokens_used": {
+        "input": extraction_result["input_tokens"],
+        "output": extraction_result["output_tokens"],
+      },
+    }
+
+  def extract_neighborhood_grades_batch(self, report_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    """
+    Extract letter grades for multiple neighborhood reports in batch.
+
+    Args:
+        report_ids: Optional list of report IDs to process. If None, processes all completed neighborhood reports.
+
+    Returns:
+        Dict with summary of processed reports, successes, failures, and total cost
+    """
+    # Fetch reports to process
+    try:
+      if report_ids:
+        # Fetch specific reports
+        reports = []
+        for report_id in report_ids:
+          result = (
+            self.supabase.table("research_reports")
+            .select("*")
+            .eq("id", report_id)
+            .single()
+            .execute()
+          )
+          if result.data:
+            reports.append(result.data)
+      else:
+        # Fetch all completed neighborhood reports
+        result = (
+          self.supabase.table("research_reports")
+          .select("*")
+          .eq("status", "completed")
+          .execute()
+        )
+        # Filter for neighborhood reports
+        reports = [
+          r for r in result.data
+          if r.get("research_type", "").endswith("_neighborhood_report")
+        ]
+
+      if not reports:
+        self.console.print("[yellow]No neighborhood reports found to process[/yellow]")
+        return {
+          "total_processed": 0,
+          "successful": 0,
+          "failed": 0,
+          "total_cost": 0.0,
+          "results": []
+        }
+
+    except Exception as e:
+      self.console.print(f"[red]Error fetching reports: {str(e)}[/red]")
+      return {
+        "total_processed": 0,
+        "successful": 0,
+        "failed": 0,
+        "total_cost": 0.0,
+        "results": []
+      }
+
+    # Process each report with progress bar
+    successes = 0
+    failures = 0
+    total_cost = 0.0
+    results = []
+
+    self.console.print(f"\n[bold cyan]Processing {len(reports)} neighborhood reports...[/bold cyan]\n")
+
+    with Progress(
+      SpinnerColumn(),
+      TextColumn("[progress.description]{task.description}"),
+      console=self.console,
+    ) as progress:
+      for i, report in enumerate(reports, 1):
+        report_id = report["id"]
+        research_type = report.get("research_type", "")
+        neighborhood_name = research_type.replace("_neighborhood_report", "")
+
+        task = progress.add_task(
+          f"[cyan][{i}/{len(reports)}] Processing {neighborhood_name}...",
+          total=None
+        )
+
+        try:
+          # Debug: Log what we're processing
+          self.console.print(f"[dim]  Extracting grade from report {report_id} (type: {research_type})...[/dim]")
+
+          result = self.extract_neighborhood_grade(report_id, show_progress=False)
+
+          if result:
+            successes += 1
+            total_cost += result["cost"]
+            results.append({
+              "neighborhood": neighborhood_name,
+              "grade": result["letter_grade"],
+              "confidence": result["confidence_score"],
+              "success": True,
+              "error": None
+            })
+            progress.update(task, description=f"[green][{i}/{len(reports)}] ✓ {neighborhood_name} - Grade: {result['letter_grade']}[/green]")
+          else:
+            # Log WHY it failed
+            error_msg = "extract_neighborhood_grade returned None - check logs above for details"
+            self.console.print(f"[yellow]  ⚠ Warning: {error_msg}[/yellow]")
+
+            failures += 1
+            results.append({
+              "neighborhood": neighborhood_name,
+              "grade": None,
+              "confidence": None,
+              "success": False,
+              "error": error_msg
+            })
+            progress.update(task, description=f"[red][{i}/{len(reports)}] ✗ {neighborhood_name} - Failed[/red]")
+
+        except Exception as e:
+          # Log the full exception with traceback
+          self.console.print(f"[red]  ✗ Exception: {str(e)}[/red]")
+          import traceback
+          self.console.print(f"[dim]{traceback.format_exc()}[/dim]")
+
+          failures += 1
+          results.append({
+            "neighborhood": neighborhood_name,
+            "grade": None,
+            "confidence": None,
+            "success": False,
+            "error": str(e)
+          })
+          progress.update(task, description=f"[red][{i}/{len(reports)}] ✗ {neighborhood_name} - Error[/red]")
+
+        progress.remove_task(task)
+
+    # Display batch summary
+    self.console.print("\n[bold green]Batch Processing Summary:[/bold green]")
+
+    summary_table = Table(
+      title="Neighborhood Grade Extraction Results",
+      show_header=True,
+      header_style="bold cyan"
+    )
+    summary_table.add_column("Neighborhood", style="cyan", width=30)
+    summary_table.add_column("Grade", justify="center", width=10)
+    summary_table.add_column("Confidence", justify="right", width=12)
+    summary_table.add_column("Status", justify="center", width=10)
+
+    for result in results:
+      if result["success"]:
+        grade = result["grade"]
+        # Determine grade color
+        if grade in ["A", "B"]:
+          grade_display = f"[green]{grade}[/green]"
+        elif grade == "C":
+          grade_display = f"[yellow]{grade}[/yellow]"
+        else:
+          grade_display = f"[red]{grade}[/red]"
+
+        summary_table.add_row(
+          result["neighborhood"],
+          grade_display,
+          f"{result['confidence']:.1%}",
+          "[green]✓[/green]"
+        )
+      else:
+        summary_table.add_row(
+          result["neighborhood"],
+          "N/A",
+          "N/A",
+          "[red]✗[/red]"
+        )
+
+    self.console.print(summary_table)
+
+    # Display statistics
+    stats_panel = Panel(
+      f"[green]Total Processed: {len(reports)}[/green]\n"
+      f"[green]Successful: {successes}[/green]\n"
+      f"[red]Failed: {failures}[/red]\n"
+      f"[cyan]Total API Cost: ${total_cost:.4f}[/cyan]",
+      title="Statistics",
+      border_style="green"
+    )
+    self.console.print(stats_panel)
+
+    return {
+      "total_processed": len(reports),
+      "successful": successes,
+      "failed": failures,
+      "total_cost": total_cost,
+      "results": results
+    } 
