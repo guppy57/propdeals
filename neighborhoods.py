@@ -283,6 +283,66 @@ class NeighborhoodsClient():
       self.console.print(f"[yellow]Warning: Error checking neighborhood analysis for '{neighborhood_name}': {str(e)}[/yellow]")
       return False
 
+  def has_neighborhood_analysis_batch(self, neighborhood_names: List[str]) -> Dict[str, bool]:
+    """
+    Batch check if completed neighborhood analysis reports exist for multiple neighborhoods.
+    This is significantly more efficient than calling has_neighborhood_analysis() in a loop.
+
+    Args:
+        neighborhood_names: List of neighborhood names to check
+
+    Returns:
+        Dictionary mapping neighborhood name -> bool (True if completed report exists)
+    """
+    # Initialize result dictionary with False for all neighborhoods
+    result = {}
+
+    # Filter out None/empty neighborhoods upfront
+    valid_neighborhoods = [
+        name for name in neighborhood_names
+        if name and isinstance(name, str)
+    ]
+
+    # Initialize all as False (including invalid ones)
+    for name in neighborhood_names:
+        result[name] = False
+
+    if not valid_neighborhoods:
+        return result
+
+    try:
+        # Build list of research_type values to check
+        research_types = [f"{name}_neighborhood_report" for name in valid_neighborhoods]
+
+        # Single query to check all neighborhoods at once
+        # Using .in_() to match any of the research types
+        report_response = (
+            self.supabase.table("research_reports")
+            .select("research_type")
+            .in_("research_type", research_types)
+            .eq("status", "completed")
+            .execute()
+        )
+
+        # Create set of neighborhoods that have completed reports
+        # Extract neighborhood name from "neighborhood_name_neighborhood_report" format
+        completed_neighborhoods = {
+            report["research_type"].replace("_neighborhood_report", "")
+            for report in report_response.data
+        }
+
+        # Update result dictionary for neighborhoods with completed reports
+        for name in valid_neighborhoods:
+            result[name] = name in completed_neighborhoods
+
+    except Exception as e:
+        self.console.print(
+            f"[yellow]Warning: Error batch checking neighborhood analyses: {str(e)}[/yellow]"
+        )
+        # Keep all as False on error
+
+    return result
+
   def get_neighborhoods_dataframe(self, supabase):
     """
     Fetch neighborhoods for all properties from the property_neighborhood many-to-many table.
