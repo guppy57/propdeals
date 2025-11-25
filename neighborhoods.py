@@ -48,6 +48,38 @@ class NeighborhoodsClient():
   def is_neighborhood_assessment_complete(self, address1: str) -> bool:
     return False
 
+  def has_neighborhood_analysis(self, neighborhood_name: str) -> bool:
+    """
+    Check if a completed neighborhood analysis report exists for a given neighborhood.
+
+    Args:
+        neighborhood_name: Name of the neighborhood to check
+
+    Returns:
+        True if a completed neighborhood report exists, False otherwise
+    """
+    # Handle None or empty neighborhood name
+    if not neighborhood_name or not isinstance(neighborhood_name, str):
+      return False
+
+    try:
+      # Check if completed neighborhood report exists for this neighborhood
+      report_response = (
+        self.supabase.table("research_reports")
+        .select("id")
+        .eq("research_type", f"{neighborhood_name}_neighborhood_report")
+        .eq("status", "completed")
+        .limit(1)
+        .execute()
+      )
+
+      return bool(report_response.data and len(report_response.data) > 0)
+
+    except Exception as e:
+      # Log error but return False to indicate no completed report
+      self.console.print(f"[yellow]Warning: Error checking neighborhood analysis for '{neighborhood_name}': {str(e)}[/yellow]")
+      return False
+
   def get_neighborhoods_dataframe(self, supabase):
     """
     Fetch neighborhoods for all properties from the property_neighborhood many-to-many table.

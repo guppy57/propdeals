@@ -1983,7 +1983,7 @@ def get_phase2_data_checklist():
             ),
             "has_maps_data": is_property_maps_done(row),
             "has_rent_dd": row["rent_dd_completed"] if row["rent_dd_completed"] is not None else False,
-            "has_neighborhood_assessment": neighborhoods.is_neighborhood_assessment_complete(row["address1"]),
+            "has_neighborhood_analysis": neighborhoods.has_neighborhood_analysis(row["neighborhood"]),
             "has_taxes": row["annual_tax_amount"] is not None,
             "has_seller_circumstances": row["seller_circumstances"] is not None,
             "has_property_assessment": is_property_assessment_done(row),
