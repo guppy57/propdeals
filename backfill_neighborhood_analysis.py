@@ -44,8 +44,8 @@ def display_summary(
         f"Properties without Neighborhoods: {summary['properties_without_neighborhoods']}\n\n"
         f"[bold green]Neighborhood Analysis Summary[/bold green]\n"
         f"Unique Neighborhoods: {summary['unique_neighborhoods']}\n"
-        f"Already Had Analysis: {summary['neighborhoods_with_existing_analysis']}\n"
-        f"Newly Generated: {summary['neighborhoods_generated']}\n"
+        f"Deleted Old Reports: {summary['deleted_reports']}\n"
+        f"Generated (with new rubric): {summary['neighborhoods_generated']}\n"
         f"Failed: {summary['neighborhoods_failed']}\n\n"
         f"[bold yellow]Letter Grade Extraction[/bold yellow]\n"
         f"Successfully Extracted: {summary['letter_grades_extracted']}\n\n"
@@ -132,100 +132,96 @@ def backfill_neighborhood_analyses() -> Dict:
     console.print(f"[green]✓ Properties with neighborhoods: {len(properties_with_hoods)}[/green]")
     console.print(f"[yellow]⚠ Properties without neighborhoods: {len(properties_without_hoods)}[/yellow]\n")
 
-    # Step 3: Get Unique Neighborhoods and Check for Existing Analyses
-    console.print("[bold cyan]🔄 Step 3: Checking for existing neighborhood analyses...[/bold cyan]")
+    # Step 3: Get Unique Neighborhoods
+    console.print("[bold cyan]🔄 Step 3: Identifying neighborhoods to regenerate...[/bold cyan]")
 
     unique_neighborhoods = properties_with_hoods['neighborhood'].unique().tolist()
     console.print(f"[cyan]Found {len(unique_neighborhoods)} unique neighborhoods[/cyan]")
 
-    # Batch check which neighborhoods already have analyses
-    existing_analyses = neighborhoods_client.has_neighborhood_analysis_batch(unique_neighborhoods)
+    # We will regenerate ALL neighborhood reports to use the updated rubric
+    console.print(f"[cyan]All {len(unique_neighborhoods)} neighborhoods will be regenerated with updated rubric[/cyan]\n")
 
-    # Filter to neighborhoods needing analysis
-    neighborhoods_needing_analysis = [
-        neighborhood for neighborhood in unique_neighborhoods
-        if not existing_analyses.get(neighborhood, False)
-    ]
+    # Set all neighborhoods as needing analysis
+    neighborhoods_needing_analysis = unique_neighborhoods
 
-    already_analyzed = sum(existing_analyses.values())
-    console.print(f"[green]✓ Already have analysis: {already_analyzed}[/green]")
-    console.print(f"[yellow]⚠ Need new analysis: {len(neighborhoods_needing_analysis)}[/yellow]\n")
+    # Step 3.5: Delete existing neighborhood reports to force regeneration
+    console.print("[bold cyan]🔄 Step 3.5: Deleting existing neighborhood reports...[/bold cyan]")
 
-    # Step 4: Generate Missing Neighborhood Analyses
+    deleted_count = 0
+    for neighborhood in unique_neighborhoods:
+        try:
+            # Delete existing completed reports for this neighborhood
+            # Note: Reports are tied to property_id (address1), but identified by research_type
+            result = supabase.table("research_reports")\
+                .delete()\
+                .eq("research_type", f"{neighborhood}_neighborhood_report")\
+                .eq("status", "completed")\
+                .execute()
+
+            if result.data:
+                deleted_count += len(result.data)
+        except Exception as e:
+            console.print(f"[yellow]⚠ Warning: Failed to delete report for {neighborhood}: {str(e)}[/yellow]")
+
+    console.print(f"[green]✓ Deleted {deleted_count} existing reports[/green]\n")
+
+    # Step 4: Generate New Neighborhood Analyses
     generated_reports = []
     failed_reports = []
     total_generation_cost = 0.0
 
-    if len(neighborhoods_needing_analysis) > 0:
-        console.print(f"[bold cyan]🔄 Step 4: Generating {len(neighborhoods_needing_analysis)} neighborhood analyses...[/bold cyan]\n")
+    # Step 4: Generate New Neighborhood Analyses for ALL neighborhoods
+    console.print(f"[bold cyan]🔄 Step 4: Generating {len(neighborhoods_needing_analysis)} neighborhood analyses with updated rubric...[/bold cyan]\n")
 
-        # For each neighborhood needing analysis, pick one property as representative
-        neighborhoods_to_generate = {}
-        for neighborhood in neighborhoods_needing_analysis:
-            # Get first property in this neighborhood
-            first_property = properties_with_hoods[
-                properties_with_hoods['neighborhood'] == neighborhood
-            ].iloc[0]
-            neighborhoods_to_generate[neighborhood] = first_property['address1']
+    # For each neighborhood, pick one property as representative
+    neighborhoods_to_generate = {}
+    for neighborhood in neighborhoods_needing_analysis:
+        # Get first property in this neighborhood
+        first_property = properties_with_hoods[
+            properties_with_hoods['neighborhood'] == neighborhood
+        ].iloc[0]
+        neighborhoods_to_generate[neighborhood] = first_property['address1']
 
-        # Generate analyses with progress tracking
-        for i, (neighborhood, address1) in enumerate(neighborhoods_to_generate.items(), 1):
-            console.print(f"[cyan][{i}/{len(neighborhoods_to_generate)}] Processing {neighborhood}...[/cyan]")
+    # Generate analyses with progress tracking
+    for i, (neighborhood, address1) in enumerate(neighborhoods_to_generate.items(), 1):
+        console.print(f"[cyan][{i}/{len(neighborhoods_to_generate)}] Processing {neighborhood}...[/cyan]")
 
-            try:
-                report_id, was_existing = neighborhoods_client.generate_neighborhood_research(address1)
+        try:
+            report_id, was_existing = neighborhoods_client.generate_neighborhood_research(address1)
 
-                if report_id and not was_existing:
-                    # Fetch the report to get cost information
-                    report_data = neighborhoods_client.get_report_by_id(report_id)
-                    if report_data and 'api_cost' in report_data:
-                        total_generation_cost += float(report_data['api_cost'])
+            if report_id and not was_existing:
+                # Fetch the report to get cost information
+                report_data = neighborhoods_client.get_report_by_id(report_id)
+                if report_data and 'api_cost' in report_data:
+                    total_generation_cost += float(report_data['api_cost'])
 
-                    generated_reports.append({
-                        'neighborhood': neighborhood,
-                        'report_id': report_id,
-                        'address1': address1
-                    })
-                    console.print(f"[green]  ✓ Generated report for {neighborhood}[/green]\n")
-                elif was_existing:
-                    # Shouldn't happen if batch check worked, but handle it
-                    console.print(f"[yellow]  ⚠ Report already exists for {neighborhood}[/yellow]\n")
-
-            except Exception as e:
-                failed_reports.append({
+                generated_reports.append({
                     'neighborhood': neighborhood,
-                    'address1': address1,
-                    'error': str(e)
+                    'report_id': report_id,
+                    'address1': address1
                 })
-                console.print(f"[red]  ✗ Failed: {str(e)[:50]}...[/red]\n")
+                console.print(f"[green]  ✓ Generated report for {neighborhood}[/green]\n")
+            elif was_existing:
+                # Shouldn't happen since we just deleted, but handle it
+                console.print(f"[yellow]  ⚠ Report already exists for {neighborhood}[/yellow]\n")
 
-        console.print(f"[green]✓ Successfully generated {len(generated_reports)} new analyses[/green]")
-        if failed_reports:
-            console.print(f"[red]✗ Failed to generate {len(failed_reports)} analyses[/red]\n")
-    else:
-        console.print("[green]✓ Step 4: All neighborhoods already have analyses, skipping generation...[/green]\n")
+        except Exception as e:
+            failed_reports.append({
+                'neighborhood': neighborhood,
+                'address1': address1,
+                'error': str(e)
+            })
+            console.print(f"[red]  ✗ Failed: {str(e)[:50]}...[/red]\n")
+
+    console.print(f"[green]✓ Successfully generated {len(generated_reports)} new analyses[/green]")
+    if failed_reports:
+        console.print(f"[red]✗ Failed to generate {len(failed_reports)} analyses[/red]\n")
 
     # Step 5: Batch Extract Letter Grades
     console.print("[bold cyan]🔄 Step 5: Batch extracting letter grades for all neighborhood reports...[/bold cyan]\n")
 
-    # Get all report IDs (both existing and newly generated)
-    all_report_ids = []
-
-    # Get existing report IDs
-    for neighborhood in unique_neighborhoods:
-        if existing_analyses.get(neighborhood):
-            # Query to get report_id
-            report = supabase.table("research_reports")\
-                .select("id")\
-                .eq("research_type", f"{neighborhood}_neighborhood_report")\
-                .eq("status", "completed")\
-                .limit(1)\
-                .execute()
-            if report.data:
-                all_report_ids.append(report.data[0]['id'])
-
-    # Add newly generated report IDs
-    all_report_ids.extend([r['report_id'] for r in generated_reports])
+    # Get all report IDs (only newly generated since we deleted old ones)
+    all_report_ids = [r['report_id'] for r in generated_reports]
 
     # Debug: Show what we're processing
     console.print(f"[cyan]Found {len(all_report_ids)} report IDs to process[/cyan]")
@@ -251,7 +247,7 @@ def backfill_neighborhood_analyses() -> Dict:
         'properties_with_neighborhoods': len(properties_with_hoods),
         'properties_without_neighborhoods': len(properties_without_hoods),
         'unique_neighborhoods': len(unique_neighborhoods),
-        'neighborhoods_with_existing_analysis': already_analyzed,
+        'deleted_reports': deleted_count,
         'neighborhoods_generated': len(generated_reports),
         'neighborhoods_failed': len(failed_reports),
         'letter_grades_extracted': extraction_results['successful'],

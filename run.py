@@ -909,7 +909,6 @@ def get_all_phase1_qualifying_properties(active=True):
       - Triplexes / Fourplexes must pass FHA self-sufficiency test (Gross Rent * 0.75 >= PITI)
       - Net Present Value in 10 years must be positive, thus beating the stock market
       - Square Feet must be greater than or equal to 1000
-      - Neighborhood Letter Grade must be C or higher
     """
     status_criteria = "status == 'active'" if active else "status != 'active'"
     criteria = (
@@ -923,7 +922,7 @@ def get_all_phase1_qualifying_properties(active=True):
         "& ((units == 0 & monthly_cash_flow_y2 >= -50) | (units > 0 & monthly_cash_flow_y2 >= 400)) "
         "& ((units >= 3 & fha_self_sufficiency_ratio >= 1) | (units < 3)) "
         "& beats_market "
-        "& neighborhood_letter_grade in ['A', 'B', 'C']"
+        # "& neighborhood_letter_grade in ['C', 'A', 'B']"
     )
 
     base_df = df.copy()
@@ -946,6 +945,9 @@ def get_combined_phase1_qualifiers(active=True):
     ).drop_duplicates(subset=["address1"], keep="first") 
     return combined
 
+def new_get_all_phase2_properties():
+
+
 def get_all_phase2_properties():
     """
     This method filters phase 1 qualifiers based property condition, rentability, and affordability 
@@ -953,6 +955,7 @@ def get_all_phase2_properties():
       - property must qualify for phase 1
       - property must not have any 'deal breakers'
       - fixed monthly costs to after tax income ratio must be greater than 0.45
+      - Neighborhood Letter Grade must be C or higher
     """
     p1_df = get_combined_phase1_qualifiers()
 
@@ -986,7 +989,7 @@ def get_all_phase2_properties():
         # ^ can be used in seller motivation score
 
         # STEP 3 - CREATE CRITERIA AND QUERY
-        qualifying_criteria = "has_inspection_dealbreakers == False & costs_to_income <= 0.45" # todo add more here
+        qualifying_criteria = "has_inspection_dealbreakers == False & costs_to_income <= 0.45 & neighborhood_letter_grade in ['A', 'B', 'C']" # todo add more here
         disqualifying_criteria = "has_inspection_dealbreaks == True | costs_to_income >= 0.45" # todo add more here
         qualifying_df = completed_df.query(qualifying_criteria)
         disqualifying_df = completed_df.query(disqualifying_criteria)
