@@ -911,24 +911,33 @@ def get_all_phase1_qualifying_properties(active=True):
       - Square Feet must be greater than or equal to 1000
     """
     status_criteria = "status == 'active'" if active else "status != 'active'"
-    criteria = f"{status_criteria} & square_ft >= 1000 & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & ((units == 0 & monthly_cash_flow_y2 >= -50) | (units > 0 & monthly_cash_flow_y2 >= 400)) & ((units >= 3 & fha_self_sufficiency_ratio >= 1) | (units < 3)) & beats_market"
+    criteria = (
+        f"{status_criteria} "
+        "& square_ft >= 1000 "
+        "& MGR_PP > 0.01 "
+        "& OpEx_Rent < 0.5 "
+        "& DSCR > 1.25 "
+        "& cash_needed <= 25000 "
+        "& monthly_cash_flow_y1 >= -400 "
+        "& ((units == 0 & monthly_cash_flow_y2 >= -50) | (units > 0 & monthly_cash_flow_y2 >= 400)) "
+        "& ((units >= 3 & fha_self_sufficiency_ratio >= 1) | (units < 3)) "
+        "& beats_market"
+    )
 
-    filtered_df = df.copy()
-    filtered_df = filtered_df.query(criteria)
+    base_df = df.copy()
+    filtered_df = base_df.query(criteria).copy()
+    filtered_df.loc[:, "qualification_type"] = "current"
 
-    qualifier_address1s = []
-
-    for _, row in filtered_df.iterrows():
-      qualifier_address1s.append(row["address1"])
+    qualifier_address1s = filtered_df["address1"].tolist()
 
     reduced_df = get_reduced_pp_df(0.10)
-    reduced_df = reduced_df.query(criteria)
-
-    for address1 in qualifier_address1s:
-      reduced_df = reduced_df.drop(reduced_df[reduced_df['address1'] == address1].index)
+    reduced_df = reduced_df.query(criteria).copy()
+    reduced_df.loc[:, "qualification_type"] = "contingent"
+    reduced_df = reduced_df[~reduced_df["address1"].isin(qualifier_address1s)].copy()
 
     creative_df = get_additional_room_rental_df()
-    creative_df = creative_df.query(criteria)
+    creative_df = creative_df.query(criteria).copy()
+    creative_df.loc[:, "qualification_type"] = "creative"
     
     return filtered_df, reduced_df, creative_df 
 
