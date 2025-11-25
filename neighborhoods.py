@@ -291,7 +291,7 @@ class NeighborhoodsClient():
       self.console.print(f"[red]Error storing report: {error_details}[/red]")
       return None
 
-  def generate_neighborhood_research(self, address1: str) -> Optional[str]:
+  def generate_neighborhood_research(self, address1: str) -> tuple[Optional[str], bool]:
     """
     Generate comprehensive neighborhood research report for a property.
     Checks for existing reports first to avoid regenerating for the same neighborhood.
@@ -300,7 +300,9 @@ class NeighborhoodsClient():
         address1: Property address (primary key)
 
     Returns:
-        report_id if successful, None if failed
+        Tuple of (report_id, was_existing):
+        - report_id: Report ID if successful, None if failed
+        - was_existing: True if existing report was found, False if new report was generated
     """
     # Fetch property data
     try:
@@ -313,11 +315,11 @@ class NeighborhoodsClient():
       )
       if not property_response.data:
         self.console.print(f"[red]Property not found: {address1}[/red]")
-        return None
+        return (None, False)
       property_data = property_response.data
     except Exception as e:
       self.console.print(f"[red]Error fetching property data: {str(e)}[/red]")
-      return None
+      return (None, False)
 
     # Get neighborhood from property_neighborhood table
     try:
@@ -330,17 +332,17 @@ class NeighborhoodsClient():
       )
       if not neighborhood_response.data or not neighborhood_response.data.get('neighborhoods'):
         self.console.print(f"[red]No neighborhood found for property: {address1}[/red]")
-        return None
+        return (None, False)
 
       neighborhood_dict = neighborhood_response.data['neighborhoods']
       if not isinstance(neighborhood_dict, dict) or 'name' not in neighborhood_dict:
         self.console.print(f"[red]Invalid neighborhood data structure[/red]")
-        return None
+        return (None, False)
 
       neighborhood_name = neighborhood_dict['name']
     except Exception as e:
       self.console.print(f"[red]Error fetching neighborhood: {str(e)}[/red]")
-      return None
+      return (None, False)
 
     # Check for existing neighborhood report
     try:
@@ -359,7 +361,7 @@ class NeighborhoodsClient():
           f"[green]✓ Existing neighborhood report found for '{neighborhood_name}'[/green]"
         )
         self.console.print(f"[cyan]Report ID: {existing_report_id}[/cyan]")
-        return existing_report_id
+        return (existing_report_id, True)
     except Exception as e:
       self.console.print(f"[yellow]Warning: Could not check for existing reports: {str(e)}[/yellow]")
       # Continue with new report generation
@@ -414,7 +416,7 @@ class NeighborhoodsClient():
           Decimal("0.0000"),
           "failed",
         )
-        return None
+        return (None, False)
 
       progress.update(
         task,
@@ -494,7 +496,7 @@ You are a real estate investment analyst. Generate a concise neighborhood report
           Decimal("0.0000"),
           "failed",
         )
-        return None
+        return (None, False)
 
       # Calculate total cost
       num_searches = len(queries)
@@ -535,4 +537,36 @@ You are a real estate investment analyst. Generate a concise neighborhood report
         )
       )
 
-      return report_id 
+      return (report_id, False)
+
+  def get_report_by_id(self, report_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch a specific research report by ID"""
+    try:
+      result = (
+        self.supabase.table("research_reports")
+        .select("*")
+        .eq("id", report_id)
+        .single()
+        .execute()
+      )
+      return result.data
+    except Exception as e:
+      self.console.print(f"[red]Error fetching report: {str(e)}[/red]")
+      return None
+
+  def display_report(self, report_content: str):
+    """Display a neighborhood research report using Rich formatting"""
+    from rich.markdown import Markdown
+
+    # Create markdown object
+    markdown = Markdown(report_content)
+
+    with self.console.pager(styles=True):
+      self.console.print(
+        Panel(
+          markdown,
+          title="[bold cyan]Neighborhood Research Report[/bold cyan]",
+          border_style="cyan",
+          padding=(1, 2),
+        )
+      ) 

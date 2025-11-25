@@ -29,10 +29,10 @@ from rent_research import RentResearcher
 
 load_dotenv()
 
-console = Console() 
+console = Console()
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 inspections = InspectionsClient(supabase_client=supabase)
-neighborhoods = NeighborhoodsClient()
+neighborhoods = NeighborhoodsClient(supabase_client=supabase, console=console)
 
 LAST_USED_LOAN = 1
 LAND_VALUE_PCT = 0.20  # 20% of purchase price is land (non-depreciable)
@@ -1580,6 +1580,7 @@ def analyze_property(property_id):
         research_menu_choices.append("Generate property-wide rent research")
 
     research_menu_choices.extend([
+        "Run neighborhood analysis",
         "Export property analysis to PDF",
         "Skip - return to main menu"
     ])
@@ -1597,6 +1598,8 @@ def analyze_property(property_id):
         handle_generate_rent_estimates(property_id)
     elif research_choice == "Generate property-wide rent research":
         handle_property_wide_research_generation(property_id)
+    elif research_choice == "Run neighborhood analysis":
+        handle_neighborhood_analysis(property_id)
     elif research_choice == "Record price cut":
         handle_price_cut(property_id, row["purchase_price"])
         reload_dataframe()
@@ -1670,6 +1673,43 @@ def handle_property_wide_research_generation(property_id: str):
 
     except Exception as e:
         console.print(f"[red]Error during property-wide research generation: {str(e)}[/red]")
+
+def handle_neighborhood_analysis(property_id: str):
+    """Run neighborhood analysis for a property (checks for existing reports first)"""
+    try:
+        report_id, was_existing = neighborhoods.generate_neighborhood_research(property_id)
+
+        if report_id:
+            if was_existing:
+                # Existing report found - just offer to view it
+                console.print(f"\n[bold yellow]📍 An existing neighborhood report was found for this area.[/bold yellow]")
+                console.print("[dim]This report is shared across all properties in the same neighborhood.[/dim]")
+
+                view_now = questionary.confirm("Would you like to view the existing neighborhood report?").ask()
+
+                if view_now:
+                    report_data = neighborhoods.get_report_by_id(report_id)
+                    if report_data:
+                        neighborhoods.display_report(report_data['report_content'])
+                    else:
+                        console.print("[red]❌ Error: Could not load the report.[/red]")
+            else:
+                # New report was generated
+                console.print(f"\n[bold green]✅ New neighborhood research completed! Report ID: {report_id}[/bold green]")
+
+                view_now = questionary.confirm("Would you like to view the neighborhood report now?").ask()
+
+                if view_now:
+                    report_data = neighborhoods.get_report_by_id(report_id)
+                    if report_data:
+                        neighborhoods.display_report(report_data['report_content'])
+                    else:
+                        console.print("[red]❌ Error: Could not load the report.[/red]")
+        else:
+            console.print("[red]❌ Neighborhood analysis failed.[/red]")
+
+    except Exception as e:
+        console.print(f"[red]Error during neighborhood analysis: {str(e)}[/red]")
 
 def handle_rent_research_generation(property_id: str):
     researcher = RentResearcher(supabase, console)
