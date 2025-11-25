@@ -1,4 +1,6 @@
 import os
+import requests
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -9,6 +11,7 @@ import pandas as pd
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.prompt import Confirm, Prompt
 from supabase import Client
 from tavily import TavilyClient
 
@@ -47,6 +50,206 @@ class NeighborhoodsClient():
 
   def is_neighborhood_assessment_complete(self, address1: str) -> bool:
     return False
+
+  def assign_neighborhood_to_property(self, address1: str, full_address: str) -> Optional[str]:
+    """
+    Assign a neighborhood to a property using geocoding.
+
+    Args:
+        address1: Property address identifier
+        full_address: Full address string for geocoding
+
+    Returns:
+        Neighborhood name if successful, None otherwise
+    """
+    try:
+      # Get geocode data
+      self.console.print(f"[cyan]Getting geocode data for: {full_address}[/cyan]")
+      response = requests.get(
+        "https://maps.googleapis.com/maps/api/geocode/json",
+        params={
+          "key": os.getenv("GOOGLE_KEY"),
+          "address": full_address,
+        },
+      )
+
+      data = response.json()
+      neighborhood = None
+
+      if not data.get("results"):
+        self.console.print(f"[red]No geocode results found for address[/red]")
+      else:
+        # Extract neighborhood from geocode
+        address_components = data["results"][0]["address_components"]
+
+        for component in address_components:
+          if "neighborhood" in component["types"]:
+            neighborhood = component["long_name"]
+            break
+
+        if neighborhood:
+          self.console.print(f"[green]Found neighborhood: {neighborhood}[/green]")
+        else:
+          self.console.print(f"[yellow]No neighborhood found in geocode results[/yellow]")
+
+      # If geocoding failed or no neighborhood found, offer manual input
+      if not neighborhood:
+        should_enter_manually = Confirm.ask(
+          "[cyan]Would you like to enter a neighborhood name manually?[/cyan]",
+          default=True
+        )
+
+        if should_enter_manually:
+          neighborhood = Prompt.ask(
+            "[cyan]Enter neighborhood name[/cyan]"
+          ).strip()
+
+          if not neighborhood:
+            self.console.print(f"[red]No neighborhood name provided[/red]")
+            return None
+
+          self.console.print(f"[green]Using manually entered neighborhood: {neighborhood}[/green]")
+        else:
+          self.console.print(f"[yellow]Neighborhood assignment cancelled[/yellow]")
+          return None
+
+      # Normalize neighborhood name
+      def normalize_neighborhood_name(name):
+        if not name:
+          return None
+        cleaned = name.strip()
+        if not cleaned:
+          return None
+        normalized = unicodedata.normalize('NFKD', cleaned)
+        normalized = ''.join(c for c in normalized if not unicodedata.combining(c))
+        return normalized.lower()
+
+      normalized_name = normalize_neighborhood_name(neighborhood)
+      if not normalized_name:
+        return None
+
+      # Get or create neighborhood in database
+      neighborhood_response = self.supabase.table('neighborhoods')\
+        .select('id, name')\
+        .eq('name', normalized_name)\
+        .limit(1)\
+        .execute()
+
+      if neighborhood_response.data and len(neighborhood_response.data) > 0:
+        neighborhood_id = neighborhood_response.data[0]['id']
+        self.console.print(f"[green]Using existing neighborhood: {normalized_name}[/green]")
+      else:
+        # Create new neighborhood
+        insert_response = self.supabase.table('neighborhoods').insert(
+          {'name': normalized_name}
+        ).execute()
+
+        if insert_response.data and len(insert_response.data) > 0:
+          neighborhood_id = insert_response.data[0]['id']
+          self.console.print(f"[green]Created new neighborhood: {normalized_name}[/green]")
+        else:
+          self.console.print(f"[red]Failed to create neighborhood[/red]")
+          return None
+
+      # Check if relationship already exists
+      existing_relationship = self.supabase.table('property_neighborhood')\
+        .select('*')\
+        .eq('neighborhood_id', neighborhood_id)\
+        .eq('address1', address1)\
+        .limit(1)\
+        .execute()
+
+      if existing_relationship.data and len(existing_relationship.data) > 0:
+        self.console.print(f"[yellow]Property-neighborhood relationship already exists[/yellow]")
+      else:
+        # Create the relationship
+        relationship_response = self.supabase.table('property_neighborhood').insert({
+          'neighborhood_id': neighborhood_id,
+          'address1': address1
+        }).execute()
+
+        if relationship_response.data:
+          self.console.print(f"[green]✓ Created property-neighborhood relationship[/green]")
+        else:
+          self.console.print(f"[yellow]Warning: Failed to create property-neighborhood relationship[/yellow]")
+          return None
+
+      return normalized_name
+
+    except Exception as e:
+      self.console.print(f"[red]Error assigning neighborhood: {str(e)}[/red]")
+
+      # Offer manual input as fallback when exception occurs
+      should_enter_manually = Confirm.ask(
+        "[cyan]Would you like to enter a neighborhood name manually instead?[/cyan]",
+        default=True
+      )
+
+      if not should_enter_manually:
+        return None
+
+      neighborhood = Prompt.ask("[cyan]Enter neighborhood name[/cyan]").strip()
+
+      if not neighborhood:
+        self.console.print(f"[red]No neighborhood name provided[/red]")
+        return None
+
+      # Normalize the manually entered name
+      def normalize_neighborhood_name(name):
+        if not name:
+          return None
+        cleaned = name.strip()
+        if not cleaned:
+          return None
+        normalized = unicodedata.normalize('NFKD', cleaned)
+        normalized = ''.join(c for c in normalized if not unicodedata.combining(c))
+        return normalized.lower()
+
+      normalized_name = normalize_neighborhood_name(neighborhood)
+      if not normalized_name:
+        self.console.print(f"[red]Invalid neighborhood name[/red]")
+        return None
+
+      try:
+        # Get or create neighborhood in database
+        neighborhood_response = self.supabase.table('neighborhoods')\
+          .select('id, name')\
+          .eq('name', normalized_name)\
+          .limit(1)\
+          .execute()
+
+        if neighborhood_response.data and len(neighborhood_response.data) > 0:
+          neighborhood_id = neighborhood_response.data[0]['id']
+          self.console.print(f"[green]Using existing neighborhood: {normalized_name}[/green]")
+        else:
+          # Create new neighborhood
+          insert_response = self.supabase.table('neighborhoods').insert(
+            {'name': normalized_name}
+          ).execute()
+
+          if insert_response.data and len(insert_response.data) > 0:
+            neighborhood_id = insert_response.data[0]['id']
+            self.console.print(f"[green]Created new neighborhood: {normalized_name}[/green]")
+          else:
+            self.console.print(f"[red]Failed to create neighborhood[/red]")
+            return None
+
+        # Create the relationship
+        relationship_response = self.supabase.table('property_neighborhood').insert({
+          'neighborhood_id': neighborhood_id,
+          'address1': address1
+        }).execute()
+
+        if relationship_response.data:
+          self.console.print(f"[green]✓ Created property-neighborhood relationship[/green]")
+          return normalized_name
+        else:
+          self.console.print(f"[red]Failed to create property-neighborhood relationship[/red]")
+          return None
+
+      except Exception as db_error:
+        self.console.print(f"[red]Database error: {str(db_error)}[/red]")
+        return None
 
   def has_neighborhood_analysis(self, neighborhood_name: str) -> bool:
     """
@@ -359,19 +562,44 @@ class NeighborhoodsClient():
         self.supabase.table('property_neighborhood')
         .select('neighborhoods(name)')
         .eq('address1', address1)
-        .single()
+        .limit(1)
         .execute()
       )
-      if not neighborhood_response.data or not neighborhood_response.data.get('neighborhoods'):
-        self.console.print(f"[red]No neighborhood found for property: {address1}[/red]")
-        return (None, False)
 
-      neighborhood_dict = neighborhood_response.data['neighborhoods']
-      if not isinstance(neighborhood_dict, dict) or 'name' not in neighborhood_dict:
-        self.console.print(f"[red]Invalid neighborhood data structure[/red]")
-        return (None, False)
+      # Check if neighborhood exists
+      if not neighborhood_response.data or len(neighborhood_response.data) == 0:
+        self.console.print(f"[yellow]⚠️  No neighborhood assigned for property: {address1}[/yellow]")
+        self.console.print(f"[yellow]This property needs a neighborhood assignment before running neighborhood analysis.[/yellow]")
 
-      neighborhood_name = neighborhood_dict['name']
+        # Prompt user for action
+        should_assign = Confirm.ask(
+          "[cyan]Would you like to automatically assign a neighborhood now using geocoding?[/cyan]",
+          default=True
+        )
+
+        if should_assign:
+          # Attempt to assign neighborhood using geocoding
+          full_address = property_data.get("address1", "")
+          neighborhood_name = self.assign_neighborhood_to_property(address1, full_address)
+
+          if not neighborhood_name:
+            self.console.print(f"[red]Failed to assign neighborhood. Please assign manually and try again.[/red]")
+            return (None, False)
+
+          self.console.print(f"[green]✓ Successfully assigned neighborhood: {neighborhood_name}[/green]")
+          # Continue with analysis below
+        else:
+          self.console.print(f"[yellow]Neighborhood analysis cancelled. Please assign a neighborhood manually and try again.[/yellow]")
+          return (None, False)
+      else:
+        # Neighborhood exists, extract it
+        neighborhood_dict = neighborhood_response.data[0].get('neighborhoods')
+        if not neighborhood_dict or not isinstance(neighborhood_dict, dict) or 'name' not in neighborhood_dict:
+          self.console.print(f"[red]Invalid neighborhood data structure[/red]")
+          return (None, False)
+
+        neighborhood_name = neighborhood_dict['name']
+
     except Exception as e:
       self.console.print(f"[red]Error fetching neighborhood: {str(e)}[/red]")
       return (None, False)
