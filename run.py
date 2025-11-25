@@ -117,10 +117,15 @@ def load_loan(loan_id):
 
 def get_deal_score(row):
     score = 0
-    score += (3 if row["monthly_cash_flow_y2"] > 500 else 
-              2 if row["monthly_cash_flow_y2"] > 400 else 
-              1 if row["monthly_cash_flow_y2"] > 200 else 0)
-    score += (3 if row["monthly_cash_flow_y1"] > 0 else 2 if row["monthly_cash_flow_y1"] > -350 else 0)  # House-hacking bonus
+    # Y2 cashflow scoring - property-type specific to align with phase 1 criteria
+    if row["units"] == 0:  # Single family
+        score += (3 if row["monthly_cash_flow_y2"] > 300 else
+                  2 if row["monthly_cash_flow_y2"] >= -50 else 0)  # SFH phase 1 requires >= -$50
+    else:  # Multi-family
+        score += (3 if row["monthly_cash_flow_y2"] > 500 else
+                  2 if row["monthly_cash_flow_y2"] > 400 else
+                  1 if row["monthly_cash_flow_y2"] > 200 else 0)  # Multi-family phase 1 requires > $400
+    score += (3 if row["monthly_cash_flow_y1"] > 0 else 2 if row["monthly_cash_flow_y1"] > -400 else 0)  # House-hacking bonus (aligned with phase 1)
     score += (3 if row["CoC_y2"] > 0.15 else 
               2 if row["CoC_y2"] > 0.12 else 
               1 if row["CoC_y2"] > 0.08 else 0)

@@ -273,8 +273,15 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, loan_info=
     pdf.section_title('Investment Criteria Breakdown')
 
     # Calculate scores (same logic as analyze_property)
-    cf_y2_score = (3 if row["monthly_cash_flow_y2"] > 500 else 2 if row["monthly_cash_flow_y2"] > 400 else 1 if row["monthly_cash_flow_y2"] > 200 else 0)
-    cf_y1_bonus = (3 if row["monthly_cash_flow_y1"] > 0 else 2 if row["monthly_cash_flow_y1"] > -350 else 0)
+    # Y2 cashflow scoring - property-type specific
+    if row["units"] == 0:  # Single family
+        cf_y2_score = (3 if row["monthly_cash_flow_y2"] > 300 else
+                       2 if row["monthly_cash_flow_y2"] >= -50 else 0)
+    else:  # Multi-family
+        cf_y2_score = (3 if row["monthly_cash_flow_y2"] > 500 else
+                       2 if row["monthly_cash_flow_y2"] > 400 else
+                       1 if row["monthly_cash_flow_y2"] > 200 else 0)
+    cf_y1_bonus = (3 if row["monthly_cash_flow_y1"] > 0 else 2 if row["monthly_cash_flow_y1"] > -400 else 0)
     coc_score = (3 if row["CoC_y2"] > 0.15 else 2 if row["CoC_y2"] > 0.12 else 1 if row["CoC_y2"] > 0.08 else 0)
     cap_score = (1 if row["cap_rate_y2"] > 0.06 else 0)
     mgr_score = (2 if row["MGR_PP"] >= 0.01 else 1 if row["MGR_PP"] >= 0.008 else 0)
