@@ -160,7 +160,6 @@ async def get_phase1_qualifiers_route():
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail="No properties found")
     
-    criteria = "status == 'active' & MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & cash_needed <= 25000 & monthly_cash_flow_y1 >= -400 & monthly_cash_flow_y2 >= 400"
     assumptions_response = supabase.table('assumptions').select("*").eq("id", 1).limit(1).single().execute()
     deal_score_total = 43
     
@@ -176,7 +175,6 @@ async def get_phase1_qualifiers_route():
         ia_creative = convert_numpy_types(ia_creative.fillna(0).to_dict('records'))
 
         return {
-            "criteria": criteria,
             "assumptions": assumptions_response.data,
             "deal_score_total": deal_score_total,
             "properties": {
