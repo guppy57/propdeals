@@ -908,10 +908,12 @@ def get_all_phase1_qualifying_properties(active=True):
       - SFH: Fully rented monthly cashflow above -50
       - Triplexes / Fourplexes must pass FHA self-sufficiency test (Gross Rent * 0.75 >= PITI)
       - Net Present Value in 10 years must be positive, thus beating the stock market
+      - Square Feet must be greater than or equal to 1000
     """
     status_criteria = "status == 'active'" if active else "status != 'active'"
     criteria = (
         f"{status_criteria} "
+        "& square_ft >= 1000 "
         "& MGR_PP > 0.01 "
         "& OpEx_Rent < 0.5 "
         "& DSCR > 1.25 "
