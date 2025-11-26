@@ -908,12 +908,12 @@ def get_all_phase1_qualifying_properties(active=True):
       - SFH: Fully rented monthly cashflow above -50
       - Triplexes / Fourplexes must pass FHA self-sufficiency test (Gross Rent * 0.75 >= PITI)
       - Net Present Value in 10 years must be positive, thus beating the stock market
-      - Square Feet must be greater than or equal to 1000
+      - Square Feet must be greater than or equal to 950 
     """
     status_criteria = "status == 'active'" if active else "status != 'active'"
     criteria = (
         f"{status_criteria} "
-        "& square_ft >= 1000 "
+        "& square_ft >= 950 "
         "& MGR_PP > 0.01 "
         "& OpEx_Rent < 0.5 "
         "& DSCR > 1.25 "
@@ -945,9 +945,9 @@ def get_combined_phase1_qualifiers(active=True):
     ).drop_duplicates(subset=["address1"], keep="first") 
     return combined
 
-def get_phase1_tour_list():
-    current_df, _, creative_df = get_all_phase1_qualifying_properties()
-    combined = pd.concat([current_df, creative_df], ignore_index=True).drop_duplicates(subset=["address1"], keep="first")
+def get_phase1_research_list():
+    current_df, contingent_df, creative_df = get_all_phase1_qualifying_properties()
+    combined = pd.concat([current_df, contingent_df, creative_df], ignore_index=True).drop_duplicates(subset=["address1"], keep="first")
     criteria = "neighborhood_letter_grade in ['A','B','C']"
     filtered = combined.query(criteria).copy()
     return filtered 
@@ -1025,12 +1025,12 @@ def display_all_phase1_qualifying_properties():
       show_min_rent_data=True
     )
 
-def create_phase1_tour_list_table(df, title):
+def create_phase1_research_list_table(df, title):
     """Creates a simplified table for phase 1 tour list display with color styling"""
     table = Table(title=title, show_header=True, header_style="bold magenta")
 
     # Add columns with short names
-    table.add_column("Address", style="cyan", no_wrap=False)
+    table.add_column(f"Address ({len(df)})", style="cyan", no_wrap=False)
     table.add_column("Neighborhood", style="dim")
     table.add_column("CFY1", justify="right")
     table.add_column("CFY2", justify="right")
@@ -1194,34 +1194,24 @@ def create_phase1_tour_list_table(df, title):
 
     return table
 
-def display_phase1_tour_list():
-    # Get tour list properties
-    tour_list = get_phase1_tour_list()
-
-    # Get all phase 1 qualifying properties
+def display_phase1_research_list():
+    tour_list = get_phase1_research_list()
     all_qualifiers = get_combined_phase1_qualifiers()
-
-    # Filter out properties that are already on the tour list
     tour_addresses = tour_list['address1'].tolist()
     not_on_tour = all_qualifiers[~all_qualifiers['address1'].isin(tour_addresses)].copy()
-
-    # Sort both dataframes by neighborhood
     tour_list = tour_list.sort_values(by='neighborhood')
     not_on_tour = not_on_tour.sort_values(by='neighborhood')
 
-    # Display tour list
     if len(tour_list) == 0:
         console.print("[dim]No properties on the tour list yet[/dim]\n")
     else:
-        table1 = create_phase1_tour_list_table(tour_list, "Phase 1 Tour List")
+        table1 = create_phase1_research_list_table(tour_list, "Phase 1 Tour List")
         console.print(table1)
         console.print()
-
-    # Display properties not on tour
     if len(not_on_tour) == 0:
         console.print("[dim]All qualifying properties are on the tour list[/dim]\n")
     else:
-        table2 = create_phase1_tour_list_table(not_on_tour, "Phase 1 Qualifying Properties - Not on Tour List")
+        table2 = create_phase1_research_list_table(not_on_tour, "Phase 1 Qualifying Properties - Not on Tour List")
         console.print(table2)
         console.print() 
 
@@ -2922,7 +2912,7 @@ def run_all_properties_options():
     using_all_properties = True
     choices = [
         "Phase 1 - Qualifiers",
-        "Phase 1 - Tour List",
+        "Phase 1 - Research List",
         "Phase 2 - Qualifiers",
         "All properties - Active (FHA)",
         "All properties - Reduce price and recalculate",
@@ -2948,8 +2938,8 @@ def run_all_properties_options():
             )
         elif option == "Phase 1 - Qualifiers":
             display_all_phase1_qualifying_properties()
-        elif option == "Phase 1 - Tour List":
-            display_phase1_tour_list()
+        elif option == "Phase 1 - Research List":
+            display_phase1_research_list()
         elif option == "All properties - Reduce price and recalculate":
             percent = questionary.text(
                 "Enter a percent to reduce purchase price by"
