@@ -945,6 +945,13 @@ def get_combined_phase1_qualifiers(active=True):
     ).drop_duplicates(subset=["address1"], keep="first") 
     return combined
 
+def get_phase1_short_tour_list():
+    current_df, _, creative_df = get_all_phase1_qualifying_properties()
+    combined = pd.concat([current_df, creative_df], ignore_index=True).drop_duplicates(subset=["address1"], keep="first")
+    criteria = "neighborhood_letter_grade in ['A','B','C']"
+    filtered = combined.query(criteria).copy()
+    return filtered 
+
 def get_all_phase2_properties():
     """
     This method filters phase 1 qualifiers based property condition, rentability, and affordability 
@@ -2594,6 +2601,7 @@ def run_all_properties_options():
     using_all_properties = True
     choices = [
         "Phase 1 - Qualifiers",
+        "Phase 1 - Tour List",
         "Phase 2 - Qualifiers",
         "All properties - Active (FHA)",
         "All properties - Reduce price and recalculate",
@@ -2619,6 +2627,9 @@ def run_all_properties_options():
             )
         elif option == "Phase 1 - Qualifiers":
             display_all_phase1_qualifying_properties()
+        elif option == "Phase 1 - Tour List":
+            tour_list = get_phase1_short_tour_list()
+            display_all_properties(tour_list, "Properties to tour", show_prop_type=True)
         elif option == "All properties - Reduce price and recalculate":
             percent = questionary.text(
                 "Enter a percent to reduce purchase price by"

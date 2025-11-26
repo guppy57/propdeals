@@ -26,7 +26,7 @@ from tavily import TavilyClient
 class ResearchConfig:
     """Configuration for rent research operations"""
 
-    reasoning_model: str = "gpt-5"
+    reasoning_model: str = "gpt-5.1"
     max_tokens: int = 120000
     search_cost_per_query: float = 0.008  # Tavily cost
     reasoning_cost_per_input_token: float = 1.25 / 1000000
