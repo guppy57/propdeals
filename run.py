@@ -1025,8 +1025,205 @@ def display_all_phase1_qualifying_properties():
       show_min_rent_data=True
     )
 
+def create_phase1_tour_list_table(df, title):
+    """Creates a simplified table for phase 1 tour list display with color styling"""
+    table = Table(title=title, show_header=True, header_style="bold magenta")
+
+    # Add columns with short names
+    table.add_column("Address", style="cyan", no_wrap=False)
+    table.add_column("Neighborhood", style="dim")
+    table.add_column("CFY1", justify="right")
+    table.add_column("CFY2", justify="right")
+    table.add_column("Cash", justify="right")
+    table.add_column("Price", justify="right")
+    table.add_column("Type", justify="center")
+    table.add_column("Qual Type", justify="center")
+    table.add_column("SqFt", justify="right")
+    table.add_column("Config", justify="center")
+    table.add_column("IRR 5Y", justify="right")
+    table.add_column("Payback", justify="right")
+    table.add_column("BE Vac", justify="right")
+    table.add_column("PITI", justify="right")
+    table.add_column("Cost/Inc", justify="right")
+
+    # Calculate percentiles for price and cash_needed (for styling)
+    price_25 = df['purchase_price'].quantile(0.25)
+    price_75 = df['purchase_price'].quantile(0.75)
+    cash_25 = df['cash_needed'].quantile(0.25)
+    cash_75 = df['cash_needed'].quantile(0.75)
+
+    # Calculate percentiles for new columns (for styling)
+    irr_5yr_25 = df['irr_5yr'].quantile(0.25)
+    irr_5yr_75 = df['irr_5yr'].quantile(0.75)
+    payback_25 = df['payback_period_years'].quantile(0.25)
+    payback_75 = df['payback_period_years'].quantile(0.75)
+    be_vac_25 = df['break_even_vacancy'].quantile(0.25)
+    be_vac_75 = df['break_even_vacancy'].quantile(0.75)
+    piti_25 = df['piti'].quantile(0.25)
+    piti_75 = df['piti'].quantile(0.75)
+    cost_inc_25 = df['costs_to_income'].quantile(0.25)
+    cost_inc_75 = df['costs_to_income'].quantile(0.75)
+
+    # Add rows
+    for _, row in df.iterrows():
+        # Determine property type
+        units = row['units']
+        if units == 0:
+            prop_type = "SFH"
+        elif units == 2:
+            prop_type = "Duplex"
+        elif units == 3:
+            prop_type = "Triplex"
+        elif units == 4:
+            prop_type = "Fourplex"
+        else:
+            prop_type = f"{units}U"
+
+        # Format configuration (e.g., "4BR/2BA")
+        beds = int(row['beds']) if pd.notna(row['beds']) else 0
+        baths = int(row['baths']) if pd.notna(row['baths']) else 0
+        config = f"{beds}BR/{baths}BA"
+
+        # Style cashflow Y1 (red if negative, green if positive)
+        cfy1_value = row['monthly_cash_flow_y1']
+        if cfy1_value < 0:
+            cfy1_display = f"[red]{format_currency(cfy1_value)}[/red]"
+        else:
+            cfy1_display = f"[green]{format_currency(cfy1_value)}[/green]"
+
+        # Style cashflow Y2 (red if negative, green if positive)
+        cfy2_value = row['monthly_cash_flow_y2']
+        if cfy2_value < 0:
+            cfy2_display = f"[red]{format_currency(cfy2_value)}[/red]"
+        else:
+            cfy2_display = f"[green]{format_currency(cfy2_value)}[/green]"
+
+        # Style cash needed (percentile-based: bottom 25% green, middle yellow, top 25% red)
+        cash_value = row['cash_needed']
+        if cash_value <= cash_25:
+            cash_display = f"[green]{format_currency(cash_value)}[/green]"
+        elif cash_value <= cash_75:
+            cash_display = f"[yellow]{format_currency(cash_value)}[/yellow]"
+        else:
+            cash_display = f"[red]{format_currency(cash_value)}[/red]"
+
+        # Style price (percentile-based: bottom 25% green, middle yellow, top 25% red)
+        price_value = row['purchase_price']
+        if price_value <= price_25:
+            price_display = f"[green]{format_currency(price_value)}[/green]"
+        elif price_value <= price_75:
+            price_display = f"[yellow]{format_currency(price_value)}[/yellow]"
+        else:
+            price_display = f"[red]{format_currency(price_value)}[/red]"
+
+        # Combine grade and neighborhood
+        grade = row['neighborhood_letter_grade'] if pd.notna(row['neighborhood_letter_grade']) else 'N/A'
+        neighborhood = row['neighborhood'] if pd.notna(row['neighborhood']) else 'N/A'
+        neighborhood_display = f"{grade} - {neighborhood}"
+
+        # Style IRR 5Y (higher is better: top 25% green, middle yellow, bottom 25% red)
+        irr_5yr_value = row['irr_5yr']
+        if irr_5yr_value >= irr_5yr_75:
+            irr_5yr_display = f"[green]{format_percentage(irr_5yr_value)}[/green]"
+        elif irr_5yr_value >= irr_5yr_25:
+            irr_5yr_display = f"[yellow]{format_percentage(irr_5yr_value)}[/yellow]"
+        else:
+            irr_5yr_display = f"[red]{format_percentage(irr_5yr_value)}[/red]"
+
+        # Style Payback (lower is better: bottom 25% green, middle yellow, top 25% red)
+        payback_value = row['payback_period_years']
+        if math.isinf(payback_value):
+            payback_display = "[red]Never[/red]"
+        elif payback_value <= payback_25:
+            payback_display = f"[green]{payback_value:.1f} yr[/green]"
+        elif payback_value <= payback_75:
+            payback_display = f"[yellow]{payback_value:.1f} yr[/yellow]"
+        else:
+            payback_display = f"[red]{payback_value:.1f} yr[/red]"
+
+        # Style Break-even Vacancy (higher is better: top 25% green, middle yellow, bottom 25% red)
+        be_vac_value = row['break_even_vacancy']
+        break_even_occupancy = 1.0 - be_vac_value
+        if break_even_occupancy >= 1:
+            be_vac_formatted = "---"
+        else:
+            be_vac_formatted = express_percent_as_months_and_days(be_vac_value)
+
+        if be_vac_value >= be_vac_75:
+            be_vac_display = f"[green]{be_vac_formatted}[/green]"
+        elif be_vac_value >= be_vac_25:
+            be_vac_display = f"[yellow]{be_vac_formatted}[/yellow]"
+        else:
+            be_vac_display = f"[red]{be_vac_formatted}[/red]"
+
+        # Style PITI (lower is better: bottom 25% green, middle yellow, top 25% red)
+        piti_value = row['piti']
+        if piti_value <= piti_25:
+            piti_display = f"[green]{format_currency(piti_value)}[/green]"
+        elif piti_value <= piti_75:
+            piti_display = f"[yellow]{format_currency(piti_value)}[/yellow]"
+        else:
+            piti_display = f"[red]{format_currency(piti_value)}[/red]"
+
+        # Style Cost/Income (lower is better: bottom 25% green, middle yellow, top 25% red)
+        cost_inc_value = row['costs_to_income']
+        if cost_inc_value <= cost_inc_25:
+            cost_inc_display = f"[green]{format_percentage(cost_inc_value)}[/green]"
+        elif cost_inc_value <= cost_inc_75:
+            cost_inc_display = f"[yellow]{format_percentage(cost_inc_value)}[/yellow]"
+        else:
+            cost_inc_display = f"[red]{format_percentage(cost_inc_value)}[/red]"
+
+        table.add_row(
+            row['address1'],
+            neighborhood_display,
+            cfy1_display,
+            cfy2_display,
+            cash_display,
+            price_display,
+            prop_type,
+            row['qualification_type'] if pd.notna(row['qualification_type']) else 'N/A',
+            format_number(row['square_ft']),
+            config,
+            irr_5yr_display,
+            payback_display,
+            be_vac_display,
+            piti_display,
+            cost_inc_display
+        )
+
+    return table
+
 def display_phase1_tour_list():
-    tour_list = get_phase1_tour_list() 
+    # Get tour list properties
+    tour_list = get_phase1_tour_list()
+
+    # Get all phase 1 qualifying properties
+    all_qualifiers = get_combined_phase1_qualifiers()
+
+    # Filter out properties that are already on the tour list
+    tour_addresses = tour_list['address1'].tolist()
+    not_on_tour = all_qualifiers[~all_qualifiers['address1'].isin(tour_addresses)].copy()
+
+    # Sort both dataframes by neighborhood
+    tour_list = tour_list.sort_values(by='neighborhood')
+    not_on_tour = not_on_tour.sort_values(by='neighborhood')
+
+    # Display tour list
+    if len(tour_list) == 0:
+        console.print("[dim]No properties on the tour list yet[/dim]\n")
+    else:
+        table1 = create_phase1_tour_list_table(tour_list, "Phase 1 Tour List")
+        console.print(table1)
+        console.print()
+
+    # Display properties not on tour
+    if len(not_on_tour) == 0:
+        console.print("[dim]All qualifying properties are on the tour list[/dim]\n")
+    else:
+        table2 = create_phase1_tour_list_table(not_on_tour, "Phase 1 Qualifying Properties - Not on Tour List")
+        console.print(table2)
+        console.print() 
 
 def display_all_phase2_qualifying_properties():
     dfs = get_all_phase2_properties()
