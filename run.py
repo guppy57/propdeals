@@ -12,7 +12,7 @@ from rich.panel import Panel
 from rich.table import Table
 from supabase import Client, create_client
 
-from add_property import run_add_property
+from add_property import run_add_property, normalize_neighborhood_name, get_or_create_neighborhood
 from exporter import export_property_analysis
 from helpers import (
   calculate_monthly_take_home,
@@ -945,7 +945,7 @@ def get_combined_phase1_qualifiers(active=True):
     ).drop_duplicates(subset=["address1"], keep="first") 
     return combined
 
-def get_phase1_short_tour_list():
+def get_phase1_tour_list():
     current_df, _, creative_df = get_all_phase1_qualifying_properties()
     combined = pd.concat([current_df, creative_df], ignore_index=True).drop_duplicates(subset=["address1"], keep="first")
     criteria = "neighborhood_letter_grade in ['A','B','C']"
@@ -1024,6 +1024,9 @@ def display_all_phase1_qualifying_properties():
       title="Phase 1 Criteria Qualifiers - If we rent out additional rooms in our unit",
       show_min_rent_data=True
     )
+
+def display_phase1_tour_list():
+    tour_list = get_phase1_tour_list() 
 
 def display_all_phase2_qualifying_properties():
     dfs = get_all_phase2_properties()
@@ -2315,6 +2318,55 @@ def handle_generate_rent_estimates(property_id: str, report_id: str = None):
         console.print(f"[red]Error generating estimates: {str(e)}[/red]")
 
 def handle_rent_research_after_add(property_id):
+    # Prompt for neighborhood assignment (optional)
+    console.print("\n[bold cyan]🏘️  Neighborhood Assignment[/bold cyan]")
+    neighborhood_input = questionary.text(
+        "Enter neighborhood name (or press Enter to skip):",
+        default=""
+    ).ask()
+
+    if neighborhood_input and neighborhood_input.strip():
+        # User provided a neighborhood - assign and analyze it
+        neighborhood_name = neighborhood_input.strip()
+
+        # Get or create the neighborhood in the database
+        neighborhood_id, was_created = get_or_create_neighborhood(neighborhood_name, supabase)
+
+        if neighborhood_id:
+            # Assign neighborhood to property via junction table
+            try:
+                # Check if already assigned
+                existing_assignment = (
+                    supabase.table("property_neighborhood")
+                    .select("*")
+                    .eq("address1", property_id)
+                    .eq("neighborhood_id", neighborhood_id)
+                    .execute()
+                )
+
+                if not existing_assignment.data or len(existing_assignment.data) == 0:
+                    # Insert new assignment
+                    supabase.table("property_neighborhood").insert({
+                        "address1": property_id,
+                        "neighborhood_id": neighborhood_id
+                    }).execute()
+
+                    if was_created:
+                        console.print(f"[green]✓ Created and assigned neighborhood: {neighborhood_name}[/green]")
+                    else:
+                        console.print(f"[green]✓ Assigned existing neighborhood: {neighborhood_name}[/green]")
+                else:
+                    console.print(f"[yellow]Neighborhood '{neighborhood_name}' already assigned to this property[/yellow]")
+
+                # Automatically run neighborhood analysis
+                console.print("\n[cyan]Running neighborhood analysis...[/cyan]")
+                handle_neighborhood_analysis(property_id)
+
+            except Exception as e:
+                console.print(f"[red]Error assigning neighborhood: {str(e)}[/red]")
+        else:
+            console.print(f"[red]Failed to create/find neighborhood '{neighborhood_name}'[/red]")
+
     researcher = RentResearcher(supabase, console)
 
     # Fetch property data to check if it's single family
@@ -2700,8 +2752,7 @@ def run_all_properties_options():
         elif option == "Phase 1 - Qualifiers":
             display_all_phase1_qualifying_properties()
         elif option == "Phase 1 - Tour List":
-            tour_list = get_phase1_short_tour_list()
-            display_all_properties(tour_list, "Properties to tour", show_prop_type=True)
+            display_phase1_tour_list()
         elif option == "All properties - Reduce price and recalculate":
             percent = questionary.text(
                 "Enter a percent to reduce purchase price by"
