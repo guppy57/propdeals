@@ -956,25 +956,54 @@ def get_all_phase2_properties():
     """
     This method filters phase 1 qualifiers based property condition, rentability, and affordability 
     Current criteria:
-      - property must qualify for phase 1
+      - property must qualify for phase 1 research list
       - property must not have any 'deal breakers'
       - fixed monthly costs to after tax income ratio must be greater than 0.45
       - Neighborhood Letter Grade must be C or higher
     """
     p1_df = get_combined_phase1_qualifiers()
-
-    # STEP 1 - REMOVE PROPERTIES THAT AREN'T DATA COMPLETE
     checklist = get_phase2_data_checklist()
 
-    complete_address1s = [
-        address for address, checks in checklist.items()
-        if all(checks.values())
+    bg_research_keys = [
+      "has_listing",
+      "has_maps_data",
+      "has_neighborhood_analysis",
+      "has_taxes",
+      "has_property_assessment",
+      "has_zillow_link",
+      "has_built_in_year",
+      "has_neighborhood"
     ]
 
-    completed_df = p1_df[p1_df['address1'].isin(complete_address1s)].copy()
-    incompleted_df = p1_df[~p1_df['address1'].isin(complete_address1s)].copy()
+    physical_research_keys = [
+        "has_neighborhood_assessment",
+        "has_inspection_done",
+        "has_seller_circumstances",
+        "has_rent_dd",
+    ]
 
-    # STEP 2 - RUN ALL NEW EVALUATIONS AND MODIFY DATAFRAME
+    # List 1 - properties that need background research to determine if we TOUR
+    research_1 = [
+        address for address, checks in checklist.items()
+        if not all(checks[key] for key in bg_research_keys)
+    ]
+
+    # List 2 - properties that have bg research done but need physical research for Phase 2
+    research_2 = [
+        address for address, checks in checklist.items()
+        if all(checks[key] for key in bg_research_keys) and
+          not all(checks[key] for key in physical_research_keys)
+    ]
+
+    completed = [
+        address for address, checks in checklist.items()
+        if all(checks[key] for key in bg_research_keys + physical_research_keys) 
+    ]
+
+    research_1_df = p1_df[p1_df['address1'].isin(research_1)].copy()
+    research_2_df = p1_df[p1_df['address1'].isin(research_2)].copy()
+    completed_df = p1_df[p1_df['address1'].isin(completed)].copy()
+
     qualifying_df = [] 
     disqualifying_df = [] 
 
@@ -998,13 +1027,11 @@ def get_all_phase2_properties():
         qualifying_df = completed_df.query(qualifying_criteria)
         disqualifying_df = completed_df.query(disqualifying_criteria)
 
-    # STEP 4 - CREATE A DF-RELATIVE RANKING AMONGST QUALIFIERS
-    # maybe pandas has ranking methods?
-
     return {
         "qualifiers": qualifying_df,
         "disqualifiers": disqualifying_df,
-        "incomplete_data": incompleted_df if not incompleted_df.empty else [],
+        "needs_research_1": research_1_df,
+        "needs_research_2": research_2_df,
     }
 
 def display_all_phase1_qualifying_properties():
@@ -2374,18 +2401,20 @@ def get_phase2_data_checklist():
 
     checklist = {
         address: {
+            # required to determine if we tour the property
             "has_listing": has_listing,
-            "has_inspection_done": has_inspection_done,
             "has_maps_data": has_maps_data,
             "has_rent_dd": has_rent_dd,
             "has_neighborhood_analysis": has_neighborhood_analysis,
-            "has_neighborhood_assessment": has_neighborhood_assessment,
             "has_taxes": has_taxes,
-            "has_seller_circumstances": has_seller_circumstances,
             "has_property_assessment": has_property_assessment,
             "has_zillow_link": has_zillow_link,
             "has_built_in_year": has_built_in_year,
-            "has_neighborhood": has_neighborhood
+            "has_neighborhood": has_neighborhood,
+            # required to determine if we can run phase 2 criteria against
+            "has_neighborhood_assessment": has_neighborhood_assessment,
+            "has_inspection_done": has_inspection_done,
+            "has_seller_circumstances": has_seller_circumstances,
         }
         for address, has_listing, has_inspection_done, has_maps_data, has_rent_dd,
             has_neighborhood_analysis, has_neighborhood_assessment, has_taxes, has_seller_circumstances,

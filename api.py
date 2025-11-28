@@ -208,9 +208,26 @@ async def get_phase2_data_checklist_route():
     try:
         result = get_all_phase2_properties()
         return {
-            "qualifiers": convert_numpy_types(result["qualifiers"].fillna(0).to_dict('records')) if hasattr(result["qualifiers"], 'to_dict') else result["qualifiers"],
-            "disqualifiers": convert_numpy_types(result["disqualifiers"].fillna(0).to_dict('records')) if hasattr(result["disqualifiers"], 'to_dict') else result["disqualifiers"],
-            "incomplete_data": convert_numpy_types(result["incomplete_data"].fillna(0).to_dict('records')) if hasattr(result["incomplete_data"], 'to_dict') else result["incomplete_data"],
+            "qualifiers": convert_numpy_types(
+                result["qualifiers"].fillna(0).to_dict("records")
+            )
+            if hasattr(result["qualifiers"], "to_dict")
+            else result["qualifiers"],
+            "disqualifiers": convert_numpy_types(
+                result["disqualifiers"].fillna(0).to_dict("records")
+            )
+            if hasattr(result["disqualifiers"], "to_dict")
+            else result["disqualifiers"],
+            "needs_research_1": convert_numpy_types(
+                result["needs_research_1"].fillna(0).to_dict("records")
+            )
+            if hasattr(result["needs_research_1"], "to_dict")
+            else result["needs_research_1"],
+            "needs_research_2": convert_numpy_types(
+                result["needs_research_2"].fillna(0).to_dict("records")
+            )
+            if hasattr(result["needs_research_2"], "to_dict")
+            else result["needs_research_2"],
         }
     except Exception as e:
         print(e)
