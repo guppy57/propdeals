@@ -12,15 +12,15 @@ from rich.panel import Panel
 from rich.table import Table
 from supabase import Client, create_client
 
-from add_property import run_add_property, normalize_neighborhood_name, get_or_create_neighborhood
+from add_property import get_or_create_neighborhood, run_add_property
 from exporter import export_property_analysis
 from helpers import (
-  calculate_monthly_take_home,
-  calculate_mortgage,
-  express_percent_as_months_and_days,
-  format_currency,
-  format_number,
-  format_percentage,
+    calculate_monthly_take_home,
+    calculate_mortgage,
+    express_percent_as_months_and_days,
+    format_currency,
+    format_number,
+    format_percentage,
 )
 from inspections import InspectionsClient
 from loans import LoansProvider
@@ -397,7 +397,7 @@ def apply_calculations_on_dataframe(df):
     df["monthly_mip"] = (df["loan_amount"] * mip_annual_rate) / 12
     df["monthly_taxes"] = df.apply(get_monthly_taxes, axis=1)
     df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
-    df["cash_needed"] = df["closing_costs"] + df["down_payment"] - upfront_discounts - (IA_FIRSTHOME_GRANT_AMT if ia_fhb_prog_upfront_option == "GRANT" else 0)
+    df["cash_needed"] = df["closing_costs"] + df["down_payment"] - upfront_discounts - (IA_FIRSTHOME_GRANT_AMT if (ia_fhb_prog_upfront_option == "GRANT" and using_ia_fhb_prog) else 0)
     df["annual_rent_y1"] = df["net_rent_y1"] * 12
     # Year 1 operating expenses (before changing total_rent for SFH)
     # For SFH: uses aggregated per-room rent (house-hacking scenario)
@@ -946,9 +946,15 @@ def get_combined_phase1_qualifiers(active=True):
     return combined
 
 def get_phase1_research_list():
+    """
+    Criteria for the research list:
+    - Neighborhood letter grade must be C or higher
+    - The qualification type must be CURRENT or the property is For Sale Buy Owner
+    - Cashflow YR must be positive
+    """
     current_df, contingent_df, creative_df = get_all_phase1_qualifying_properties()
     combined = pd.concat([current_df, contingent_df, creative_df], ignore_index=True).drop_duplicates(subset=["address1"], keep="first")
-    criteria = "neighborhood_letter_grade in ['A','B','C']"
+    criteria = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & annual_cash_flow_y2 >= 0"
     filtered = combined.query(criteria).copy()
     return filtered 
 
@@ -1780,14 +1786,14 @@ def analyze_property(property_id):
     
     console.print(cost_table)
 
-    grant = format_currency(IA_FIRSTHOME_GRANT_AMT) if ia_fhb_prog_upfront_option == "GRANT" else "[dim]Not using grant option for Iowa First Home[/dim]"
+    grant = format_currency(IA_FIRSTHOME_GRANT_AMT) if ia_fhb_prog_upfront_option == "GRANT" and using_ia_fhb_prog else "[dim]Not using grant option for Iowa First Home[/dim]"
 
     investment_summary = (
         f"[bold green]Investment Summary[/bold green]\n"
         f"Down Payment: {format_currency(row['down_payment'])}\n"
         f"Closing Costs: {format_currency(row['closing_costs'])}\n"
         f"Lender Discounts: {format_currency(upfront_discounts)}\n"
-        f"IA FirstHome Grant: {grant}\n"
+        f"IA FirstHome Grant: {grant}\n" 
         f"[bold]Total Cash Needed: {format_currency(row['cash_needed'])}[/bold]\n"
         f"Loan Amount: {format_currency(row['loan_amount'])}"
     )
@@ -1923,7 +1929,7 @@ def handle_neighborhood_analysis(property_id: str):
         if report_id:
             if was_existing:
                 # Existing report found - just offer to view it
-                console.print(f"\n[bold yellow]📍 An existing neighborhood report was found for this area.[/bold yellow]")
+                console.print("\n[bold yellow]📍 An existing neighborhood report was found for this area.[/bold yellow]")
                 console.print("[dim]This report is shared across all properties in the same neighborhood.[/dim]")
 
                 view_now = questionary.confirm("Would you like to view the existing neighborhood report?").ask()
