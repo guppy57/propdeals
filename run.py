@@ -950,11 +950,11 @@ def get_phase1_research_list():
     Criteria for the research list:
     - Neighborhood letter grade must be C or higher
     - The qualification type must be CURRENT or the property is For Sale Buy Owner
-    - Cashflow YR must be positive
+    - Cashflow Year 2 must be above -$50
     """
     current_df, contingent_df, creative_df = get_all_phase1_qualifying_properties()
     combined = pd.concat([current_df, contingent_df, creative_df], ignore_index=True).drop_duplicates(subset=["address1"], keep="first")
-    criteria = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & annual_cash_flow_y2 >= 0"
+    criteria = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & annual_cash_flow_y2 >= -50"
     filtered = combined.query(criteria).copy()
     return filtered 
 
