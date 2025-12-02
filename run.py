@@ -25,6 +25,7 @@ from helpers import (
 from inspections import InspectionsClient
 from loans import LoansProvider
 from neighborhoods import NeighborhoodsClient
+from property_assessment import edit_property_assessment
 from rent_research import RentResearcher
 
 load_dotenv()
@@ -1813,6 +1814,7 @@ def analyze_property(property_id):
 
     # Build menu choices based on property type
     research_menu_choices = [
+        "Edit property assessment",
         "Record price cut",
         "Change status",
         "Generate new rent research",
@@ -1835,7 +1837,9 @@ def analyze_property(property_id):
         choices=research_menu_choices
     ).ask()
 
-    if research_choice == "Generate new rent research":
+    if research_choice == "Edit property assessment":
+        edit_property_assessment(property_id, supabase, console)
+    elif research_choice == "Generate new rent research":
         handle_rent_research_generation(property_id)
     elif research_choice == "View existing research reports":
         handle_view_research_reports(property_id)
