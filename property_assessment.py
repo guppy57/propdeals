@@ -174,24 +174,49 @@ def edit_property_assessment(property_id: str, supabase_client: Client, console:
         console: Rich console instance for formatted output
     """
     while True:
-        # Build menu of editable fields
-        field_choices = list(FIELD_CONFIG.keys()) + ["Go Back"]
-
-        field_choice = questionary.select(
-            "Which field would you like to edit?",
-            choices=field_choices
-        ).ask()
-
-        if field_choice == "Go Back":
-            break
-
-        # Fetch current property data
+        # Fetch current property data first (so we can show checkmarks)
         try:
             response = supabase_client.table("properties").select("*").eq("address1", property_id).single().execute()
             current_data = response.data
         except Exception as e:
             console.print(f"[red]Error fetching property data: {str(e)}[/red]")
-            continue
+            break
+
+        # Build menu with checkmarks for fields that have values
+        display_choices = []
+        label_to_field = {}  # Map display label back to actual field label
+
+        for field_label in FIELD_CONFIG.keys():
+            field_name, field_type = FIELD_CONFIG[field_label]
+            current_value = current_data.get(field_name)
+
+            # Determine if field has a value
+            has_value = False
+            if current_value is not None:
+                # Empty strings count as null
+                if isinstance(current_value, str):
+                    has_value = bool(current_value.strip())
+                else:
+                    has_value = True
+
+            # Add checkmark or spacing
+            indicator = "✓ " if has_value else "  "
+            display_label = f"{indicator}{field_label}"
+            display_choices.append(display_label)
+            label_to_field[display_label] = field_label
+
+        display_choices.append("Go Back")
+
+        field_choice_display = questionary.select(
+            "Which field would you like to edit?",
+            choices=display_choices
+        ).ask()
+
+        if field_choice_display == "Go Back":
+            break
+
+        # Get the actual field label (strip indicator)
+        field_choice = label_to_field[field_choice_display]
 
         # Get field configuration
         field_name, field_type = FIELD_CONFIG[field_choice]
