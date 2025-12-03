@@ -21,7 +21,6 @@ FIELD_CONFIG = {
     # Notes
     "Neighborhood stakeout notes": ("neighborhood_stakeout_notes", "editor"),
     "Talking to neighbors notes": ("talking_neighbor_notes", "editor"),
-    "AI neighborhood notes": ("ai_neighborhood_notes", "editor"),
 }
 
 

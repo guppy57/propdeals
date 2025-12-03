@@ -32,7 +32,7 @@ class LoansProvider:
 
     def get_loans(self) -> Optional[List[Loan]]:
         try:
-            response = self.supabase.table("loans").select("*").execute()
+            response = self.supabase.table("loans").select("*").limit(10000).execute()
             if not response:
                 self.console.print("[red]Loans not found[/red]")
                 return None
@@ -168,7 +168,7 @@ class LoansProvider:
             years=int(years),
             mip_upfront_rate=mip_upfront_rate,
             mip_annual_rate=mip_annual_rate,
-            lender_fees=lender_fees,
+            lender_fees=float(lender_fees),
             upfront_discounts=float(upfront_discounts),
             preapproval_link=preapproval_link.strip(),
             preapproved_amount=int(preapproved_amount.replace(",", "")),

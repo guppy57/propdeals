@@ -35,7 +35,7 @@ def load_loan_details():
             'interest_rate': float(loan_data['interest_rate']),
             'apr_rate': float(loan_data['apr_rate']),
             'down_payment_rate': float(loan_data['down_payment_rate']),
-            'years': float(loan_data['years']),
+            'years': int(loan_data['years']),
             'mip_upfront_rate': float(loan_data['mip_upfront_rate']),
             'mip_annual_rate': float(loan_data['mip_annual_rate'])
         }
@@ -63,9 +63,9 @@ def reload_dataframe_logic():
     except Exception as e:
         print(f"⚠️ Failed to use run.py reload logic: {str(e)}")
         print("🔧 Using basic property data loading")
-        
+
         # Fallback: just load properties without full calculations
-        properties_get_response = supabase.table('properties').select('*').execute()
+        properties_get_response = supabase.table('properties').select('*').limit(10000).execute()
         df = pd.DataFrame(properties_get_response.data)
         rents = None
 
@@ -76,7 +76,7 @@ async def lifespan(app: FastAPI):
     
     try:
         print("📊 Loading property data...")
-        properties_get_response = supabase.table('properties').select('*').execute()
+        properties_get_response = supabase.table('properties').select('*').limit(10000).execute()
         df = pd.DataFrame(properties_get_response.data)
         reload_dataframe_logic()
         print(f"✅ Loaded {len(df) if df is not None else 0} properties")
@@ -130,7 +130,7 @@ async def get_all_properties_route(
     if df is None or df.empty:
         try:
             print("🔄 Loading data on demand...")
-            properties_get_response = supabase.table('properties').select('*').execute()
+            properties_get_response = supabase.table('properties').select('*').limit(10000).execute()
             df = pd.DataFrame(properties_get_response.data)
             
             if df.empty:

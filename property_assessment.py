@@ -1,4 +1,5 @@
 import questionary
+from datetime import date, datetime, timedelta
 from rich.console import Console
 from rich.panel import Panel
 from supabase import Client
@@ -24,6 +25,9 @@ FIELD_CONFIG = {
     "Has easements": ("has_easements", "boolean"),
     "Easements": ("easements", "editor"),
     "In flood zone": ("in_flood_zone", "boolean"),
+    "Year Built": ("built_in", "integer"),
+    "Zillow Link": ("zillow_link", "text"),
+    "Days in Market": ("listed_date", "days_to_date"),
 
     # Permits
     "Has open/pulled permits": ("has_open_pulled_permits", "boolean"),
@@ -164,6 +168,77 @@ def handle_date_field(field_label: str, field_name: str, current_value: str, con
     return new_value
 
 
+def handle_text_field(field_label: str, field_name: str, current_value: str, console: Console):
+    """Handle single-line text fields"""
+    default_str = str(current_value) if current_value is not None else ""
+
+    new_value_str = questionary.text(
+        f"{field_label} (currently: {current_value if current_value else 'Not set'})",
+        default=default_str
+    ).ask()
+
+    new_value = new_value_str if new_value_str else None
+
+    # Show preview
+    console.print(f"\n[yellow]Current:[/yellow] {current_value if current_value else 'Not set'}")
+    console.print(f"[green]New:[/green] {new_value if new_value else 'Not set'}\n")
+
+    return new_value
+
+
+def handle_days_to_date_field(field_label: str, field_name: str, current_value: str, console: Console):
+    """Handle days-to-date conversion fields (accepts days in market, stores as date)"""
+    # Calculate current days in market if date exists
+    current_days = None
+    current_display = "Not set"
+
+    if current_value:
+        try:
+            # Parse the date string
+            if isinstance(current_value, str):
+                listed_datetime = datetime.fromisoformat(current_value.replace('Z', '+00:00').split('T')[0])
+            else:
+                listed_datetime = datetime.fromisoformat(str(current_value))
+
+            # Calculate days in market
+            current_days = (datetime.now() - listed_datetime).days
+            current_display = f"{current_days} days (listed on {listed_datetime.date()})"
+        except (ValueError, AttributeError):
+            current_display = f"Invalid date: {current_value}"
+
+    default_str = str(current_days) if current_days is not None else ""
+
+    def validate_integer(text):
+        if text == "":
+            return True
+        return text.isdigit()
+
+    new_value_str = questionary.text(
+        f"{field_label} (enter days in market) (currently: {current_display})",
+        default=default_str,
+        validate=validate_integer
+    ).ask()
+
+    if new_value_str == "":
+        new_value = None
+    else:
+        # Convert days to date: today - days_input = listing_date
+        days_in_market = int(new_value_str)
+        listing_date = date.today() - timedelta(days=days_in_market)
+        new_value = listing_date.isoformat()
+
+    # Show preview
+    console.print(f"\n[yellow]Current:[/yellow] {current_display}")
+    if new_value:
+        new_days = int(new_value_str)
+        console.print(f"[green]New:[/green] {new_days} days in market (listing date: {new_value})")
+    else:
+        console.print(f"[green]New:[/green] Not set")
+    console.print()
+
+    return new_value
+
+
 def edit_property_assessment(property_id: str, supabase_client: Client, console: Console):
     """
     Edit property assessment fields using appropriate input methods.
@@ -235,6 +310,10 @@ def edit_property_assessment(property_id: str, supabase_client: Client, console:
             new_value = handle_float_field(field_choice, field_name, current_value, console)
         elif field_type == "date":
             new_value = handle_date_field(field_choice, field_name, current_value, console)
+        elif field_type == "text":
+            new_value = handle_text_field(field_choice, field_name, current_value, console)
+        elif field_type == "days_to_date":
+            new_value = handle_days_to_date_field(field_choice, field_name, current_value, console)
         else:
             console.print(f"[red]Unknown field type: {field_type}[/red]")
             continue

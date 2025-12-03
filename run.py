@@ -508,9 +508,9 @@ def apply_calculations_on_dataframe(df):
 def reload_dataframe():
     global df, rents
     console.print("[yellow]Reloading property data...[/yellow]")
-    properties_get_response = supabase.table('properties').select('*').execute()
+    properties_get_response = supabase.table('properties').select('*').limit(10000).execute()
     df = pd.DataFrame(properties_get_response.data)
-    rents_get_response = supabase.table('rent_estimates').select('*').execute()
+    rents_get_response = supabase.table('rent_estimates').select('*').limit(10000).execute()
     rents = pd.DataFrame(rents_get_response.data)
     rents = rents.drop(['id'], axis=1)
     rent_summary = rents.groupby("address1")["rent_estimate"].agg(["sum", "min"]).reset_index()
@@ -928,15 +928,15 @@ def get_all_phase1_qualifying_properties(active=True):
 
     base_df = df.copy()
     filtered_df = base_df.query(criteria).copy()
-    filtered_df.loc[:, "qualification_type"] = "current"
+    filtered_df["qualification_type"] = "current"
     qualifier_address1s = filtered_df["address1"].tolist()
     reduced_df = get_reduced_pp_df(0.10)
     reduced_df = reduced_df.query(criteria).copy()
-    reduced_df.loc[:, "qualification_type"] = "contingent"
+    reduced_df["qualification_type"] = "contingent"
     reduced_df = reduced_df[~reduced_df["address1"].isin(qualifier_address1s)].copy()
     creative_df = get_additional_room_rental_df()
     creative_df = creative_df.query(criteria).copy()
-    creative_df.loc[:, "qualification_type"] = "creative"
+    creative_df["qualification_type"] = "creative"
     return filtered_df, reduced_df, creative_df 
 
 def get_combined_phase1_qualifiers(active=True):
@@ -1457,8 +1457,14 @@ def analyze_property(property_id):
                       f"Cost per Sq Ft: {format_currency(row['cost_per_sqrft'])}\n"
                       f"Neighborhood: {row["neighborhood"]} (rated: {row["neighborhood_letter_grade"]})",
                       title="Basic Info"))
-    
+
     property_rents = rents[rents['address1'] == property_id]
+
+    if property_rents.empty:
+        console.print("[red]ERROR: No rent estimates found for this property![/red]")
+        console.print("[yellow]This property may need rent estimates to be generated.[/yellow]")
+        return
+
     your_unit_index = property_rents['rent_estimate'].idxmin()
 
     # Use contextual labels for single family vs multi-family
@@ -3057,7 +3063,7 @@ if __name__ == "__main__":
       run_all_properties_options()
     elif option == "One property":
       property_ids = []
-      properties_get_response = supabase.table('properties').select('address1').execute()
+      properties_get_response = supabase.table('properties').select('address1').limit(10000).execute()
       for row in properties_get_response.data:
         property_ids.append(row['address1'])
       property_id = inquirer.fuzzy(
