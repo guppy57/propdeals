@@ -12,8 +12,8 @@ FIELD_CONFIG = {
     # County Records
     "Obtained county records": ("obtained_county_records", "boolean"),
     "County record notes": ("county_record_notes", "editor"),
-    "Previous owner count": ("previous_owner_count", "integer"),
-    "Has short ownership pattern": ("has_short_ownership_pattern", "boolean"),
+    "Historical Turnover Rate": ("historical_turnover_rate", "float"),
+    "Average Ownership Duration": ("average_ownership_duration", "float"),
 
     # Restrictions
     "Has deed restrictions": ("has_deed_restrictions", "boolean"),
