@@ -10,6 +10,8 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from supabase import Client
 
+from property_assessment import FIELD_CONFIG
+
 
 @dataclass
 class PropertySummaryConfig:
@@ -83,6 +85,41 @@ class PropertySummaryClient:
                 return f"{neighborhood}{grade_text} - No detailed analysis available"
         except Exception:
             return f"{neighborhood}{grade_text}"
+
+    def _format_property_assessment_fields(self, property_data: Dict[str, Any]) -> str:
+        """Format property assessment fields for the prompt"""
+        lines = []
+
+        for field_label, (field_name, field_type) in FIELD_CONFIG.items():
+            value = property_data.get(field_name)
+
+            # Special handling for days_to_date fields (convert date to days)
+            if field_type == "days_to_date" and value:
+                try:
+                    # Parse the date string
+                    if isinstance(value, str):
+                        listed_datetime = datetime.fromisoformat(value.replace('Z', '+00:00').split('T')[0])
+                    else:
+                        listed_datetime = datetime.fromisoformat(str(value))
+
+                    # Calculate days on market
+                    days_on_market = (datetime.now() - listed_datetime).days
+                    display_value = f"{days_on_market} days"
+                except (ValueError, AttributeError):
+                    display_value = "Invalid date"
+            # Format the value appropriately
+            elif value is None:
+                display_value = "Not set"
+            elif isinstance(value, bool):
+                display_value = "Yes" if value else "No"
+            elif isinstance(value, str):
+                display_value = value.strip() if value.strip() else "Not set"
+            else:
+                display_value = str(value)
+
+            lines.append(f"- **{field_label}**: {display_value}")
+
+        return "\n".join(lines)
 
     def _get_rent_summary(self, property_id: str, property_data: Dict[str, Any]) -> str:
         """Get detailed rent estimate summary with per-unit/room breakdown"""
@@ -249,8 +286,7 @@ class PropertySummaryClient:
         # Get supporting data
         neighborhood_summary = self._get_neighborhood_summary(property_data)
         rent_summary = self._get_rent_summary(property_id, property_data)
-        key_concerns = self._get_key_assessment_notes(property_data)
-        concerns_text = ", ".join(key_concerns) if key_concerns else "None identified"
+        property_assessment_fields = self._format_property_assessment_fields(property_data)
 
         prompt = f"""You are a direct, no-nonsense real estate analyst. Create a concise narrative summary for a 24-year-old first-time house hacker evaluating this property.
 
@@ -293,9 +329,9 @@ class PropertySummaryClient:
 
 {neighborhood_summary}
 
-# Property Assessment Flags
+# Property Assessment Data
 
-{concerns_text}
+{property_assessment_fields}
 
 ---
 
