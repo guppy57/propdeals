@@ -337,7 +337,7 @@ class PropertySummaryClient:
 
 # Instructions
 
-Write a direct, no-nonsense narrative summary with these **3 sections with loose headers**:
+Write a direct, no-nonsense narrative summary with these **4 sections with loose headers**:
 
 ## The Bottom Line
 One paragraph that clearly states: Is this a good deal or not? What's the verdict on financial viability? Cut through the noise and give the straight truth.
@@ -348,12 +348,19 @@ One paragraph covering: What's it like to live here Year 1? What will your actua
 ## The Full Rental Picture
 One paragraph covering: What happens when you move out? How does this perform as a full rental investment? What's the long-term trajectory look like (5-10-20 years)? What are the key risks or concerns to watch?
 
+## What Buying Looks Like
+One paragraph providing a conditional decision-making framework: When should you buy this vs walk away? Structure as: "Buy this IF [specific conditions X, Y, Z]. Pass IF [inspection reveals A, seller won't negotiate B, appraisal shows C]. The 3 biggest risks are: [1 with $ amount and mitigation, 2 with $ amount and mitigation, 3 with $ amount and mitigation]." Be specific about inspection findings, negotiation triggers, and risk mitigation actions.
+
 # Critical Requirements
 
 - **Direct tone**: "This property cash flows well but has X risk" NOT "This property may potentially offer favorable returns"
 - **Use specific numbers**: Reference actual values from the data above
+- **Use conditional logic**: "Buy IF...", "Pass IF...", not vague statements
+- **Tie to due diligence**: What should inspection reveal? What should appraisal show?
+- **Include negotiation triggers**: "If seller won't credit $X for Y, walk away"
+- **Specific risk mitigation**: Not just "roof risk" but "roof risk - budget $10K or negotiate price down $10K"
 - **Investment trajectory framing**: Frame it as a journey from house-hacking (Year 1) to full rental (Year 2+)
-- **Be concise**: Total output should be 1-3 short paragraphs with section headers
+- **Be concise**: Total output should be 4 short paragraphs with section headers
 - **Include the good, bad, and ugly**: Don't sugarcoat issues, but also highlight strengths
 - **Focus on what matters**: Cash flow, risks, neighborhood quality, long-term potential
 - **No fluff**: Every sentence should add value
@@ -364,8 +371,9 @@ One paragraph covering: What happens when you move out? How does this perform as
 - Don't use hedging language ("may", "might", "potentially" unless there's genuine uncertainty)
 - Don't list every single data point - synthesize and prioritize
 - Don't be verbose - this is a quick executive summary, not a full report
+- Don't just list risks without conditions - frame as "Buy IF / Pass IF"
 
-Output ONLY the 3-section narrative. No preamble, no "here's the summary" - just start with "## The Bottom Line" and go.
+Output ONLY the 4-section narrative. No preamble, no "here's the summary" - just start with "## The Bottom Line" and go.
 """
 
         return prompt
