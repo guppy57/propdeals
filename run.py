@@ -955,7 +955,7 @@ def get_phase1_research_list():
     """
     current_df, contingent_df, creative_df = get_all_phase1_qualifying_properties()
     combined = pd.concat([current_df, contingent_df, creative_df], ignore_index=True).drop_duplicates(subset=["address1"], keep="first")
-    criteria = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & annual_cash_flow_y2 >= -50"
+    criteria = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & monthly_cash_flow_y2 >= -50"
     filtered = combined.query(criteria).copy()
     return filtered 
 
@@ -1316,7 +1316,7 @@ def handle_price_cut(property_id, current_price):
         print(f"Reducing price for {property_id} failed: {str(e)}")
 
 def handle_status_change(property_id): 
-    options = ["pending sale", "active", "passed", "sold"]
+    options = ["pending sale", "active", "passed", "sold", "off market"]
     new_status = questionary.select("Price cut amount", choices=options).ask()
     try:
       query = supabase.table("properties").update({ "status": new_status }).eq("address1", property_id)
