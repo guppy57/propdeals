@@ -2233,6 +2233,17 @@ def handle_risk_assessment(property_id: str):
 
 def handle_property_summary(property_id: str):
     """Handle viewing and generating property narrative summary reports"""
+    global df
+
+    # Get enriched property data from dataframe (with calculated financials)
+    property_row = df[df['address1'] == property_id]
+    if property_row.empty:
+        console.print(f"[red]Property not found in dataframe: {property_id}[/red]")
+        return
+
+    # Convert row to dict for passing to client
+    property_data = property_row.iloc[0].to_dict()
+
     # Check for existing property summary reports
     try:
         response = supabase.table("research_reports").select("*").eq(
@@ -2251,7 +2262,7 @@ def handle_property_summary(property_id: str):
 
         if generate:
             client = PropertySummaryClient(supabase, console)
-            report_id = client.generate_summary(property_id)
+            report_id = client.generate_summary(property_id, property_data=property_data)
 
             if report_id:
                 # Fetch and display the generated report
@@ -2285,7 +2296,7 @@ def handle_property_summary(property_id: str):
         return
     elif action == "Generate new summary":
         client = PropertySummaryClient(supabase, console)
-        report_id = client.generate_summary(property_id)
+        report_id = client.generate_summary(property_id, property_data=property_data)
 
         if report_id:
             # Fetch and display the generated report

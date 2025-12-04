@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 import openai
 from rich.console import Console
+from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from supabase import Client
 
@@ -225,25 +226,25 @@ class PropertySummaryClient:
         year_built_str = str(year_built) if year_built else "Not set"
         home_age = datetime.now().year - year_built if year_built else None
 
-        cash_needed_str = f"${cash_needed:,.0f}" if cash_needed else "Not calculated"
-        piti_str = f"${piti:,.0f}" if piti else "Not calculated"
-        total_cost_y1_str = f"${total_monthly_cost_y1:,.0f}" if total_monthly_cost_y1 else "Not calculated"
+        cash_needed_str = f"${cash_needed:,.0f}" if cash_needed is not None else "Not calculated"
+        piti_str = f"${piti:,.0f}" if piti is not None else "Not calculated"
+        total_cost_y1_str = f"${total_monthly_cost_y1:,.0f}" if total_monthly_cost_y1 is not None else "Not calculated"
 
-        cf_y1_str = f"${monthly_cf_y1:,.0f}" if monthly_cf_y1 else "Not calculated"
-        cf_after_tax_y1_str = f"${after_tax_cf_y1:,.0f}" if after_tax_cf_y1 else "Not calculated"
-        coc_y1_str = f"{coc_y1:.1f}%" if coc_y1 else "Not calculated"
+        cf_y1_str = f"${monthly_cf_y1:,.0f}" if monthly_cf_y1 is not None else "Not calculated"
+        cf_after_tax_y1_str = f"${after_tax_cf_y1:,.0f}" if after_tax_cf_y1 is not None else "Not calculated"
+        coc_y1_str = f"{coc_y1:.1f}%" if coc_y1 is not None else "Not calculated"
 
-        cf_y2_str = f"${monthly_cf_y2:,.0f}" if monthly_cf_y2 else "Not calculated"
-        cf_after_tax_y2_str = f"${after_tax_cf_y2:,.0f}" if after_tax_cf_y2 else "Not calculated"
-        coc_y2_str = f"{coc_y2:.1f}%" if coc_y2 else "Not calculated"
-        cap_rate_y2_str = f"{cap_rate_y2:.1f}%" if cap_rate_y2 else "Not calculated"
+        cf_y2_str = f"${monthly_cf_y2:,.0f}" if monthly_cf_y2 is not None else "Not calculated"
+        cf_after_tax_y2_str = f"${after_tax_cf_y2:,.0f}" if after_tax_cf_y2 is not None else "Not calculated"
+        coc_y2_str = f"{coc_y2:.1f}%" if coc_y2 is not None else "Not calculated"
+        cap_rate_y2_str = f"{cap_rate_y2:.1f}%" if cap_rate_y2 is not None else "Not calculated"
 
-        DSCR_str = f"{DSCR:.2f}" if DSCR else "Not calculated"
-        fha_str = f"{fha_self_sufficiency:.2f}" if fha_self_sufficiency else "Not calculated"
+        DSCR_str = f"{DSCR:.2f}" if DSCR is not None else "Not calculated"
+        fha_str = f"{fha_self_sufficiency:.2f}" if fha_self_sufficiency is not None else "Not calculated"
 
-        payback_str = f"{payback_period:.1f} years" if payback_period else "Not calculated"
-        equity_10yr_str = f"${equity_10yr:,.0f}" if equity_10yr else "Not calculated"
-        equity_20yr_str = f"${equity_20yr:,.0f}" if equity_20yr else "Not calculated"
+        payback_str = f"{payback_period:.1f} years" if payback_period is not None else "Not calculated"
+        equity_10yr_str = f"${equity_10yr:,.0f}" if equity_10yr is not None else "Not calculated"
+        equity_20yr_str = f"${equity_20yr:,.0f}" if equity_20yr is not None else "Not calculated"
 
         # Get supporting data
         neighborhood_summary = self._get_neighborhood_summary(property_data)
@@ -333,38 +334,49 @@ Output ONLY the 3-section narrative. No preamble, no "here's the summary" - just
 
         return prompt
 
-    def generate_summary(self, property_id: str) -> Optional[str]:
+    def generate_summary(self, property_id: str, property_data: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """
         Generate a narrative summary report for a property.
 
         Args:
             property_id: The address1 of the property
+            property_data: Optional pre-calculated property data (from enriched dataframe).
+                          If not provided, will query database.
 
         Returns:
             report_id if successful, None if failed
         """
         try:
-            # Fetch property data
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[cyan]Fetching property data..."),
-                console=self.console,
-            ) as progress:
-                progress.add_task("fetch", total=None)
+            # Fetch property data from database if not provided
+            if property_data is None:
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[cyan]Fetching property data..."),
+                    console=self.console,
+                ) as progress:
+                    progress.add_task("fetch", total=None)
 
-                response = self.supabase.table("properties").select("*").eq(
-                    "address1", property_id
-                ).single().execute()
+                    response = self.supabase.table("properties").select("*").eq(
+                        "address1", property_id
+                    ).single().execute()
 
-                if not response.data:
-                    self.console.print(f"[red]Property not found: {property_id}[/red]")
-                    return None
+                    if not response.data:
+                        self.console.print(f"[red]Property not found: {property_id}[/red]")
+                        return None
 
-                property_data = response.data
+                    property_data = response.data
+            else:
+                self.console.print("[cyan]Using provided property data with calculated financials...[/cyan]")
 
             # Build prompt
             self.console.print("[cyan]Building property summary prompt...[/cyan]")
             prompt = self._build_summary_prompt(property_id, property_data)
+
+            # Display prompt for review
+            self.console.print("\n")
+            with self.console.pager():
+                self.console.print(Panel(prompt, title="Property Summary Prompt (Review Before Generation)", border_style="cyan", padding=(1, 2)))
+            self.console.print("\n")
 
             # Generate summary with LLM
             self.console.print("[cyan]Generating property summary (this may take 15-30 seconds)...[/cyan]")
