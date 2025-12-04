@@ -27,6 +27,7 @@ from loans import LoansProvider
 from neighborhood_assessment import edit_neighborhood_assessment
 from neighborhoods import NeighborhoodsClient
 from property_assessment import edit_property_assessment, RiskAssessmentClient
+from property_summary import PropertySummaryClient
 from rent_research import RentResearcher
 
 load_dotenv()
@@ -1822,6 +1823,7 @@ def analyze_property(property_id):
     research_menu_choices = [
         "Edit property assessment",
         "View risk assessment report",
+        "View property summary",
         "Edit neighborhood assessment",
         "Record price cut",
         "Change status",
@@ -1849,6 +1851,8 @@ def analyze_property(property_id):
         edit_property_assessment(property_id, supabase, console)
     elif research_choice == "View risk assessment report":
         handle_risk_assessment(property_id)
+    elif research_choice == "View property summary":
+        handle_property_summary(property_id)
     elif research_choice == "Edit neighborhood assessment":
         edit_neighborhood_assessment(property_id, supabase, console)
     elif research_choice == "Generate new rent research":
@@ -2225,6 +2229,123 @@ def handle_risk_assessment(property_id: str):
                             console.print(md)
                 except Exception as e:
                     console.print(f"[red]Error displaying report: {str(e)}[/red]")
+
+
+def handle_property_summary(property_id: str):
+    """Handle viewing and generating property narrative summary reports"""
+    # Check for existing property summary reports
+    try:
+        response = supabase.table("research_reports").select("*").eq(
+            "property_id", property_id
+        ).eq("research_type", "property_narrative_summary").order("created_at", desc=True).execute()
+
+        existing_reports = response.data if response.data else []
+    except Exception as e:
+        console.print(f"[red]Error fetching property summary reports: {str(e)}[/red]")
+        return
+
+    # If no reports exist, ask if they want to generate one
+    if not existing_reports:
+        console.print("[yellow]No property summary found for this property.[/yellow]")
+        generate = questionary.confirm("Would you like to generate a property summary?").ask()
+
+        if generate:
+            client = PropertySummaryClient(supabase, console)
+            report_id = client.generate_summary(property_id)
+
+            if report_id:
+                # Fetch and display the generated report
+                try:
+                    report_response = supabase.table("research_reports").select("*").eq(
+                        "id", report_id
+                    ).single().execute()
+
+                    if report_response.data:
+                        from rich.markdown import Markdown
+
+                        md = Markdown(report_response.data['report_content'])
+
+                        with console.pager():
+                            console.print(md)
+                except Exception as e:
+                    console.print(f"[red]Error displaying report: {str(e)}[/red]")
+        return
+
+    # If reports exist, ask if they want to view or generate new
+    action = questionary.select(
+        "Property summary report(s) exist for this property. What would you like to do?",
+        choices=[
+            "View existing summary",
+            "Generate new summary",
+            "← Go back"
+        ]
+    ).ask()
+
+    if action == "← Go back":
+        return
+    elif action == "Generate new summary":
+        client = PropertySummaryClient(supabase, console)
+        report_id = client.generate_summary(property_id)
+
+        if report_id:
+            # Fetch and display the generated report
+            try:
+                report_response = supabase.table("research_reports").select("*").eq(
+                    "id", report_id
+                ).single().execute()
+
+                if report_response.data:
+                    from rich.markdown import Markdown
+
+                    md = Markdown(report_response.data['report_content'])
+
+                    with console.pager():
+                        console.print(md)
+            except Exception as e:
+                console.print(f"[red]Error displaying report: {str(e)}[/red]")
+    elif action == "View existing summary":
+        # Show list of existing reports
+        while True:
+            report_choices = []
+            for report in existing_reports:
+                created_date = report['created_at'][:10]  # Extract date part
+                status = report['status']
+                cost = report.get('api_cost', 0)
+                report_choices.append(f"{created_date} - {status} (${cost:.4f}) - ID: {report['id'][:8]}")
+
+            report_choices.append("← Go back")
+
+            selected = questionary.select(
+                "Select a property summary to view:",
+                choices=report_choices
+            ).ask()
+
+            if selected == "← Go back":
+                return
+
+            # Find selected report
+            selected_id = None
+            for report in existing_reports:
+                if report['id'][:8] in selected:
+                    selected_id = report['id']
+                    break
+
+            if selected_id:
+                try:
+                    report_response = supabase.table("research_reports").select("*").eq(
+                        "id", selected_id
+                    ).single().execute()
+
+                    if report_response.data:
+                        from rich.markdown import Markdown
+
+                        md = Markdown(report_response.data['report_content'])
+
+                        with console.pager():
+                            console.print(md)
+                except Exception as e:
+                    console.print(f"[red]Error displaying report: {str(e)}[/red]")
+
 
 def display_rent_estimates_comparison(property_id: str, estimates: dict, existing_estimates: dict, 
                                     unit_configs: list, result_cost: float, selected_report_info: str) -> bool:
