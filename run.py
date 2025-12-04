@@ -26,7 +26,7 @@ from inspections import InspectionsClient
 from loans import LoansProvider
 from neighborhood_assessment import edit_neighborhood_assessment
 from neighborhoods import NeighborhoodsClient
-from property_assessment import edit_property_assessment
+from property_assessment import edit_property_assessment, RiskAssessmentClient
 from rent_research import RentResearcher
 
 load_dotenv()
@@ -1821,6 +1821,7 @@ def analyze_property(property_id):
     # Build menu choices based on property type
     research_menu_choices = [
         "Edit property assessment",
+        "View risk assessment report",
         "Edit neighborhood assessment",
         "Record price cut",
         "Change status",
@@ -1846,6 +1847,8 @@ def analyze_property(property_id):
 
     if research_choice == "Edit property assessment":
         edit_property_assessment(property_id, supabase, console)
+    elif research_choice == "View risk assessment report":
+        handle_risk_assessment(property_id)
     elif research_choice == "Edit neighborhood assessment":
         edit_neighborhood_assessment(property_id, supabase, console)
     elif research_choice == "Generate new rent research":
@@ -2071,11 +2074,11 @@ def handle_rent_research_generation(property_id: str):
 def handle_view_research_reports(property_id: str):
     researcher = RentResearcher(supabase, console)
     reports = researcher.get_reports_for_property(property_id)
-    
+
     if not reports:
         console.print("[yellow]No research reports found for this property.[/yellow]")
         return
-    
+
     while True:
         report_choices = []
         for report in reports:
@@ -2083,29 +2086,145 @@ def handle_view_research_reports(property_id: str):
             status = report['status']
             cost = report['api_cost']
             report_choices.append(f"{created_date} - {status} (${cost:.4f}) - ID: {report['id'][:8]}")
-        
+
         report_choices.append("← Go back")
-        
+
         selected = questionary.select(
             "Select a research report to view:",
             choices=report_choices
         ).ask()
-        
+
         if selected == "← Go back":
             return
-        
+
         selected_id = None
         for report in reports:
             if report['id'][:8] in selected:
                 selected_id = report['id']
                 break
-        
+
         if selected_id:
             report_data = researcher.get_report_by_id(selected_id)
             if report_data:
                 researcher.display_report(report_data['report_content'])
             else:
                 console.print("[red]Error loading report.[/red]")
+
+
+def handle_risk_assessment(property_id: str):
+    """Handle viewing and generating risk assessment reports"""
+    # Check for existing risk assessment reports
+    try:
+        response = supabase.table("research_reports").select("*").eq(
+            "property_id", property_id
+        ).eq("research_type", "property_risk_report").order("created_at", desc=True).execute()
+
+        existing_reports = response.data if response.data else []
+    except Exception as e:
+        console.print(f"[red]Error fetching risk assessment reports: {str(e)}[/red]")
+        return
+
+    # If no reports exist, ask if they want to generate one
+    if not existing_reports:
+        console.print("[yellow]No risk assessment report found for this property.[/yellow]")
+        generate = questionary.confirm("Would you like to generate a risk assessment report?").ask()
+
+        if generate:
+            client = RiskAssessmentClient(supabase, console)
+            report_id = client.generate_risk_assessment(property_id)
+
+            if report_id:
+                # Fetch and display the generated report
+                try:
+                    report_response = supabase.table("research_reports").select("*").eq(
+                        "id", report_id
+                    ).single().execute()
+
+                    if report_response.data:
+                        from rich.markdown import Markdown
+
+                        md = Markdown(report_response.data['report_content'])
+
+                        with console.pager():
+                            console.print(md)
+                except Exception as e:
+                    console.print(f"[red]Error displaying report: {str(e)}[/red]")
+        return
+
+    # If reports exist, ask if they want to view or generate new
+    action = questionary.select(
+        "Risk assessment report(s) exist for this property. What would you like to do?",
+        choices=[
+            "View existing report",
+            "Generate new report",
+            "← Go back"
+        ]
+    ).ask()
+
+    if action == "← Go back":
+        return
+    elif action == "Generate new report":
+        client = RiskAssessmentClient(supabase, console)
+        report_id = client.generate_risk_assessment(property_id)
+
+        if report_id:
+            # Fetch and display the generated report
+            try:
+                report_response = supabase.table("research_reports").select("*").eq(
+                    "id", report_id
+                ).single().execute()
+
+                if report_response.data:
+                    from rich.markdown import Markdown
+
+                    md = Markdown(report_response.data['report_content'])
+
+                    with console.pager():
+                        console.print(md)
+            except Exception as e:
+                console.print(f"[red]Error displaying report: {str(e)}[/red]")
+    elif action == "View existing report":
+        # Show list of existing reports
+        while True:
+            report_choices = []
+            for report in existing_reports:
+                created_date = report['created_at'][:10]  # Extract date part
+                status = report['status']
+                cost = report.get('api_cost', 0)
+                report_choices.append(f"{created_date} - {status} (${cost:.4f}) - ID: {report['id'][:8]}")
+
+            report_choices.append("← Go back")
+
+            selected = questionary.select(
+                "Select a risk assessment report to view:",
+                choices=report_choices
+            ).ask()
+
+            if selected == "← Go back":
+                return
+
+            # Find selected report
+            selected_id = None
+            for report in existing_reports:
+                if report['id'][:8] in selected:
+                    selected_id = report['id']
+                    break
+
+            if selected_id:
+                try:
+                    report_response = supabase.table("research_reports").select("*").eq(
+                        "id", selected_id
+                    ).single().execute()
+
+                    if report_response.data:
+                        from rich.markdown import Markdown
+
+                        md = Markdown(report_response.data['report_content'])
+
+                        with console.pager():
+                            console.print(md)
+                except Exception as e:
+                    console.print(f"[red]Error displaying report: {str(e)}[/red]")
 
 def display_rent_estimates_comparison(property_id: str, estimates: dict, existing_estimates: dict, 
                                     unit_configs: list, result_cost: float, selected_report_info: str) -> bool:
