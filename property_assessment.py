@@ -653,6 +653,8 @@ class RiskAssessmentClient:
 
 {self._get_rent_estimates(property_id, property_data)}
 
+**Note**: These rent estimates are based on detailed research and analysis of 25+ comparable properties in the area, considering bedroom/bathroom count, location, amenities, and current market conditions.
+
 # Property Assessment Data
 
 {self._format_property_assessment_fields(property_data)}
@@ -665,56 +667,319 @@ class RiskAssessmentClient:
 
 # Instructions
 
-Generate a concise **House Hacking Risk Assessment Report** with these 4 sections:
+Generate a concise **House Hacking Risk Assessment Report** with these 4 sections.
 
-## 1. Go/No-Go Recommendation
-- **Risk Score (1-10)** using this rubric:
-  - **9-10**: Excellent condition, minimal major system risk, strong rental demand
-  - **7-8**: Good fundamentals, minor cosmetic work needed, low-moderate risk
-  - **4-6**: Moderate concerns (older systems, legal complications, rental demand questions)
-  - **1-3**: Major rehab needed, significant legal restrictions, or high tenant turnover risk
-- **Offer Price Recommendation**: At asking price, or what counteroffer?
-- **Top 3 Risks**: The biggest concerns specific to THIS property
-- **One-Paragraph Summary**: Should I pursue this deal or walk away?
+## CRITICAL REQUIREMENTS
 
-## 2. Critical Risks & Deal-Breakers
-- **Major Systems Condition** (focus on big-ticket items):
-  - Roof: age, remaining life, replacement cost estimate
-  - HVAC: age, condition, replacement cost estimate
-  - Foundation: any structural issues, moisture, settling
-  - Water heater: age, capacity
-  - Plumbing/Electrical: any major red flags (galvanized pipes, knob-and-tube, etc.)
-- **Rehab Risk Level**: Move-in ready vs. cosmetic work vs. major rehab required
-- **Legal Blockers**:
-  - HOA rental restrictions or excessive fees
-  - Zoning issues (can you legally rent rooms/units?)
-  - Deed restrictions limiting house hacking
-  - Permit issues (open/pulled permits, unpermitted work)
-  - Flood zone insurance costs
-- **Deal-Breaker Issues**: What problems should make a first-time buyer walk away?
+**Quantification Standards:**
+- Attach DOLLAR AMOUNTS to every risk (e.g., "Roof replacement: $8,000-$12,000")
+- Assign PROBABILITY percentages to each risk occurring (e.g., "70% chance within 3 years")
+- Calculate BREAK-EVEN points (e.g., "Breaks even at 15% vacancy rate")
+- Provide CONFIDENCE LEVELS for each assessment:
+  - **High Confidence**: Based on concrete data from this report
+  - **Medium Confidence**: Reasonable assumption based on industry standards
+  - **Low Confidence**: Requires verification during inspection
 
-## 3. House Hacking Viability
-- **Rental Demand**: How easy to find roommates/tenants in this area/neighborhood?
-- **Rent Achievability**: Are the estimated rents realistic for this location?
-- **Vacancy Risk**: Financial impact if 2-3 months vacant
-- **Tenant Management Challenges**: Specific to this property (shared spaces, unit layout, etc.)
-- **Financial Resilience**: Can you afford mortgage alone if tenants leave?
-- **Property Turnover Concerns**: Why has this property or neighborhood had high turnover?
-- **Days on Market Analysis**: What does listing time indicate?
-
-## 4. Action Plan & Next Steps
-- **Must-Do Inspections**: Which professional inspections are essential? (especially for major systems)
-- **Negotiation Strategy**:
-  - What repairs/issues justify price reduction?
-  - Specific dollar amounts to request based on identified issues
-- **Offer Contingencies**: Inspection, financing, appraisal, HOA approval, etc.
-- **Cash Reserve Needed**: Emergency fund recommendation for major repairs (beyond closing costs)
-- **Key Questions for Seller**: About systems, repairs, permits, rental history
-- **Risk Mitigation**: Specific actions to address the top 3 risks identified in Section 1
+**Visual Indicators:**
+- 🚨 **CRITICAL**: Deal-breakers or issues requiring immediate attention
+- ⚠️ **IMPORTANT**: Significant concerns affecting decision
+- ℹ️ **INFORMATIONAL**: Good-to-know context
 
 ---
 
-**Output Format**: Use clear markdown with headers, bullet points, and bold text. Be specific with dollar amounts, percentages, and actionable recommendations. Focus on property-specific insights, not generic advice. Prioritize concerns relevant to a first-time homebuyer doing their first house hack.
+# REPORT STRUCTURE
+
+## 1. Go/No-Go Recommendation
+
+- **Risk Score (1-10)** using this rubric with specific thresholds:
+
+  **9-10 (STRONG BUY)**: ALL of the following must be true:
+  - Major systems (roof, HVAC, foundation, water heater) have >10 years remaining life OR <10 years old
+  - No legal/zoning restrictions on rentals
+  - No HOA OR HOA allows rentals with fees <$150/month
+  - Positive cash flow even with 20% vacancy rate
+  - DSCR > 1.25
+  - Deferred maintenance < $5,000
+  - No unpermitted work OR easily permittable
+  - Property listed <60 days OR price justified
+
+  **7-8 (BUY)**: MOST of the following:
+  - Major systems have >5 years remaining life
+  - Minor legal issues that are fixable (e.g., rental registration needed)
+  - HOA allows rentals with fees <$250/month OR no HOA
+  - Break-even to positive cash flow at 10-15% vacancy
+  - DSCR > 1.0
+  - Deferred maintenance $5,000-$15,000
+  - No structural issues identified
+  - Property listed <90 days
+
+  **4-6 (CAUTION - Negotiate Heavily)**: Several concerns:
+  - 1-2 major systems need replacement within 5 years
+  - Legal concerns requiring verification (zoning, permits, etc.)
+  - HOA restrictions unclear OR fees $250-$400/month
+  - Negative cash flow OR breaks even only at 100% occupancy
+  - DSCR 0.8-1.0
+  - Deferred maintenance $15,000-$30,000
+  - Property listed >90 days OR multiple price reductions
+  - High turnover indicators (property sold 2+ times in 5 years)
+
+  **1-3 (PASS)**: Any of the following deal-breakers:
+  - Multiple major systems need immediate replacement
+  - Legal blockers (HOA prohibits rentals, zoning violations, etc.)
+  - Structural issues (foundation cracks, settling, moisture damage)
+  - Negative cash flow >$200/month even at 100% occupancy
+  - DSCR < 0.8
+  - Deferred maintenance > $30,000
+  - Property listed >180 days OR reduced >15%
+  - First-time buyer would be overwhelmed by rehab scope
+
+- **Offer Price Recommendation**: State specific dollar amount with justification (e.g., "$XXX - $YYY below asking to account for [specific issues with dollar amounts]")
+
+- **Top 3 Risks** (ranked by financial impact):
+  1. [Risk with dollar amount + probability + confidence level]
+  2. [Risk with dollar amount + probability + confidence level]
+  3. [Risk with dollar amount + probability + confidence level]
+
+- **One-Paragraph Summary**: Clear go/no-go recommendation with specific reasoning
+
+## 2. Critical Risks & Deal-Breakers
+
+- **Major Systems Condition** (quantify everything with dollar amounts):
+  - **Roof**: Current age, expected remaining life, replacement cost estimate ($X-$Y), probability of replacement needed within 5 years
+  - **HVAC**: Age, condition, efficiency, replacement cost estimate ($X-$Y), expected lifespan
+  - **Foundation**: Any structural issues, moisture, settling, repair cost estimates
+  - **Water Heater**: Age, capacity (adequate for units?), replacement cost ($X-$Y)
+  - **Plumbing/Electrical**: Major red flags (galvanized pipes, knob-and-tube, outdated panel), upgrade costs
+  - **Windows/Insulation**: Energy efficiency concerns, replacement costs if needed
+
+- **Rehab Risk Level**:
+  - Categorize as: Move-in ready / Cosmetic work ($X-$Y) / Major rehab ($X-$Y)
+  - List specific items needed and cost estimates
+  - Assess DIY feasibility vs. professional contractors needed
+
+- **Legal Blockers**:
+  - HOA rental restrictions or excessive fees (specify monthly/annual costs)
+  - Zoning issues (can you legally rent rooms/units?)
+  - Deed restrictions limiting house hacking
+  - Permit issues (open/pulled permits, unpermitted work, legalization costs)
+  - Flood zone status and insurance cost implications ($X/year)
+
+- **Property History & Sales Patterns** (analyze county records data):
+
+  **Ownership Churn Analysis:**
+  - Historical Turnover Rate: {property_data.get('historical_turnover_rate', 'Not available')}% per year
+  - Average Ownership Duration: {property_data.get('average_ownership_duration', 'Not available')} years
+  - Interpretation: What does this churn rate indicate about the property?
+    - Is this stability (low churn) or a red flag (high churn)?
+    - Why might owners be selling frequently?
+    - How does this compare to typical ownership duration in the neighborhood?
+  - Confidence Level: [High/Medium/Low]
+
+  **Price Appreciation/Depreciation Analysis:**
+  - Last Purchase Price: {f"${property_data.get('last_purchase_price'):,.0f}" if property_data.get('last_purchase_price') else "Not available"}
+  - Last Purchase Date: {property_data.get('last_purchase_date', 'Not available')}
+  - Current Asking Price: {purchase_price_str}
+  - Calculate:
+    - Time between sales: X years
+    - Dollar change: +/- $X (X% total)
+    - Annualized appreciation rate: +/- X% per year
+  - Analysis:
+    - Is this appreciation typical for the area or concerning?
+    - Does rapid appreciation suggest overpricing or strong market?
+    - Does depreciation indicate property issues, market decline, or motivated seller?
+    - What does pricing trend reveal about condition or market positioning?
+  - Confidence Level: [High/Medium/Low]
+
+  **County Records Insights:**
+  - County Records Obtained: {property_data.get('obtained_county_records', False)}
+  - Key Findings from County Record Notes:
+{property_data.get('county_record_notes', 'No county record notes available')}
+  - Identify from records:
+    - Any liens, judgments, or tax issues
+    - Legal complications or disputes
+    - Permit history and code violations
+    - Utility disconnect history
+    - Other red flags from public records
+  - Confidence Level: {"High (records obtained)" if property_data.get('obtained_county_records') else "Low (records not yet obtained)"}
+
+  **Overall Ownership Pattern Risk Assessment:**
+  - Risk Level: 🚨 CRITICAL / ⚠️ IMPORTANT / ℹ️ INFORMATIONAL
+  - Should these patterns concern a first-time buyer? YES/NO
+  - Specific concerns requiring investigation: [List any]
+  - Estimated dollar impact or risk: $X-$Y
+  - Recommended action: [Investigate further / Request explanation from seller / Walk away / No concern]
+
+- **RED FLAGS CHECKLIST** (mark each as YES/NO/UNKNOWN):
+
+  **Major Systems:**
+  - [ ] Roof needs replacement within 5 years ($X estimated)
+  - [ ] HVAC system >15 years old or failing
+  - [ ] Foundation has structural issues (cracks, settling, moisture)
+  - [ ] Plumbing has galvanized pipes or major leaks
+  - [ ] Electrical is knob-and-tube or panel undersized
+
+  **Legal/Compliance:**
+  - [ ] HOA prohibits rentals or charges >$200/month
+  - [ ] Zoning doesn't allow multi-tenant occupancy
+  - [ ] Open permits or unpermitted work identified
+  - [ ] Property in flood zone requiring expensive insurance
+  - [ ] Deed restrictions limiting rental use
+
+  **Financial:**
+  - [ ] Negative cash flow even at 100% occupancy
+  - [ ] Deferred maintenance exceeds $20,000
+  - [ ] DSCR below 1.0
+  - [ ] Can't afford mortgage if all tenants leave for 3+ months
+
+  **Property History:**
+  - [ ] Property listed >120 days
+  - [ ] Price reduced >10%
+  - [ ] Sold 2+ times in last 5 years (churn indicator)
+  - [ ] Historical turnover rate >50%/year
+
+  **Total Red Flags**: X/20 — (0-3: Low Risk | 4-7: Medium Risk | 8+: High Risk)
+
+- **Deal-Breaker Assessment**: Based on checklist and data, identify which issues should make a first-time buyer walk away
+
+## 3. House Hacking Viability
+
+- **Rental Demand**: How easy to find roommates/tenants in this area/neighborhood? (Confidence level: High/Medium/Low)
+
+- **Rent Achievability**: Are the estimated rents realistic for this location? Compare to neighborhood analysis data. (Confidence level: High/Medium/Low)
+
+- **Vacancy Risk**: Specific financial impact if 1 unit vacant for 2-3 months (calculate dollar amount)
+
+- **Tenant Management Challenges**: Property-specific concerns (shared spaces, unit layout, parking, etc.)
+
+- **Financial Resilience**: Can buyer afford full mortgage alone if all tenants leave? For how many months?
+
+- **Property Turnover Analysis**:
+  - Historical turnover rate interpretation
+  - Average ownership duration concerns
+  - Reasons for turnover (if identifiable)
+
+- **Days on Market Analysis**: What does {property_data.get('listed_date', 'listing time')} indicate about property desirability or pricing?
+
+- **STRESS TEST SCENARIOS** (calculate specific impacts):
+
+  **Scenario 1: Job Loss (6 months no rental income)**
+  - Total out-of-pocket cost for 6 months: $X
+  - Cash reserves needed: $X
+  - Months until reserves depleted (if buyer has $Y saved): X months
+  - Recovery plan: [brief description]
+  - Risk Assessment: 🚨/⚠️/ℹ️
+
+  **Scenario 2: Major System Failure Year 1**
+  - Most likely system to fail: [Roof/HVAC/etc.]
+  - Replacement cost: $X-$Y
+  - Impact on cash-on-cash return: -X.X%
+  - Financing options: [home equity, emergency fund, credit card]
+  - Could this force sale? YES/NO
+  - Risk Assessment: 🚨/⚠️/ℹ️
+
+  **Scenario 3: Extended Vacancy (3 months)**
+  - Lost rental income: $X
+  - Additional carrying costs: $X
+  - Total impact: $X
+  - How many months to recover financially: X
+  - Prevention strategies: [brief description]
+  - Risk Assessment: 🚨/⚠️/ℹ️
+
+  **Scenario 4: Market Downturn (15% property value drop)**
+  - New property value: $X (from {purchase_price_str})
+  - New LTV ratio: X% (currently {ltv_ratio_str})
+  - Underwater amount: $X / Breaking even / Still have equity of $X
+  - Impact on refinancing ability: [description]
+  - Impact on exit strategy: [description]
+  - Should this concern a first-time buyer planning to hold 3-5 years? YES/NO
+  - Risk Assessment: 🚨/⚠️/ℹ️
+
+  **Overall Financial Resilience Score**: X/10 (based on ability to weather these scenarios)
+
+## 4. Action Plan & Next Steps
+
+- **Must-Do Inspections** (prioritized by importance):
+  1. [Inspection type] - Cost: $X-$Y - Why essential: [specific reason]
+  2. [Inspection type] - Cost: $X-$Y - Why essential: [specific reason]
+  3. [Inspection type] - Cost: $X-$Y - Why essential: [specific reason]
+  Total inspection costs: $X-$Y
+
+- **Negotiation Strategy**:
+  - **Price Reduction Justification**: Total identified issues worth $X-$Y
+  - **Specific Ask**: Request $X credit/reduction for:
+    - [Issue 1]: $X-$Y
+    - [Issue 2]: $X-$Y
+    - [Issue 3]: $X-$Y
+  - **Alternative**: Seller completes repairs before closing (get quotes)
+  - **Walk-away price**: If seller won't negotiate below $X, walk away because [reason]
+
+- **Offer Contingencies** (must-haves):
+  - [ ] General inspection contingency (X days)
+  - [ ] Specific system inspection contingency: [roof/HVAC/foundation/etc.]
+  - [ ] Financing contingency
+  - [ ] Appraisal contingency
+  - [ ] HOA approval (if applicable)
+  - [ ] Rental permit verification (if applicable)
+  - [ ] [Other specific contingencies based on property issues]
+
+- **Cash Reserve Recommendation**:
+  - **Minimum emergency fund**: $X (covers [specific scenario])
+  - **Comfortable emergency fund**: $Y (covers [specific scenarios])
+  - **Beyond closing costs**, set aside: $Z for [specific anticipated expenses]
+
+- **Key Questions for Seller** (ranked by importance):
+  1. [Question about major systems with specific details needed]
+  2. [Question about repairs/permits]
+  3. [Question about rental history/tenant issues]
+  4. [Question about HOA/legal concerns]
+  5. [Question about why selling]
+
+- **Risk Mitigation Plan** (addressing Top 3 Risks from Section 1):
+  - **Risk #1**: [Specific mitigation action + cost + timeline]
+  - **Risk #2**: [Specific mitigation action + cost + timeline]
+  - **Risk #3**: [Specific mitigation action + cost + timeline]
+
+- **Decision Timeline**:
+  - Day 1-3: Schedule inspections
+  - Day 4-10: Complete inspections and review reports
+  - Day 11-14: Renegotiate based on findings or walk away
+  - Day 15+: Finalize financing and close OR move to next property
+
+---
+
+# OUTPUT QUALITY REQUIREMENTS
+
+**Specificity Over Generalities:**
+- ❌ BAD: "The roof may need replacement soon"
+- ✅ GOOD: "The 23-year-old asphalt shingle roof has ~2-5 years remaining life (typical lifespan 25-30 years). Replacement cost: $8,000-$12,000. 70% probability of needing replacement within 5 years. [Medium Confidence - based on age and typical lifespan]"
+
+**Actionable Recommendations:**
+- Every risk must have: Dollar amount + Probability + Mitigation strategy + Confidence level
+- Every recommendation must include: Specific action + Timeline + Cost
+- Prioritize ruthlessly: Focus on top 3-5 items per section, not exhaustive lists
+
+**Use Visual Indicators:**
+- 🚨 for CRITICAL issues (deal-breakers, immediate safety concerns, legal blockers)
+- ⚠️ for IMPORTANT concerns (significant financial impact, major systems)
+- ℹ️ for INFORMATIONAL context (good to know, minor issues)
+
+**Property-Specific Focus:**
+- Use actual data from this report (don't say "if X" when X is provided in the data)
+- Reference specific fields: Historical Turnover Rate ({property_data.get('historical_turnover_rate', 'Not set')}%), Days in Market, Year Built ({year_built_str}), etc.
+- Avoid generic advice - every insight should be unique to THIS property
+
+**Confidence Calibration:**
+- HIGH: Based on concrete data in this report (e.g., year built, financial calculations, listed date)
+- MEDIUM: Reasonable industry-standard assumptions (e.g., typical system lifespans, market norms)
+- LOW: Requires verification during inspection (e.g., actual system condition, structural issues)
+
+**Final Check:**
+- Is every dollar amount justified and calculated?
+- Does every risk have a probability percentage?
+- Is the Risk Score (1-10) aligned with the rubric criteria?
+- Are all 20 red flag checklist items marked YES/NO/UNKNOWN?
+- Are stress test scenarios fully calculated with specific numbers?
+- Would a first-time homebuyer know EXACTLY what to do next after reading this?
 """
 
         return prompt
