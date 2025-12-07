@@ -392,6 +392,18 @@ def apply_calculations_on_dataframe(df):
     df[cols] = df[cols].fillna(0)
     df["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
     df["home_age"] = 2025 - df["built_in"].fillna(2025)
+
+    # calculate each component of the closing cost individually
+    # home inspector
+    # appraisal
+    # title
+    # title insurance
+    # document fee
+    # home owners insurance
+    # home owners insurance escrow
+    # real estate agent commission
+    # property tax escrow
+
     df["closing_costs"] = (df["purchase_price"] * closing_costs_rate) + lender_fees
     df["down_payment"] = df["purchase_price"] * down_payment_rate
     df["5_pct_loan"] = df["purchase_price"] * 0.05
@@ -402,6 +414,14 @@ def apply_calculations_on_dataframe(df):
     df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
     df["cash_needed"] = df["closing_costs"] + df["down_payment"] - upfront_discounts - (IA_FIRSTHOME_GRANT_AMT if (ia_fhb_prog_upfront_option == "GRANT" and using_ia_fhb_prog) else 0)
     df["annual_rent_y1"] = df["net_rent_y1"] * 12
+
+
+    df["quick_monthly_rent_estimate"] = (df["purchase_price"] + df["closing_costs"]) * 0.0075
+
+    df["total_rent"] = df['quick_monthly_rent_estimate']
+
+
+
     # Year 1 operating expenses (before changing total_rent for SFH)
     # For SFH: uses aggregated per-room rent (house-hacking scenario)
     # For multi-family: uses total rent from all units
@@ -427,10 +447,21 @@ def apply_calculations_on_dataframe(df):
     df["monthly_NOI_y1"] = df["net_rent_y1"] - df["operating_expenses_y1"]
     df["annual_NOI_y1"] = df["monthly_NOI_y1"] * 12
     df["annual_NOI_y2"] = df["monthly_NOI_y2"] * 12
+
+
     df["monthly_cash_flow_y1"] = df["net_rent_y1"] - df["total_monthly_cost_y1"]
-    df["monthly_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost_y2"]
+    # df["monthly_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost_y2"]
     df["annual_cash_flow_y1"] = df["monthly_cash_flow_y1"] * 12
-    df["annual_cash_flow_y2"] = df["monthly_cash_flow_y2"] * 12
+    # df["annual_cash_flow_y2"] = df["monthly_cash_flow_y2"] * 12
+
+
+    df['ammoritization_estimate'] = (df['loan_amount'] * 0.017) / 12
+
+    # df["monthly_cash_flow_y1"] = (df["quick_annual_rent_estimate"] / 12) - df["total_monthly_cost_y1"]
+    df["monthly_cash_flow_y2"] = df['total_rent'] - df["total_monthly_cost_y2"] + df['ammoritization_estimate']
+    # df["annual_cash_flow_y1"] = df["monthly_cash_flow_y1"] * 12
+    df["annual_cash_flow_y2"] = df['monthly_cash_flow_y2'] * 12 
+
     df["cap_rate_y1"] = df["annual_NOI_y1"] / df["purchase_price"]
     df["cap_rate_y2"] = df["annual_NOI_y2"] / df["purchase_price"]
     df["CoC_y1"] = df["annual_cash_flow_y1"] / df["cash_needed"]
@@ -504,6 +535,8 @@ def apply_calculations_on_dataframe(df):
     df["cash_flow_y2_downside_10pct"] = (df["total_rent"] * 0.9) - df["total_monthly_cost_y2"]
     df["deal_score"] = df.apply(get_deal_score, axis=1)
     df["fha_self_sufficiency_ratio"] = (df["total_rent"] * 0.75) / df["piti"]  # Uses Y2 rent (whole-property for SFH)
+
+
     return df
 
 def reload_dataframe():
@@ -916,15 +949,14 @@ def get_all_phase1_qualifying_properties(active=True):
     criteria = (
         f"{status_criteria} "
         "& square_ft >= 950 "
-        "& MGR_PP > 0.01 "
-        "& OpEx_Rent < 0.5 "
-        "& DSCR > 1.25 "
-        "& cash_needed <= 25000 "
-        "& monthly_cash_flow_y1 >= -400 "
+        # "& MGR_PP > 0.01 "
+        # "& OpEx_Rent < 0.5 "
+        # "& DSCR > 1.25 "
+        # "& cash_needed <= 25000 "
+        # "& monthly_cash_flow_y1 >= -400 "
         "& ((units == 0 & monthly_cash_flow_y2 >= -50) | (units > 0 & monthly_cash_flow_y2 >= 400)) "
-        "& ((units >= 3 & fha_self_sufficiency_ratio >= 1) | (units < 3)) "
-        "& beats_market "
-        # "& neighborhood_letter_grade in ['C', 'A', 'B']"
+        # "& ((units >= 3 & fha_self_sufficiency_ratio >= 1) | (units < 3)) "
+        # "& beats_market "
     )
 
     base_df = df.copy()
