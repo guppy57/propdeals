@@ -26,7 +26,7 @@ from inspections import InspectionsClient
 from loans import LoansProvider
 from neighborhood_assessment import edit_neighborhood_assessment
 from neighborhoods import NeighborhoodsClient
-from property_assessment import edit_property_assessment, RiskAssessmentClient
+from property_assessment import RiskAssessmentClient, edit_property_assessment
 from property_summary import PropertySummaryClient
 from rent_research import RentResearcher
 
@@ -37,7 +37,7 @@ supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_
 inspections = InspectionsClient(supabase_client=supabase)
 neighborhoods = NeighborhoodsClient(supabase_client=supabase, console=console)
 
-LAST_USED_LOAN = 1
+LAST_USED_LOAN = 2
 LAND_VALUE_PCT = 0.20  # 20% of purchase price is land (non-depreciable)
 FEDERAL_TAX_RATE = 0.22  # 22% federal tax bracket
 SELLING_COSTS_RATE = 0.07  # 7% selling costs (6% agent commission + 1% closing)
@@ -244,12 +244,6 @@ def get_expected_gains(row, length_years):
     equity_gains = loan_amount - remaining_balance
     return cumulative_cashflow + appreciation_gains + equity_gains
 
-def get_monthly_taxes(row):
-    annual_tax = row.get('annual_tax_amount')
-    if pd.notna(annual_tax) and annual_tax is not None:
-        return (annual_tax * 1.05) / 12 # add a small buffer of 5% to be conservative
-    return (row["purchase_price"] * property_tax_rate) / 12
-
 def get_state_tax_rate(state_code):
     """Get state marginal tax rate from state code"""
     state_rates = {
@@ -378,12 +372,6 @@ def calculate_roe(row):
         return row["annual_cash_flow_y2"] / current_equity
     return 0
 
-def get_loan_amount(row):
-    if using_ia_fhb_prog and ia_fhb_prog_upfront_option == "LOAN" and row["units"] == 0:
-        return row["purchase_price"] - row["down_payment"] + (row["purchase_price"] * mip_upfront_rate) - row["5_pct_loan"]
-    else:
-        return row["purchase_price"] - row["down_payment"] + (row["purchase_price"] * mip_upfront_rate)
-
 def apply_calculations_on_dataframe(df):
     state_rate = get_state_tax_rate(state_tax_code)
     combined_tax_rate = FEDERAL_TAX_RATE + state_rate
@@ -407,21 +395,20 @@ def apply_calculations_on_dataframe(df):
     df["closing_costs"] = (df["purchase_price"] * closing_costs_rate) + lender_fees
     df["down_payment"] = df["purchase_price"] * down_payment_rate
     df["5_pct_loan"] = df["purchase_price"] * 0.05
-    df["loan_amount"] = df.apply(get_loan_amount, axis=1)
+    df["loan_amount"] = df["purchase_price"] - df["down_payment"] + (df["purchase_price"] * mip_upfront_rate)
     df["monthly_mortgage"] = df["loan_amount"].apply(lambda x: calculate_mortgage(x, apr_rate, loan_length_years))
     df["monthly_mip"] = (df["loan_amount"] * mip_annual_rate) / 12
-    df["monthly_taxes"] = df.apply(get_monthly_taxes, axis=1)
+    df["monthly_taxes"] = (df["purchase_price"] * property_tax_rate) / 12
     df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
     df["cash_needed"] = df["closing_costs"] + df["down_payment"] - upfront_discounts - (IA_FIRSTHOME_GRANT_AMT if (ia_fhb_prog_upfront_option == "GRANT" and using_ia_fhb_prog) else 0)
-    df["annual_rent_y1"] = df["net_rent_y1"] * 12
-
 
     df["quick_monthly_rent_estimate"] = (df["purchase_price"] + df["closing_costs"]) * 0.0075
-
+    df['ammoritization_estimate'] = (df['loan_amount'] * 0.017) / 12
     df["total_rent"] = df['quick_monthly_rent_estimate']
+    df["my_rent"] = df['quick_monthly_rent_estimate'] * 0.25 # quick and dirty calculation
+    df["net_rent_y1"] = df['total_rent'] - df['my_rent']
 
-
-
+    df["annual_rent_y1"] = df["net_rent_y1"] * 12
     # Year 1 operating expenses (before changing total_rent for SFH)
     # For SFH: uses aggregated per-room rent (house-hacking scenario)
     # For multi-family: uses total rent from all units
@@ -431,8 +418,8 @@ def apply_calculations_on_dataframe(df):
     # For single family homes (units == 0): switch total_rent from aggregated per-room to whole-property rent
     # This affects all Year 2 calculations and Y2-based metrics below
     # Only update where rent_estimate is not null; otherwise keep aggregated per-room rent
-    mask = (df["units"] == 0) & (df["rent_estimate"].notna())
-    df.loc[mask, "total_rent"] = df.loc[mask, "rent_estimate"].astype(float)
+    # mask = (df["units"] == 0) & (df["rent_estimate"].notna())
+    # df.loc[mask, "total_rent"] = df.loc[mask, "rent_estimate"].astype(float)
     df["annual_rent_y2"] = df["total_rent"] * 12
     # Year 2 operating expenses (after changing total_rent for SFH)
     # For SFH: uses whole-property rent (full rental scenario)
@@ -448,19 +435,10 @@ def apply_calculations_on_dataframe(df):
     df["annual_NOI_y1"] = df["monthly_NOI_y1"] * 12
     df["annual_NOI_y2"] = df["monthly_NOI_y2"] * 12
 
-
-    df["monthly_cash_flow_y1"] = df["net_rent_y1"] - df["total_monthly_cost_y1"]
-    # df["monthly_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost_y2"]
+    df["monthly_cash_flow_y1"] = df["net_rent_y1"] - df["total_monthly_cost_y1"] + df['ammoritization_estimate']
+    df["monthly_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost_y2"] + df['ammoritization_estimate']
     df["annual_cash_flow_y1"] = df["monthly_cash_flow_y1"] * 12
-    # df["annual_cash_flow_y2"] = df["monthly_cash_flow_y2"] * 12
-
-
-    df['ammoritization_estimate'] = (df['loan_amount'] * 0.017) / 12
-
-    # df["monthly_cash_flow_y1"] = (df["quick_annual_rent_estimate"] / 12) - df["total_monthly_cost_y1"]
-    df["monthly_cash_flow_y2"] = df['total_rent'] - df["total_monthly_cost_y2"] + df['ammoritization_estimate']
-    # df["annual_cash_flow_y1"] = df["monthly_cash_flow_y1"] * 12
-    df["annual_cash_flow_y2"] = df['monthly_cash_flow_y2'] * 12 
+    df["annual_cash_flow_y2"] = df["monthly_cash_flow_y2"] * 12
 
     df["cap_rate_y1"] = df["annual_NOI_y1"] / df["purchase_price"]
     df["cap_rate_y2"] = df["annual_NOI_y2"] / df["purchase_price"]
@@ -535,8 +513,6 @@ def apply_calculations_on_dataframe(df):
     df["cash_flow_y2_downside_10pct"] = (df["total_rent"] * 0.9) - df["total_monthly_cost_y2"]
     df["deal_score"] = df.apply(get_deal_score, axis=1)
     df["fha_self_sufficiency_ratio"] = (df["total_rent"] * 0.75) / df["piti"]  # Uses Y2 rent (whole-property for SFH)
-
-
     return df
 
 def reload_dataframe():
@@ -548,12 +524,12 @@ def reload_dataframe():
     rents = pd.DataFrame(rents_get_response.data)
     rents = rents.drop(['id'], axis=1)
     rent_summary = rents.groupby("address1")["rent_estimate"].agg(["sum", "min"]).reset_index()
-    rent_summary.columns = ["address1", "total_rent", "min_rent"]
+    rent_summary.columns = ["address1", "market_total_rent_estimate", "min_rent"]
     min_rent_indices = rents.groupby("address1")["rent_estimate"].idxmin()
     min_rent_units = rents.loc[min_rent_indices, ["address1", "unit_num", "beds"]].reset_index(drop=True)
     min_rent_units.columns = ["address1", "min_rent_unit", "min_rent_unit_beds"]
     rent_summary = rent_summary.merge(min_rent_units, on="address1", how="left")
-    rent_summary["net_rent_y1"] = rent_summary["total_rent"] - rent_summary["min_rent"]
+    rent_summary["market_estimate_net_rent_y1"] = rent_summary["market_total_rent_estimate"] - rent_summary["min_rent"]
     df = df.merge(rent_summary, on="address1", how="left")
     neighborhoods_df = neighborhoods.get_neighborhoods_dataframe(supabase)
     df = df.merge(neighborhoods_df, on="address1", how="left")
@@ -724,6 +700,52 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             row_args.append(str(int(row["min_rent_unit_beds"] - 1)))
             row_args.append(str(calculate_additional_room_rent(row)))
             
+        table.add_row(*row_args)
+
+    console.print(table)
+
+def display_y2_calculations(properties_df=None):
+    """Display property options table with Y2 financial calculations"""
+    dataframe = df if properties_df is None else properties_df
+    dataframe = dataframe.sort_values(by="units")  # Default sort
+
+    table = Table(title="Y2 Property Calculations", show_header=True, header_style="bold magenta")
+
+    # Add columns
+    table.add_column("Address", style="cyan", no_wrap=True)
+    table.add_column("Purchase Price", justify="right")
+    table.add_column("Down Payment", justify="right", style="yellow")
+    table.add_column("Closing Costs", justify="right", style="yellow")
+    table.add_column("Total Rent", justify="right", style="green")
+    table.add_column("Monthly Mortgage", justify="right", style="red")
+    table.add_column("Monthly MIP", justify="right", style="red")
+    table.add_column("Monthly Taxes", justify="right", style="red")
+    table.add_column("Monthly Insurance", justify="right", style="red")
+    table.add_column("Y2 Repair Cost", justify="right", style="yellow")
+    table.add_column("Y2 Vacancy Reserve", justify="right", style="yellow")
+    table.add_column("Monthly CF Y2", justify="right")
+
+    # Iterate and add rows
+    for _, row in dataframe.iterrows():
+        # Determine cashflow color
+        cf_y2_style = "red" if row["monthly_cash_flow_y2"] < 0 else "green"
+
+        # Build row with formatted values
+        row_args = [
+            str(row["address1"]),
+            format_currency(row["purchase_price"]),
+            format_currency(row["down_payment"]),
+            format_currency(row["closing_costs"]),
+            format_currency(row["total_rent"]),
+            format_currency(row["monthly_mortgage"]),
+            format_currency(row["monthly_mip"]),
+            format_currency(row["monthly_taxes"]),
+            format_currency(row["monthly_insurance"]),
+            format_currency(row["monthly_repair_costs_y2"]),
+            format_currency(row["monthly_vacancy_costs_y2"]),
+            f"[{cf_y2_style}]{format_currency(row['monthly_cash_flow_y2'])}[/{cf_y2_style}]"
+        ]
+
         table.add_row(*row_args)
 
     console.print(table)
@@ -934,15 +956,9 @@ def get_all_phase1_qualifying_properties(active=True):
     This method filters all properties based on our criteria for what is a financially viable property
     Current criteria:
       - status = 'active'
-      - 1% rule (monthly gross rent must be 1% or more of purchase price)
-      - 50% rule (operating expenses must be 50% or lower than gross rent)
       - Cash needed must be below $25,000
-      - Debt Service Coverage Ratio should be above 1.25
       - SFH/MF: Monthly Cashflow with cheapest unit not rented above -400 (house hacking)
-      - MF: Fully rented monthly cashflow above 400
-      - SFH: Fully rented monthly cashflow above -50
-      - Triplexes / Fourplexes must pass FHA self-sufficiency test (Gross Rent * 0.75 >= PITI)
-      - Net Present Value in 10 years must be positive, thus beating the stock market
+      - SFH/MF: Fully rented monthly cashflow above -200
       - Square Feet must be greater than or equal to 950 
     """
     status_criteria = "status == 'active'" if active else "status != 'active'"
@@ -952,12 +968,21 @@ def get_all_phase1_qualifying_properties(active=True):
         # "& MGR_PP > 0.01 "
         # "& OpEx_Rent < 0.5 "
         # "& DSCR > 1.25 "
-        # "& cash_needed <= 25000 "
+        "& cash_needed <= 25000 "
         # "& monthly_cash_flow_y1 >= -400 "
-        "& ((units == 0 & monthly_cash_flow_y2 >= -50) | (units > 0 & monthly_cash_flow_y2 >= 400)) "
+        "& ((units == 0 & monthly_cash_flow_y2 >= -200) | (units > 0 & monthly_cash_flow_y2 >= -200)) "
         # "& ((units >= 3 & fha_self_sufficiency_ratio >= 1) | (units < 3)) "
         # "& beats_market "
     )
+
+    """
+    Old criteria before new model:
+      - 1% rule (monthly gross rent must be 1% or more of purchase price)
+      - 50% rule (operating expenses must be 50% or lower than gross rent)
+      - Debt Service Coverage Ratio should be above 1.25
+      - Triplexes / Fourplexes must pass FHA self-sufficiency test (Gross Rent * 0.75 >= PITI)
+      - Net Present Value in 10 years must be positive, thus beating the stock market
+    """
 
     base_df = df.copy()
     filtered_df = base_df.query(criteria).copy()
@@ -988,7 +1013,7 @@ def get_phase1_research_list():
     """
     current_df, contingent_df, creative_df = get_all_phase1_qualifying_properties()
     combined = pd.concat([current_df, contingent_df, creative_df], ignore_index=True).drop_duplicates(subset=["address1"], keep="first")
-    criteria = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & monthly_cash_flow_y2 >= -50"
+    criteria = "(neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo"
     filtered = combined.query(criteria).copy()
     return filtered 
 
@@ -1280,7 +1305,89 @@ def display_phase1_research_list():
     else:
         table2 = create_phase1_research_list_table(not_on_tour, "Phase 1 Qualifying Properties - Not on Tour List")
         console.print(table2)
-        console.print() 
+        console.print()
+
+def display_phase1_total_rent_differences():
+    """
+    Display comparison between quick rent estimate and detailed market estimate
+    for Phase 1 properties.
+
+    Green = market estimate higher (conservative quick estimate)
+    Red = market estimate lower (optimistic quick estimate)
+    """
+    # Get Phase 1 qualifiers
+    dataframe = get_combined_phase1_qualifiers(active=True)
+
+    # Handle empty case
+    if len(dataframe) == 0:
+        console.print("[dim]No Phase 1 qualifying properties found[/dim]")
+        return
+
+    # Add calculated columns
+    dataframe['rent_difference'] = dataframe['market_total_rent_estimate'] - dataframe['total_rent']
+    dataframe['rent_difference_percent'] = dataframe.apply(
+        lambda row: row['rent_difference'] / row['total_rent']
+                    if pd.notna(row['total_rent']) and row['total_rent'] != 0
+                    else 0,
+        axis=1
+    )
+
+    dataframe['adjusted_cfy2'] = dataframe['monthly_cash_flow_y2'] + dataframe['rent_difference']
+
+    # Sort by percent difference descending (biggest positive differences first)
+    dataframe = dataframe.sort_values(by='rent_difference_percent', ascending=False)
+
+    # Create Rich table
+    table = Table(
+        title=f"Phase 1 Rent Estimate Comparison ({len(dataframe)} properties)",
+        show_header=True,
+        header_style="bold magenta"
+    )
+
+    # Add columns
+    table.add_column("Address", style="cyan", no_wrap=False)
+    table.add_column("Purchase Price", justify="right")
+    table.add_column("Cash Needed", justify="right")
+    table.add_column("Quick Estimate", justify="right")
+    table.add_column("Market Estimate", justify="right")
+    table.add_column("Difference", justify="right")
+    table.add_column("Percent", justify="right")
+    table.add_column("CFY2", justify="right")
+    table.add_column('Adjusted CFY2', justify="right")
+
+    # Iterate and add rows with color coding
+    for _, row in dataframe.iterrows():
+        diff_value = row['rent_difference']
+        percent_value = row['rent_difference_percent']
+
+        # Color code: green for positive, red for negative
+        if diff_value > 0:
+            diff_display = f"[green]{format_currency(diff_value)}[/green]"
+            percent_display = f"[green]{format_percentage(percent_value)}[/green]"
+        elif diff_value < 0:
+            diff_display = f"[red]{format_currency(diff_value)}[/red]"
+            percent_display = f"[red]{format_percentage(percent_value)}[/red]"
+        else:
+            diff_display = format_currency(diff_value)
+            percent_display = format_percentage(percent_value)
+
+        adj_cfy2_color = "green" if row['adjusted_cfy2'] > 0 else "red"
+        cfy2_color = "green" if row['monthly_cash_flow_y2'] > 0 else "red"
+
+        table.add_row(
+            str(row['address1']),
+            format_currency(row['purchase_price']),
+            format_currency(row['cash_needed']),
+            format_currency(row['total_rent']),
+            format_currency(row['market_total_rent_estimate']),
+            diff_display,
+            percent_display,
+            f"[{cfy2_color}]{format_currency(row['monthly_cash_flow_y2'])}[/{cfy2_color}]",
+            f"[{adj_cfy2_color}]{format_currency(row['adjusted_cfy2'])}[/{adj_cfy2_color}]"
+        )
+
+    # Display table
+    console.print(table)
 
 def display_all_phase2_qualifying_properties():
     dfs = get_all_phase2_properties()
@@ -3243,7 +3350,8 @@ def run_all_properties_options():
     using_all_properties = True
     choices = [
         "Phase 1 - Qualifiers",
-        "Phase 1 - Research List",
+        "Phase 1 - Total Rent Differences",
+        "Phase 1.5 - Research List",
         "Phase 2 - Qualifiers",
         "All properties - Active (FHA)",
         "All properties - Reduce price and recalculate",
@@ -3269,8 +3377,10 @@ def run_all_properties_options():
             )
         elif option == "Phase 1 - Qualifiers":
             display_all_phase1_qualifying_properties()
-        elif option == "Phase 1 - Research List":
+        elif option == "Phase 1.5 - Research List":
             display_phase1_research_list()
+        elif option == "Phase 1 - Total Rent Differences":
+            display_phase1_total_rent_differences()
         elif option == "All properties - Reduce price and recalculate":
             percent = questionary.text(
                 "Enter a percent to reduce purchase price by"

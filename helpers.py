@@ -27,8 +27,8 @@ def calculate_mortgage(principal, annual_rate, years):
 
   monthly_payment = (
       principal
-      * (monthly_rate * (1 + monthly_rate) ** num_payments)
-      / ((1 + monthly_rate) ** num_payments - 1)
+      * (monthly_rate * ((1 + monthly_rate) ** num_payments))
+      / (((1 + monthly_rate) ** num_payments) - 1)
   )
 
   return monthly_payment
