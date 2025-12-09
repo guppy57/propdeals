@@ -1,9 +1,13 @@
 from rich.table import Table
+from rich.panel import Panel
+import pandas as pd
 from helpers import (
+    calculate_additional_room_rent,
+    calculate_quintile_colors_for_metrics,
+    express_percent_as_months_and_days,
     format_currency,
     format_number,
     format_percentage,
-    calculate_additional_room_rent,
 )
 
 def display_all_properties(
@@ -182,4 +186,537 @@ def display_all_properties(
 
         table.add_row(*row_args)
 
+    console.print(table)
+
+
+def display_y2_calculations(console, df, properties_df=None):
+    """Display property options table with Y2 financial calculations"""
+    dataframe = df if properties_df is None else properties_df
+    dataframe = dataframe.sort_values(by="units")  # Default sort
+
+    table = Table(title="Y2 Property Calculations", show_header=True, header_style="bold magenta")
+
+    # Add columns
+    table.add_column("Address", style="cyan", no_wrap=True)
+    table.add_column("Purchase Price", justify="right")
+    table.add_column("Down Payment", justify="right", style="yellow")
+    table.add_column("Closing Costs", justify="right", style="yellow")
+    table.add_column("Total Rent", justify="right", style="green")
+    table.add_column("Monthly Mortgage", justify="right", style="red")
+    table.add_column("Monthly MIP", justify="right", style="red")
+    table.add_column("Monthly Taxes", justify="right", style="red")
+    table.add_column("Monthly Insurance", justify="right", style="red")
+    table.add_column("Y2 Repair Cost", justify="right", style="yellow")
+    table.add_column("Y2 Vacancy Reserve", justify="right", style="yellow")
+    table.add_column("Monthly CF Y2", justify="right")
+
+    # Iterate and add rows
+    for _, row in dataframe.iterrows():
+        # Determine cashflow color
+        cf_y2_style = "red" if row["monthly_cash_flow_y2"] < 0 else "green"
+
+        # Build row with formatted values
+        row_args = [
+            str(row["address1"]),
+            format_currency(row["purchase_price"]),
+            format_currency(row["down_payment"]),
+            format_currency(row["closing_costs"]),
+            format_currency(row["total_rent"]),
+            format_currency(row["monthly_mortgage"]),
+            format_currency(row["monthly_mip"]),
+            format_currency(row["monthly_taxes"]),
+            format_currency(row["monthly_insurance"]),
+            format_currency(row["monthly_repair_costs_y2"]),
+            format_currency(row["monthly_vacancy_costs_y2"]),
+            f"[{cf_y2_style}]{format_currency(row['monthly_cash_flow_y2'])}[/{cf_y2_style}]"
+        ]
+
+        table.add_row(*row_args)
+
+    console.print(table)
+
+
+def display_new_property_qualification(console, address1, get_all_phase1_qualifying_properties):
+    current, contingent, creative = get_all_phase1_qualifying_properties()
+
+    current_result = current.query(f'address1 == "{address1}"')
+    contingent_result = contingent.query(f'address1 == "{address1}"')
+    creative_result = creative.query(f'address1 == "{address1}"')
+
+    current_msg = "Disqualified: Phase 1 Current" if current_result.empty else "Qualified: Phase 1 Current"
+    contingent_msg = "Disqualified: Phase 1 Contingent" if contingent_result.empty else "Qualified: Phase 1 Contingent"
+    creative_msg = "Disqualified: Phase 1 Creative" if creative_result.empty else "Qualified: Phase 1 Creative"
+    cur_style = "red" if current_result.empty else "green"
+    con_style = "red" if contingent_result.empty else "green"
+    cre_style = "red" if creative_result.empty else "green"
+
+    console.print(Panel(
+        f"[{cur_style}]{current_msg}[/{cur_style}]\n"
+        f"[{con_style}]{contingent_msg}[/{con_style}]\n"
+        f"[{cre_style}]{creative_msg}[/{cre_style}]",
+        title="Phase 1 Qualification Results"
+    ))
+
+
+def display_all_phase1_qualifying_properties(console, df, get_all_phase1_qualifying_properties):
+    current, contingent, creative = get_all_phase1_qualifying_properties()
+
+    display_all_properties(
+        properties_df=current, df=df, title="Phase 1 Criteria Qualifiers - Current Prices", console=console,
+    )
+
+    display_all_properties(
+        properties_df=contingent,
+        df=df,
+        title="Phase 1 Criteria Qualifiers - Contingent on 10% Price Reduction",
+        console=console
+    )
+
+    display_all_properties(
+      properties_df=creative,
+      df=df,
+      title="Phase 1 Criteria Qualifiers - If we rent out additional rooms in our unit",
+      show_min_rent_data=True,
+      console=console
+    )
+
+
+def display_all_phase2_qualifying_properties(console, df, get_all_phase2_properties):
+    dfs = get_all_phase2_properties()
+
+    if len(dfs['incomplete_data']) == 0:
+      console.print("[dim]All properties have complete data![/dim]")
+    else:
+        display_all_properties(console=console, properties_df=dfs["incomplete_data"], df=df, title="Need more data")
+
+    if len(dfs['qualifiers']) == 0:
+      console.print("[dim]No properties qualify[/dim]")
+    else:
+      display_all_properties(console=console, properties_df=dfs["qualifiers"], df=df, title="Phase 2 Qualifiers")
+
+    if len(dfs["disqualifiers"]) == 0:
+      console.print('[dim]No properties are disqualified[/dim]')
+    else:
+      display_all_properties(console=console, properties_df=dfs["disqualifiers"], df=df, title="Phase 2 Disqualifiers")
+
+
+def display_all_properties_info(console, df, properties_df):
+    """Display all properties with basic info: address, sqft, age, units, mobility scores, and electricity cost"""
+    dataframe = df if properties_df is None else properties_df
+    table = Table(
+        title="Properties Basic Information",
+        show_header=True,
+        header_style="bold magenta",
+    )
+
+    built_75th_percentile = dataframe["built_in"].quantile(0.75, skipna=True)
+    built_25th_percentile = dataframe["built_in"].quantile(0.25, skipna=True)
+    sqft_75th_percentile = dataframe["square_ft"].quantile(0.75)
+    sqft_25th_percentile = dataframe["square_ft"].quantile(0.25)
+    walk_75th_percentile = dataframe["walk_score"].quantile(0.75)
+    walk_25th_percentile = dataframe["walk_score"].quantile(0.25)
+    transit_75th_percentile = dataframe["transit_score"].quantile(0.75)
+    transit_25th_percentile = dataframe["transit_score"].quantile(0.25)
+    bike_75th_percentile = dataframe["bike_score"].quantile(0.75)
+    bike_25th_percentile = dataframe["bike_score"].quantile(0.25)
+    elec_75th_percentile = dataframe["annual_electricity_cost_est"].quantile(0.75)
+    elec_25th_percentile = dataframe["annual_electricity_cost_est"].quantile(0.25)
+
+    table.add_column("Address", style="cyan", no_wrap=True)
+    table.add_column("County", style="cyan", no_wrap=True)
+    table.add_column("Schl Dst", style="cyan", no_wrap=True)
+    table.add_column("Sqrft", justify="right", style="green")
+    table.add_column("Built", justify="right", style="yellow")
+    table.add_column("Units", justify="center", style="blue")
+    table.add_column("Walk", justify="right", style="orange3")
+    table.add_column("Transit", justify="right", style="orange3")
+    table.add_column("Bike", justify="right", style="orange3")
+    table.add_column("Elec.", justify="right", style="red")
+    table.add_column("Listed", justify="right", style="white")
+    table.add_column("Reduced Price?", justify="right", style="white")
+    table.add_column("Has tenants?", justify="right", style="white")
+
+    for _, row in dataframe.iterrows():
+        units_value = int(row["units"])
+        if units_value == 0:
+            units_display = "SFH"
+        elif units_value == 2:
+            units_display = "duplex"
+        elif units_value == 3:
+            units_display = "triplex"
+        elif units_value == 4:
+            units_display = "fourplex"
+        else:
+            units_display = str(units_value)
+
+        sqft_style = ("green" if row["square_ft"] >= sqft_75th_percentile else "yellow" if row["square_ft"] >= sqft_25th_percentile else "red")
+
+        built_in_style = (
+            "green"
+            if pd.notna(row["home_age"]) and row["home_age"] <= built_25th_percentile
+            else ("yellow" if pd.notna(row["home_age"]) and row["home_age"] <= built_75th_percentile else "red")
+        )
+        walk_style = (
+            "green"
+            if row["walk_score"] >= walk_75th_percentile
+            else ("yellow" if row["walk_score"] >= walk_25th_percentile else "red")
+        )
+
+        transit_style = (
+            "green"
+            if row["transit_score"] >= transit_75th_percentile
+            else ("yellow" if row["transit_score"] >= transit_25th_percentile else "red")
+        )
+
+        bike_style = (
+            "green"
+            if row["bike_score"] >= bike_75th_percentile
+            else ("yellow" if row["bike_score"] >= bike_25th_percentile else "red")
+        )
+
+        elec_style = (
+            "green"
+            if row["annual_electricity_cost_est"] <= elec_25th_percentile
+            else ("yellow" if row["annual_electricity_cost_est"] <= elec_75th_percentile else "red")
+        )
+
+        table.add_row(
+            str(row["address1"]),
+            row["county"],
+            row["school_district"],
+            f"[{sqft_style}]{int(row['square_ft']):,}[/{sqft_style}]",
+            f"[{built_in_style}]{int(row['built_in']) if pd.notna(row['built_in']) else 'N/A'}[/{built_in_style}]",
+            units_display,
+            f"[{walk_style}]{int(row['walk_score'])}[/{walk_style}]",
+            f"[{transit_style}]{int(row['transit_score'])}[/{transit_style}]",
+            f"[{bike_style}]{int(row['bike_score'])}[/{bike_style}]",
+            f"[{elec_style}]{format_currency(row['annual_electricity_cost_est'])}[/{elec_style}]",
+            row['listed_date'] if pd.notna(row['listed_date']) else 'N/A',
+            str(row["has_reduced_price"]),
+            str(row["has_tenants"]),
+        )
+
+    console.print(table)
+
+
+def display_phase1_total_rent_differences(console, get_combined_phase1_qualifiers):
+    """
+    Display comparison between quick rent estimate and detailed market estimate
+    for Phase 1 properties.
+
+    Green = market estimate higher (conservative quick estimate)
+    Red = market estimate lower (optimistic quick estimate)
+    """
+    # Get Phase 1 qualifiers
+    dataframe = get_combined_phase1_qualifiers(active=True)
+
+    # Handle empty case
+    if len(dataframe) == 0:
+        console.print("[dim]No Phase 1 qualifying properties found[/dim]")
+        return
+
+    # Add calculated columns
+    dataframe['rent_difference'] = dataframe['market_total_rent_estimate'] - dataframe['total_rent']
+    dataframe['rent_difference_percent'] = dataframe.apply(
+        lambda row: row['rent_difference'] / row['total_rent']
+                    if pd.notna(row['total_rent']) and row['total_rent'] != 0
+                    else 0,
+        axis=1
+    )
+
+    dataframe['adjusted_cfy2'] = dataframe['monthly_cash_flow_y2'] + dataframe['rent_difference']
+
+    # Sort by percent difference descending (biggest positive differences first)
+    dataframe = dataframe.sort_values(by='rent_difference_percent', ascending=False)
+
+    # Create Rich table
+    table = Table(
+        title=f"Phase 1 Rent Estimate Comparison ({len(dataframe)} properties)",
+        show_header=True,
+        header_style="bold magenta"
+    )
+
+    # Add columns
+    table.add_column("Address", style="cyan", no_wrap=False)
+    table.add_column("Purchase Price", justify="right")
+    table.add_column("Cash Needed", justify="right")
+    table.add_column("Quick Estimate", justify="right")
+    table.add_column("Market Estimate", justify="right")
+    table.add_column("Difference", justify="right")
+    table.add_column("Percent", justify="right")
+    table.add_column("CFY2", justify="right")
+    table.add_column('Adjusted CFY2', justify="right")
+
+    # Iterate and add rows with color coding
+    for _, row in dataframe.iterrows():
+        diff_value = row['rent_difference']
+        percent_value = row['rent_difference_percent']
+
+        # Color code: green for positive, red for negative
+        if diff_value > 0:
+            diff_display = f"[green]{format_currency(diff_value)}[/green]"
+            percent_display = f"[green]{format_percentage(percent_value)}[/green]"
+        elif diff_value < 0:
+            diff_display = f"[red]{format_currency(diff_value)}[/red]"
+            percent_display = f"[red]{format_percentage(percent_value)}[/red]"
+        else:
+            diff_display = format_currency(diff_value)
+            percent_display = format_percentage(percent_value)
+
+        adj_cfy2_color = "green" if row['adjusted_cfy2'] > 0 else "red"
+        cfy2_color = "green" if row['monthly_cash_flow_y2'] > 0 else "red"
+
+        table.add_row(
+            str(row['address1']),
+            format_currency(row['purchase_price']),
+            format_currency(row['cash_needed']),
+            format_currency(row['total_rent']),
+            format_currency(row['market_total_rent_estimate']),
+            diff_display,
+            percent_display,
+            f"[{cfy2_color}]{format_currency(row['monthly_cash_flow_y2'])}[/{cfy2_color}]",
+            f"[{adj_cfy2_color}]{format_currency(row['adjusted_cfy2'])}[/{adj_cfy2_color}]"
+        )
+
+    # Display table
+    console.print(table)
+
+
+def create_phase1_research_list_table(df, title):
+    """Creates a simplified table for phase 1 tour list display with color styling"""
+    table = Table(title=title, show_header=True, header_style="bold magenta")
+
+    # Add columns with short names
+    table.add_column(f"Address ({len(df)})", style="cyan", no_wrap=False)
+    table.add_column("Neighborhood", style="dim")
+    table.add_column("CFY1", justify="right")
+    table.add_column("CFY2", justify="right")
+    table.add_column("Cash", justify="right")
+    table.add_column("Price", justify="right")
+    table.add_column("Type", justify="center")
+    table.add_column("SqFt", justify="right")
+    table.add_column("Config", justify="center")
+    table.add_column("Cost/Inc", justify="right")
+
+    # Calculate percentiles for price and cash_needed (for styling)
+    price_25 = df['purchase_price'].quantile(0.25)
+    price_75 = df['purchase_price'].quantile(0.75)
+    cash_25 = df['cash_needed'].quantile(0.25)
+    cash_75 = df['cash_needed'].quantile(0.75)
+
+    # Calculate percentiles for new columns (for styling)
+    cost_inc_25 = df['costs_to_income'].quantile(0.25)
+    cost_inc_75 = df['costs_to_income'].quantile(0.75)
+
+    # Add rows
+    for _, row in df.iterrows():
+        # Determine property type
+        units = row['units']
+        if units == 0:
+            prop_type = "SFH"
+        elif units == 2:
+            prop_type = "Duplex"
+        elif units == 3:
+            prop_type = "Triplex"
+        elif units == 4:
+            prop_type = "Fourplex"
+        else:
+            prop_type = f"{units}U"
+
+        # Format configuration (e.g., "4BR/2BA")
+        beds = int(row['beds']) if pd.notna(row['beds']) else 0
+        baths = int(row['baths']) if pd.notna(row['baths']) else 0
+        config = f"{beds}BR/{baths}BA"
+
+        # Style cashflow Y1 (red if negative, green if positive)
+        cfy1_value = row['monthly_cash_flow_y1']
+        if cfy1_value < 0:
+            cfy1_display = f"[red]{format_currency(cfy1_value)}[/red]"
+        else:
+            cfy1_display = f"[green]{format_currency(cfy1_value)}[/green]"
+
+        # Style cashflow Y2 (red if negative, green if positive)
+        cfy2_value = row['monthly_cash_flow_y2']
+        if cfy2_value < 0:
+            cfy2_display = f"[red]{format_currency(cfy2_value)}[/red]"
+        else:
+            cfy2_display = f"[green]{format_currency(cfy2_value)}[/green]"
+
+        # Style cash needed (percentile-based: bottom 25% green, middle yellow, top 25% red)
+        cash_value = row['cash_needed']
+        if cash_value <= cash_25:
+            cash_display = f"[green]{format_currency(cash_value)}[/green]"
+        elif cash_value <= cash_75:
+            cash_display = f"[yellow]{format_currency(cash_value)}[/yellow]"
+        else:
+            cash_display = f"[red]{format_currency(cash_value)}[/red]"
+
+        # Style price (percentile-based: bottom 25% green, middle yellow, top 25% red)
+        price_value = row['purchase_price']
+        if price_value <= price_25:
+            price_display = f"[green]{format_currency(price_value)}[/green]"
+        elif price_value <= price_75:
+            price_display = f"[yellow]{format_currency(price_value)}[/yellow]"
+        else:
+            price_display = f"[red]{format_currency(price_value)}[/red]"
+
+        # Combine grade and neighborhood
+        grade = row['neighborhood_letter_grade'] if pd.notna(row['neighborhood_letter_grade']) else 'N/A'
+        neighborhood = row['neighborhood'] if pd.notna(row['neighborhood']) else 'N/A'
+        neighborhood_display = f"{grade} - {neighborhood}"
+
+        # Style Cost/Income (lower is better: bottom 25% green, middle yellow, top 25% red)
+        cost_inc_value = row['costs_to_income']
+        if cost_inc_value <= cost_inc_25:
+            cost_inc_display = f"[green]{format_percentage(cost_inc_value)}[/green]"
+        elif cost_inc_value <= cost_inc_75:
+            cost_inc_display = f"[yellow]{format_percentage(cost_inc_value)}[/yellow]"
+        else:
+            cost_inc_display = f"[red]{format_percentage(cost_inc_value)}[/red]"
+
+        table.add_row(
+            row['address1'],
+            neighborhood_display,
+            cfy1_display,
+            cfy2_display,
+            cash_display,
+            price_display,
+            prop_type,
+            f"{row['square_ft']}",
+            config,
+            cost_inc_display
+        )
+
+    return table
+
+
+def display_phase1_research_list(console, get_phase1_research_list, get_combined_phase1_qualifiers):
+    tour_list = get_phase1_research_list()
+    all_qualifiers = get_combined_phase1_qualifiers()
+    tour_addresses = tour_list['address1'].tolist()
+    not_on_tour = all_qualifiers[~all_qualifiers['address1'].isin(tour_addresses)].copy()
+    tour_list = tour_list.sort_values(by='neighborhood')
+    not_on_tour = not_on_tour.sort_values(by='neighborhood')
+
+    if len(tour_list) == 0:
+        console.print("[dim]No properties on the tour list yet[/dim]\n")
+    else:
+        table1 = create_phase1_research_list_table(tour_list, "Phase 1 Tour List")
+        console.print(table1)
+        console.print()
+    if len(not_on_tour) == 0:
+        console.print("[dim]All qualifying properties are on the tour list[/dim]\n")
+    else:
+        table2 = create_phase1_research_list_table(not_on_tour, "Phase 1 Qualifying Properties - Not on Tour List")
+        console.print(table2)
+        console.print()
+
+
+def display_property_metrics(console, df, get_combined_phase1_qualifiers, properties_df=None):
+    dataframe = df if properties_df is None else properties_df
+    console.print("\n[bold]Column Key:[/bold]")
+    key_items = [
+        ("ADDR", "Address", "Property location identifier", ""),
+        ("P/DR", "Price Per Door", "Purchase price divided by number of units; measures value per unit", "(lower = better)"),
+        ("R/SF", "Rent Per Sqft", "Monthly rent per square foot; indicates rent efficiency", "(higher = better)"),
+        ("BRKE", "Break-Even Occupancy", "Minimum occupancy % needed to cover all expenses", "(lower = better)"),
+        ("BRKV", "Break-Even Vacancy", "Maximum vacant days while still covering all expenses", "(higher = better)"),
+        ("OER", "Operating Expense Ratio", "Operating expenses as % of revenue; measures efficiency", "(lower = better)"),
+        ("EGI", "Effective Gross Income", "Total annual rental income after vacancy losses", "(higher = better)"),
+        ("DYLD", "Debt Yield", "NOI divided by loan amount; measures lender risk", "(higher = better)"),
+        ("DEPR", "Monthly Depreciation", "Tax deduction from property depreciation over 27.5 years", "(higher = better)"),
+        ("TAXS", "Monthly Tax Savings", "Tax savings from depreciation and expense deductions", "(higher = better)"),
+        ("ATCY1", "After-Tax Cash Flow Y1", "Monthly cash flow after tax benefits in Year 1", "(higher = better)"),
+        ("ATCY2", "After-Tax Cash Flow Y2", "Monthly cash flow after tax benefits in Year 2", "(higher = better)"),
+        ("FV10", "Future Value 10yr", "Estimated property value after 10 years of appreciation", "(higher = better)"),
+        ("NP10", "Net Proceeds 10yr", "Cash from sale after closing costs, loan payoff, and taxes", "(higher = better)"),
+        ("EM10", "Equity Multiple 10yr", "Total return as multiple of initial cash invested", "(higher = better)"),
+        ("AR10", "Avg Annual Return 10yr", "Average yearly return percentage over 10 years", "(higher = better)"),
+        ("ROE", "Return on Equity Y2", "Annual return on equity investment in Year 2", "(higher = better)"),
+        ("LEVB", "Leverage Benefit", "Return boost from using debt financing vs all-cash purchase", "(higher = better)"),
+        ("PAYB", "Payback Period", "Years needed to recover initial cash investment", "(lower = better)"),
+        ("IR10", "IRR 10yr", "Internal rate of return accounting for cash flows and sale proceeds", "(higher = better)"),
+        ("NPV10", "NPV 10yr", "Net present value at discount rate; answers: does this beat market returns?", "(positive = beats market)"),
+        ("CFDN", "Cash Flow Y2 Downside 10%", "Monthly cash flow if rents drop 10%; tests resilience", "(positive = resilient)")
+    ]
+
+    for code, name, description, direction in key_items:
+        direction_text = f" [yellow]{direction}[/yellow]" if direction else ""
+        console.print(f"  [red]{code}[/red] - [bold]{name}[/bold]: [dim cyan]{description}[/dim cyan]{direction_text}")
+
+    table = Table(title="Investment Metrics Comparison", show_header=True, header_style="bold magenta")
+    table.add_column("ADDR", style="cyan")
+    table.add_column("P/DR", justify="right")
+    table.add_column("R/SF", justify="right")
+    table.add_column("BRKE", justify="right")
+    table.add_column("BRKV", justify="right")
+    table.add_column("OER", justify="right")
+    table.add_column("EGI", justify="right")
+    table.add_column("DYLD", justify="right")
+    table.add_column("DEPR", justify="right")
+    table.add_column("TAXS", justify="right")
+    table.add_column("ATCY1", justify="right")
+    table.add_column("ATCY2", justify="right")
+    table.add_column("FV10", justify="right")
+    table.add_column("NP10", justify="right")
+    table.add_column("EM10", justify="right")
+    table.add_column("AR10", justify="right")
+    table.add_column("ROE", justify="right")
+    table.add_column("LEVB", justify="right")
+    table.add_column("PAYB", justify="right")
+    table.add_column("IR10", justify="right")
+    table.add_column("NPV10", justify="right")
+    table.add_column("CFDN", justify="right")
+
+    # Calculate quintile colors for ALL properties
+    color_map = calculate_quintile_colors_for_metrics(dataframe)
+
+    phase1 = get_combined_phase1_qualifiers()
+    not_phase1 = dataframe[~dataframe['address1'].isin(phase1['address1'])]
+
+    def add_rows(given_table, given_df):
+        for _, row in given_df.iterrows():
+            address = row["address1"]
+
+            # Helper function to apply color to a value
+            def colorize(value, metric_name):
+                color = color_map.get((address, metric_name), 'white')
+                return f"[{color}]{value}[/{color}]"
+
+            # Format values (same as before)
+            payback_display = f"{row['payback_period_years']:.1f} yr" if row['payback_period_years'] != float('inf') else "Never"
+            break_even_display = format_percentage(row["break_even_occupancy"]) if row["break_even_occupancy"] < 1 else "---"
+            break_v_display = express_percent_as_months_and_days(row["break_even_vacancy"]) if row["break_even_occupancy"] < 1 else "---"
+
+            # Add row with colored values
+            given_table.add_row(
+                str(address),
+                colorize(format_currency(row['price_per_door']), 'price_per_door'),
+                colorize(format_currency(row['rent_per_sqft']), 'rent_per_sqft'),
+                colorize(break_even_display, 'break_even_occupancy'),
+                colorize(break_v_display, 'break_even_vacancy'),
+                colorize(format_percentage(row['oer']), 'oer'),
+                colorize(format_currency(row['egi']), 'egi'),
+                colorize(format_percentage(row['debt_yield']), 'debt_yield'),
+                colorize(format_currency(row['monthly_depreciation']), 'monthly_depreciation'),
+                colorize(format_currency(row['tax_savings_monthly']), 'tax_savings_monthly'),
+                colorize(format_currency(row['after_tax_cash_flow_y1']), 'after_tax_cash_flow_y1'),
+                colorize(format_currency(row['after_tax_cash_flow_y2']), 'after_tax_cash_flow_y2'),
+                colorize(format_currency(row['future_value_10yr']), 'future_value_10yr'),
+                colorize(format_currency(row['net_proceeds_10yr']), 'net_proceeds_10yr'),
+                colorize(format_number(row['equity_multiple_10yr']), 'equity_multiple_10yr'),
+                colorize(format_percentage(row['avg_annual_return_10yr'] / 100), 'avg_annual_return_10yr'),
+                colorize(format_percentage(row['roe_y2']), 'roe_y2'),
+                colorize(format_percentage(row['leverage_benefit']), 'leverage_benefit'),
+                colorize(payback_display, 'payback_period_years'),
+                colorize(format_percentage(row['irr_10yr']), 'irr_10yr'),
+                colorize(format_currency(row['npv_10yr']), 'npv_10yr'),
+                colorize(format_currency(row['cash_flow_y2_downside_10pct']), 'cash_flow_y2_downside_10pct')
+            )
+
+    table.add_row("[white]PHASE 1 QUALIFIERS[/white]")
+    add_rows(given_table=table, given_df=phase1)
+    table.add_section()
+    table.add_row("[white]PHASE 1 DISQUALIFIED[/white]")
+    add_rows(given_table=table, given_df=not_phase1)
     console.print(table)
