@@ -186,3 +186,64 @@ def handle_extract_neighborhood_grade(property_id: str, supabase, console, neigh
         console.print(
             f"[red]Error extracting neighborhood letter grade: {str(e)}[/red]"
         )
+
+def handle_rent_research_generation(property_id: str, supabase, console, handle_generate_rent_estimates_func):
+    researcher = RentResearcher(supabase, console)
+
+    try:
+        report_id = researcher.generate_rent_research(property_id)
+
+        if report_id:
+            console.print(f"[green]✅ Research completed! Report ID: {report_id}[/green]")
+
+            view_now = questionary.confirm("Would you like to view the report now?").ask()
+
+            if view_now:
+                report_data = researcher.get_report_by_id(report_id)
+                if report_data:
+                    researcher.display_report(report_data['report_content'])
+
+            extract_estimates = questionary.confirm(
+                "Would you like to extract rent estimates from this report?"
+            ).ask()
+
+            if extract_estimates:
+                handle_generate_rent_estimates_func(property_id, report_id=report_id)
+        else:
+            console.print("[red]❌ Research generation failed.[/red]")
+
+    except Exception as e:
+        console.print(f"[red]Error during research generation: {str(e)}[/red]")
+
+def handle_status_change(property_id, supabase):
+    options = ["pending sale", "active", "passed", "sold", "off market"]
+    new_status = questionary.select("Price cut amount", choices=options).ask()
+    try:
+        query = (
+            supabase.table("properties")
+            .update({"status": new_status})
+            .eq("address1", property_id)
+        )
+        response = query.execute()
+        if hasattr(response, "data"):
+            print(f"Updated property data with status: {response.data}")
+        else:
+            print("Update response has no 'data' attribute")
+    except Exception as e:
+        print(f"Changing statusfor {property_id} failed: {str(e)}")
+
+def handle_price_cut(property_id, current_price, supabase):
+    amount = questionary.text("Price cut amount").ask()
+    new_price = int(int(current_price) - int(amount))
+    try:
+      query = supabase.table("properties").update({
+          "purchase_price": new_price,
+          "has_reduced_price": True
+      }).eq("address1", property_id)
+      response = query.execute()
+      if hasattr(response, "data"):
+          print(f"Updated property data with new reduced price: {response.data}")
+      else:
+          print("Update response has no 'data' attribute")
+    except Exception as e:
+        print(f"Reducing price for {property_id} failed: {str(e)}")

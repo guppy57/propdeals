@@ -15,6 +15,9 @@ from handlers import (
     handle_neighborhood_analysis,
     handle_changing_loan,
     handle_extract_neighborhood_grade,
+    handle_rent_research_generation,
+    handle_status_change,
+    handle_price_cut
 )
 from display import (
     display_all_phase1_qualifying_properties,
@@ -432,35 +435,6 @@ def get_reduced_pp_df(reduction_factor):
     dataframe = apply_calculations_on_dataframe(df=dataframe)
     return dataframe
 
-def handle_price_cut(property_id, current_price):
-    amount = questionary.text("Price cut amount").ask()
-    new_price = int(int(current_price) - int(amount))
-    try:
-      query = supabase.table("properties").update({
-          "purchase_price": new_price,
-          "has_reduced_price": True
-      }).eq("address1", property_id)
-      response = query.execute()
-      if hasattr(response, "data"):
-          print(f"Updated property data with new reduced price: {response.data}")
-      else:
-          print("Update response has no 'data' attribute")
-    except Exception as e:
-        print(f"Reducing price for {property_id} failed: {str(e)}")
-
-def handle_status_change(property_id): 
-    options = ["pending sale", "active", "passed", "sold", "off market"]
-    new_status = questionary.select("Price cut amount", choices=options).ask()
-    try:
-      query = supabase.table("properties").update({ "status": new_status }).eq("address1", property_id)
-      response = query.execute()
-      if hasattr(response, "data"):
-          print(f"Updated property data with status: {response.data}")
-      else:
-          print("Update response has no 'data' attribute")
-    except Exception as e:
-        print(f"Changing statusfor {property_id} failed: {str(e)}")
-
 def analyze_property(property_id):
     """Display detailed analysis for a single property"""
     row = df[df['address1'] == property_id].iloc[0]
@@ -821,7 +795,7 @@ def analyze_property(property_id):
     elif research_choice == "Edit neighborhood assessment":
         edit_neighborhood_assessment(property_id, supabase, console)
     elif research_choice == "Generate new rent research":
-        handle_rent_research_generation(property_id)
+        handle_rent_research_generation(property_id, supabase, console, handle_generate_rent_estimates)
     elif research_choice == "View existing research reports":
         handle_view_research_reports(property_id)
     elif research_choice == "Generate rent estimates from report":
@@ -837,11 +811,11 @@ def analyze_property(property_id):
         handle_extract_neighborhood_grade(property_id, supabase, console, neighborhoods)
         reload_dataframe()
     elif research_choice == "Record price cut":
-        handle_price_cut(property_id, row["purchase_price"])
+        handle_price_cut(property_id, row["purchase_price"], supabase)
         reload_dataframe()
         display_new_property_qualification(console, property_id, get_all_phase1_qualifying_properties)
     elif research_choice == "Change status":
-        handle_status_change(property_id)
+        handle_status_change(property_id, supabase)
         reload_dataframe()
     elif research_choice == "Export property analysis to PDF":
         downloads_folder = os.getenv("DOWNLOADS_FOLDER", ".")
@@ -871,38 +845,6 @@ def analyze_property(property_id):
 
         result_path = export_property_analysis(row, rents, ASSUMPTIONS['after_tax_monthly_income'], loan_info, assumptions_info, output_path)
         console.print(f"[green]PDF exported successfully to: {result_path}[/green]")
-
-
-
-
-
-def handle_rent_research_generation(property_id: str):
-    researcher = RentResearcher(supabase, console)
-    
-    try:
-        report_id = researcher.generate_rent_research(property_id)
-        
-        if report_id:
-            console.print(f"[green]✅ Research completed! Report ID: {report_id}[/green]")
-            
-            view_now = questionary.confirm("Would you like to view the report now?").ask()
-            
-            if view_now:
-                report_data = researcher.get_report_by_id(report_id)
-                if report_data:
-                    researcher.display_report(report_data['report_content'])
-            
-            extract_estimates = questionary.confirm(
-                "Would you like to extract rent estimates from this report?"
-            ).ask()
-
-            if extract_estimates:
-                handle_generate_rent_estimates(property_id, report_id=report_id)
-        else:
-            console.print("[red]❌ Research generation failed.[/red]")
-            
-    except Exception as e:
-        console.print(f"[red]Error during research generation: {str(e)}[/red]")
 
 def handle_view_research_reports(property_id: str):
     researcher = RentResearcher(supabase, console)
