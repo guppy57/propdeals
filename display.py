@@ -25,14 +25,8 @@ def display_all_properties(
     if sort_by == "units":
         dataframe = dataframe.sort_values(by="units")
     elif sort_by == "y2_cf":
-        dataframe = dataframe.sort_values(by="monthly_cash_flow_y2")
+        dataframe = dataframe.sort_values(by="monthly_cash_flow")
     table = Table(title=title, show_header=True, header_style="bold magenta")
-    mobility_75th_percentile = df["mobility_score"].quantile(0.75)
-    mobility_25th_percentile = df["mobility_score"].quantile(0.25)
-    forecast_10y_75th_percentile = df["10y_forecast"].quantile(0.75)
-    forecast_10y_25th_percentile = df["10y_forecast"].quantile(0.25)
-    irr_10yr_75th_percentile = df["irr_10yr"].quantile(0.75)
-    irr_10yr_25th_percentile = df["irr_10yr"].quantile(0.25)
     price_20th = dataframe["purchase_price"].quantile(0.20)
     price_40th = dataframe["purchase_price"].quantile(0.40)
     price_60th = dataframe["purchase_price"].quantile(0.60)
@@ -65,21 +59,8 @@ def display_all_properties(
     table.add_column("Price", justify="right", no_wrap=True)
     table.add_column("Cash Needed", justify="right")
     table.add_column("Costs/mo", justify="right", style="yellow")
-    table.add_column("CF/mo Y1", justify="right", no_wrap=True)
-    table.add_column("CF/mo Y2", justify="right", no_wrap=True)
-    # table.add_column("NOI Y2", justify="right", style="yellow")
-    # table.add_column("CapR Y1", justify="right", style="blue")
-    # table.add_column("CapR Y2", justify="right", style="blue")
-    # table.add_column("CoC Y2", justify="right", style="purple")
-    # table.add_column("1% Rule", justify="right", style="cyan")
-    # table.add_column("50% Rule", justify="right", style="magenta")
-    # table.add_column("DSCR", justify="right", style="blue")
+    table.add_column("CF", justify="right", no_wrap=True)
     table.add_column("Cost/Inc", justify="right", style="bold white")
-    # table.add_column("DS", justify="right", style="bold white")  # deal score
-    # table.add_column("MS", justify="right", style="bold white")  # mobility score
-    # table.add_column("10Y", justify="right", style="bold white")  # 10 year investment growth
-    table.add_column("IRR 10Y", justify="right", style="bold white")
-    # table.add_column("NPV10Y", justify="right", style="bold white") # Net present value 10 years
 
     if show_status:
         table.add_column("Status", justify="right", style="bold white")
@@ -90,42 +71,7 @@ def display_all_properties(
         table.add_column("Add. Rent", justify="right", style="bold white")
 
     for _, row in dataframe.iterrows():
-        cf_y1_style = "red" if row["monthly_cash_flow_y1"] < 0 else "green"
-        cf_y2_style = "red" if row["monthly_cash_flow_y2"] < 0 else "green"
-
-        noi_style = "red" if row["monthly_NOI_y2"] < 0 else "green"
-
-        opex_rent_style = (
-            "green"
-            if 0.45 <= row["OpEx_Rent"] <= 0.55
-            else ("yellow" if 0.35 <= row["OpEx_Rent"] <= 0.65 else "red")
-        )
-        dscr_style = "green" if row["DSCR"] >= 1.25 else "red"
-        mgr_pp_style = "green" if row["MGR_PP"] >= 0.01 else "red"
-
-        mobility_score_style = (
-            "green"
-            if row["mobility_score"] >= mobility_75th_percentile
-            else (
-                "yellow" if row["mobility_score"] >= mobility_25th_percentile else "red"
-            )
-        )
-
-        forecast_10y_style = (
-            "green"
-            if row["10y_forecast"] >= forecast_10y_75th_percentile
-            else (
-                "yellow"
-                if row["10y_forecast"] >= forecast_10y_25th_percentile
-                else "red"
-            )
-        )
-
-        irr_10yr_style = (
-            "green"
-            if row["irr_10yr"] >= irr_10yr_75th_percentile
-            else ("yellow" if row["irr_10yr"] >= irr_10yr_25th_percentile else "red")
-        )
+        cf_style = "red" if row["monthly_cash_flow"] < 0 else "green"
 
         price_style = get_quintile_color(
             row["purchase_price"], price_20th, price_40th, price_60th, price_80th
@@ -144,8 +90,6 @@ def display_all_properties(
             )
         )
 
-        npv_style = "red" if row["npv_10yr"] <= 0 else "green"
-
         prop_types = {0: "SFH", 2: "2PX", 3: "3PX", 4: "4PX"}
         prop_type_styles = {0: "yellow", 2: "red", 3: "blue", 4: "green"}
 
@@ -159,21 +103,9 @@ def display_all_properties(
             [
                 f"[{price_style}]{format_currency(row['purchase_price'])}[/{price_style}]",
                 f"[{cash_style}]{format_currency(row['cash_needed'])}[/{cash_style}]",
-                format_currency(row["total_monthly_cost_y2"]),
-                f"[{cf_y1_style}]{format_currency(row['monthly_cash_flow_y1'])}[/{cf_y1_style}]",
-                f"[{cf_y2_style}]{format_currency(row['monthly_cash_flow_y2'])}[/{cf_y2_style}]",
-                # f"[{noi_style}]{format_currency(row['monthly_NOI_y2'])}[/{noi_style}]",
-                # format_percentage(row["cap_rate_y1"]),
-                # format_percentage(row["cap_rate_y2"]),
-                # format_percentage(row["CoC_y2"]),
-                # f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
-                # f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
-                # f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
+                format_currency(row["total_monthly_cost"]),
+                f"[{cf_style}]{format_currency(row['monthly_cash_flow'])}[/{cf_style}]",
                 f"[{costs_to_income_style}]{format_percentage(row['costs_to_income'])}[/{costs_to_income_style}]",
-                # f"[{mobility_score_style}]{int(row['mobility_score'])}[/{mobility_score_style}]",
-                # f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]",
-                f"[{irr_10yr_style}]{format_percentage(row['irr_10yr'])}[/{irr_10yr_style}]",
-                # f"[{npv_style}]{format_currency(row["npv_10yr"])}[/{npv_style}]"
             ]
         )
 
@@ -195,7 +127,7 @@ def display_y2_calculations(console, df, properties_df=None):
     dataframe = df if properties_df is None else properties_df
     dataframe = dataframe.sort_values(by="units")  # Default sort
 
-    table = Table(title="Y2 Property Calculations", show_header=True, header_style="bold magenta")
+    table = Table(title="Property Calculations (without Market Rent)", show_header=True, header_style="bold magenta")
 
     # Add columns
     table.add_column("Address", style="cyan", no_wrap=True)
@@ -207,14 +139,14 @@ def display_y2_calculations(console, df, properties_df=None):
     table.add_column("Monthly MIP", justify="right", style="red")
     table.add_column("Monthly Taxes", justify="right", style="red")
     table.add_column("Monthly Insurance", justify="right", style="red")
-    table.add_column("Y2 Repair Cost", justify="right", style="yellow")
-    table.add_column("Y2 Vacancy Reserve", justify="right", style="yellow")
-    table.add_column("Monthly CF Y2", justify="right")
+    table.add_column("Repair Cost", justify="right", style="yellow")
+    table.add_column("Vacancy Reserve", justify="right", style="yellow")
+    table.add_column("Monthly CF", justify="right")
 
     # Iterate and add rows
     for _, row in dataframe.iterrows():
         # Determine cashflow color
-        cf_y2_style = "red" if row["monthly_cash_flow_y2"] < 0 else "green"
+        cf_style = "red" if row["monthly_cash_flow"] < 0 else "green"
 
         # Build row with formatted values
         row_args = [
@@ -227,9 +159,9 @@ def display_y2_calculations(console, df, properties_df=None):
             format_currency(row["monthly_mip"]),
             format_currency(row["monthly_taxes"]),
             format_currency(row["monthly_insurance"]),
-            format_currency(row["monthly_repair_costs_y2"]),
-            format_currency(row["monthly_vacancy_costs_y2"]),
-            f"[{cf_y2_style}]{format_currency(row['monthly_cash_flow_y2'])}[/{cf_y2_style}]"
+            format_currency(row["monthly_repair_costs"]),
+            format_currency(row["monthly_vacancy_costs"]),
+            f"[{cf_style}]{format_currency(row['monthly_cash_flow'])}[/{cf_style}]"
         ]
 
         table.add_row(*row_args)
@@ -425,7 +357,7 @@ def display_phase1_total_rent_differences(console, get_combined_phase1_qualifier
         axis=1
     )
 
-    dataframe['adjusted_cfy2'] = dataframe['monthly_cash_flow_y2'] + dataframe['rent_difference']
+    dataframe['adjusted_cf'] = dataframe['monthly_cash_flow'] + dataframe['rent_difference']
 
     # Sort by percent difference descending (biggest positive differences first)
     dataframe = dataframe.sort_values(by='rent_difference_percent', ascending=False)
@@ -445,8 +377,8 @@ def display_phase1_total_rent_differences(console, get_combined_phase1_qualifier
     table.add_column("Market Estimate", justify="right")
     table.add_column("Difference", justify="right")
     table.add_column("Percent", justify="right")
-    table.add_column("CFY2", justify="right")
-    table.add_column('Adjusted CFY2', justify="right")
+    table.add_column("CF", justify="right")
+    table.add_column('Adjusted CF', justify="right")
 
     # Iterate and add rows with color coding
     for _, row in dataframe.iterrows():
@@ -464,8 +396,8 @@ def display_phase1_total_rent_differences(console, get_combined_phase1_qualifier
             diff_display = format_currency(diff_value)
             percent_display = format_percentage(percent_value)
 
-        adj_cfy2_color = "green" if row['adjusted_cfy2'] > 0 else "red"
-        cfy2_color = "green" if row['monthly_cash_flow_y2'] > 0 else "red"
+        adj_cf_color = "green" if row['adjusted_cf'] > 0 else "red"
+        cf_color = "green" if row['monthly_cash_flow'] > 0 else "red"
 
         table.add_row(
             str(row['address1']),
@@ -475,11 +407,10 @@ def display_phase1_total_rent_differences(console, get_combined_phase1_qualifier
             format_currency(row['market_total_rent_estimate']),
             diff_display,
             percent_display,
-            f"[{cfy2_color}]{format_currency(row['monthly_cash_flow_y2'])}[/{cfy2_color}]",
-            f"[{adj_cfy2_color}]{format_currency(row['adjusted_cfy2'])}[/{adj_cfy2_color}]"
+            f"[{cf_color}]{format_currency(row['monthly_cash_flow'])}[/{cf_color}]",
+            f"[{adj_cf_color}]{format_currency(row['adjusted_cf'])}[/{adj_cf_color}]"
         )
 
-    # Display table
     console.print(table)
 
 
@@ -490,8 +421,7 @@ def create_phase1_research_list_table(df, title):
     # Add columns with short names
     table.add_column(f"Address ({len(df)})", style="cyan", no_wrap=False)
     table.add_column("Neighborhood", style="dim")
-    table.add_column("CFY1", justify="right")
-    table.add_column("CFY2", justify="right")
+    table.add_column("CF", justify="right")
     table.add_column("Cash", justify="right")
     table.add_column("Price", justify="right")
     table.add_column("Type", justify="center")
@@ -524,26 +454,16 @@ def create_phase1_research_list_table(df, title):
         else:
             prop_type = f"{units}U"
 
-        # Format configuration (e.g., "4BR/2BA")
         beds = int(row['beds']) if pd.notna(row['beds']) else 0
         baths = int(row['baths']) if pd.notna(row['baths']) else 0
         config = f"{beds}BR/{baths}BA"
 
-        # Style cashflow Y1 (red if negative, green if positive)
-        cfy1_value = row['monthly_cash_flow_y1']
-        if cfy1_value < 0:
-            cfy1_display = f"[red]{format_currency(cfy1_value)}[/red]"
+        cf_value = row['monthly_cash_flow']
+        if cf_value < 0:
+            cf_display = f"[red]{format_currency(cf_value)}[/red]"
         else:
-            cfy1_display = f"[green]{format_currency(cfy1_value)}[/green]"
+            cf_display = f"[green]{format_currency(cf_value)}[/green]"
 
-        # Style cashflow Y2 (red if negative, green if positive)
-        cfy2_value = row['monthly_cash_flow_y2']
-        if cfy2_value < 0:
-            cfy2_display = f"[red]{format_currency(cfy2_value)}[/red]"
-        else:
-            cfy2_display = f"[green]{format_currency(cfy2_value)}[/green]"
-
-        # Style cash needed (percentile-based: bottom 25% green, middle yellow, top 25% red)
         cash_value = row['cash_needed']
         if cash_value <= cash_25:
             cash_display = f"[green]{format_currency(cash_value)}[/green]"
@@ -552,7 +472,6 @@ def create_phase1_research_list_table(df, title):
         else:
             cash_display = f"[red]{format_currency(cash_value)}[/red]"
 
-        # Style price (percentile-based: bottom 25% green, middle yellow, top 25% red)
         price_value = row['purchase_price']
         if price_value <= price_25:
             price_display = f"[green]{format_currency(price_value)}[/green]"
@@ -561,12 +480,10 @@ def create_phase1_research_list_table(df, title):
         else:
             price_display = f"[red]{format_currency(price_value)}[/red]"
 
-        # Combine grade and neighborhood
         grade = row['neighborhood_letter_grade'] if pd.notna(row['neighborhood_letter_grade']) else 'N/A'
         neighborhood = row['neighborhood'] if pd.notna(row['neighborhood']) else 'N/A'
         neighborhood_display = f"{grade} - {neighborhood}"
 
-        # Style Cost/Income (lower is better: bottom 25% green, middle yellow, top 25% red)
         cost_inc_value = row['costs_to_income']
         if cost_inc_value <= cost_inc_25:
             cost_inc_display = f"[green]{format_percentage(cost_inc_value)}[/green]"
@@ -578,8 +495,7 @@ def create_phase1_research_list_table(df, title):
         table.add_row(
             row['address1'],
             neighborhood_display,
-            cfy1_display,
-            cfy2_display,
+            cf_display,
             cash_display,
             price_display,
             prop_type,
@@ -701,8 +617,8 @@ def display_property_metrics(console, df, get_combined_phase1_qualifiers, proper
                 colorize(format_percentage(row['debt_yield']), 'debt_yield'),
                 colorize(format_currency(row['monthly_depreciation']), 'monthly_depreciation'),
                 colorize(format_currency(row['tax_savings_monthly']), 'tax_savings_monthly'),
-                colorize(format_currency(row['after_tax_cash_flow_y1']), 'after_tax_cash_flow_y1'),
-                colorize(format_currency(row['after_tax_cash_flow_y2']), 'after_tax_cash_flow_y2'),
+                colorize(format_currency(row['mr_after_tax_cash_flow_y1']), 'mr_after_tax_cash_flow_y1'),
+                colorize(format_currency(row['mr_after_tax_cash_flow_y2']), 'mr_after_tax_cash_flow_y2'),
                 colorize(format_currency(row['future_value_10yr']), 'future_value_10yr'),
                 colorize(format_currency(row['net_proceeds_10yr']), 'net_proceeds_10yr'),
                 colorize(format_number(row['equity_multiple_10yr']), 'equity_multiple_10yr'),

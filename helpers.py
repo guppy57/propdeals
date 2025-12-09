@@ -223,8 +223,8 @@ def is_property_assessment_done_vectorized(df: pd.DataFrame) -> pd.Series:
 def get_expected_gains(row, length_years, assumptions, loan):
     current_home_value = row["purchase_price"]
     loan_amount = row["loan_amount"]
-    y1_cashflow = row["annual_cash_flow_y1"]
-    y2_cashflow = row["annual_cash_flow_y2"]
+    y1_cashflow = row["mr_annual_cash_flow_y1"]
+    y2_cashflow = row["mr_annual_cash_flow_y2"]
 
     # Year 1 is the base year (no appreciation applied)
     cumulative_cashflow = y1_cashflow
@@ -250,18 +250,18 @@ def get_expected_gains(row, length_years, assumptions, loan):
 
 def calculate_payback_period(row):
     """Calculate payback period accounting for Year 1 losses"""
-    if row["annual_cash_flow_y1"] < 0:
+    if row["mr_annual_cash_flow_y1"] < 0:
         # Year 1 we lose money, need to recover initial investment + Year 1 losses
-        total_to_recover = row["cash_needed"] + abs(row["annual_cash_flow_y1"])
+        total_to_recover = row["cash_needed"] + abs(row["mr_annual_cash_flow_y1"])
     else:
         # Year 1 profitable, deduct from recovery needed
-        total_to_recover = row["cash_needed"] - row["annual_cash_flow_y1"]
+        total_to_recover = row["cash_needed"] - row["mr_annual_cash_flow_y1"]
 
-    if row["annual_cash_flow_y2"] <= 0:
+    if row["mr_annual_cash_flow_y2"] <= 0:
         return float("inf")  # Never pays back
 
     # +1 for Year 1 already passed
-    payback_years = 1 + (total_to_recover / row["annual_cash_flow_y2"])
+    payback_years = 1 + (total_to_recover / row["mr_annual_cash_flow_y2"])
     return payback_years
 
 def get_state_tax_rate(state_code):
@@ -324,11 +324,11 @@ def calculate_irr(row, years, assumptions):
         cash_flows = [-row["cash_needed"]]  # Year 0: initial investment (outflow)
 
         # Year 1 cash flow
-        cash_flows.append(row["annual_cash_flow_y1"])
+        cash_flows.append(row["mr_annual_cash_flow_y1"])
 
         # Years 2 through N: compounded with rent appreciation
         for year in range(2, years + 1):
-            yearly_cashflow = row["annual_cash_flow_y2"] * (
+            yearly_cashflow = row["mr_annual_cash_flow_y2"] * (
                 (1 + assumptions['rent_appreciation_rate']) ** (year - 2)
             )
             cash_flows.append(yearly_cashflow)
@@ -350,11 +350,11 @@ def calculate_npv(row, years, assumptions):
         cash_flows = [-row["cash_needed"]]  # Year 0: initial investment (outflow)
 
         # Year 1 cash flow
-        cash_flows.append(row["annual_cash_flow_y1"])
+        cash_flows.append(row["mr_annual_cash_flow_y1"])
 
         # Years 2 through N: compounded with rent appreciation
         for year in range(2, years + 1):
-            yearly_cashflow = row["annual_cash_flow_y2"] * (
+            yearly_cashflow = row["mr_annual_cash_flow_y2"] * (
                 (1 + assumptions['rent_appreciation_rate']) ** (year - 2)
             )
             cash_flows.append(yearly_cashflow)
@@ -393,7 +393,7 @@ def calculate_roe(row, loan):
 
     # ROE = Annual cash flow Y2 / Current equity
     if current_equity > 0:
-        return row["annual_cash_flow_y2"] / current_equity
+        return row["mr_annual_cash_flow_y2"] / current_equity
     return 0
 
 def calculate_additional_room_rent(row):

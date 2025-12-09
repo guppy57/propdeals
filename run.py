@@ -117,8 +117,6 @@ def load_loan(loan_id):
     console.print("[green]Loan data reloaded successfully![/green]")
 
 def apply_calculations_on_dataframe(df):
-    state_rate = get_state_tax_rate(ASSUMPTIONS['state_tax_code'])
-    combined_tax_rate = FEDERAL_TAX_RATE + state_rate
     cols = ["walk_score", "transit_score", "bike_score"]
     df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
     df[cols] = df[cols].fillna(0)
@@ -136,65 +134,56 @@ def apply_calculations_on_dataframe(df):
     df["quick_monthly_rent_estimate"] = (df["purchase_price"] + df["closing_costs"]) * 0.0075
     df['ammoritization_estimate'] = (df['loan_amount'] * 0.017) / 12
     df["total_rent"] = df['quick_monthly_rent_estimate']
-    df["my_rent"] = df['quick_monthly_rent_estimate'] * 0.25 # quick and dirty calculation
-    df["net_rent_y1"] = df['total_rent'] - df['my_rent']
-    df["annual_rent_y1"] = df["net_rent_y1"] * 12
+    df["annual_rent"] = df["total_rent"] * 12
     # Year 1 operating expenses (before changing total_rent for SFH)
     # For SFH: uses aggregated per-room rent (house-hacking scenario)
     # For multi-family: uses total rent from all units
-    df["monthly_vacancy_costs_y1"] = df["total_rent"] * ASSUMPTIONS['vacancy_rate']
-    df["monthly_repair_costs_y1"] = df["total_rent"] * ASSUMPTIONS['repair_savings_rate']
-    df["operating_expenses_y1"] = df["monthly_vacancy_costs_y1"] + df["monthly_repair_costs_y1"] + df["monthly_taxes"] + df["monthly_insurance"]
-    # For single family homes (units == 0): switch total_rent from aggregated per-room to whole-property rent
-    # This affects all Year 2 calculations and Y2-based metrics below
-    # Only update where rent_estimate is not null; otherwise keep aggregated per-room rent
-    # mask = (df["units"] == 0) & (df["rent_estimate"].notna())
-    # df.loc[mask, "total_rent"] = df.loc[mask, "rent_estimate"].astype(float)
-    df["annual_rent_y2"] = df["total_rent"] * 12
-    # Year 2 operating expenses (after changing total_rent for SFH)
-    # For SFH: uses whole-property rent (full rental scenario)
-    # For multi-family: uses total rent from all units (same as Y1)
-    df["monthly_vacancy_costs_y2"] = df["total_rent"] * ASSUMPTIONS['vacancy_rate']
-    df["monthly_repair_costs_y2"] = df["total_rent"] * ASSUMPTIONS['repair_savings_rate']
-    df["operating_expenses_y2"] = df["monthly_vacancy_costs_y2"] + df["monthly_repair_costs_y2"] + df["monthly_taxes"] + df["monthly_insurance"]
-    # Total monthly cost uses Y2 operating expenses (conservative for Y1, accurate for Y2)
-    df["total_monthly_cost_y1"] = df["monthly_mortgage"] + df["monthly_mip"] + df["operating_expenses_y1"]
-    df["total_monthly_cost_y2"] = df["monthly_mortgage"] + df["monthly_mip"] + df["operating_expenses_y2"]
-    df["monthly_NOI_y2"] = df["total_rent"] - df["operating_expenses_y2"]
-    df["monthly_NOI_y1"] = df["net_rent_y1"] - df["operating_expenses_y1"]
-    df["annual_NOI_y1"] = df["monthly_NOI_y1"] * 12
-    df["annual_NOI_y2"] = df["monthly_NOI_y2"] * 12
-    df["monthly_cash_flow_y1"] = df["net_rent_y1"] - df["total_monthly_cost_y1"] + df['ammoritization_estimate']
-    df["monthly_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost_y2"] + df['ammoritization_estimate']
-    df["annual_cash_flow_y1"] = df["monthly_cash_flow_y1"] * 12
-    df["annual_cash_flow_y2"] = df["monthly_cash_flow_y2"] * 12
+    df["monthly_vacancy_costs"] = df["total_rent"] * ASSUMPTIONS['vacancy_rate']
+    df["monthly_repair_costs"] = df["total_rent"] * ASSUMPTIONS['repair_savings_rate']
+    df["operating_expenses"] = df["monthly_vacancy_costs"] + df["monthly_repair_costs"] + df["monthly_taxes"] + df["monthly_insurance"]
+    df["total_monthly_cost"] = df["monthly_mortgage"] + df["monthly_mip"] + df["operating_expenses"]
+    df["monthly_cash_flow"] = df["total_rent"] - df["total_monthly_cost"] + df['ammoritization_estimate']
+    df["annual_cash_flow"] = df["monthly_cash_flow"] * 12
+    return df
 
-
-    # all of these calculations for investmentment metrics are useful if you use the quick and dirty rent estimate
-    # so instead, these have to use the ESTIMATED MARKET RENT
-
-    df["cap_rate_y1"] = df["annual_NOI_y1"] / df["purchase_price"]
-    df["cap_rate_y2"] = df["annual_NOI_y2"] / df["purchase_price"]
-    df["CoC_y1"] = df["annual_cash_flow_y1"] / df["cash_needed"]
-    df["CoC_y2"] = df["annual_cash_flow_y2"] / df["cash_needed"]
-    df["GRM_y1"] = df["purchase_price"] / df["annual_rent_y1"] # Gross Rent Multiplier (lower = better)
-    df["GRM_y2"] = df["purchase_price"] / df["annual_rent_y2"]
-    # Industry-standard metrics using Year 2 assumptions (whole-property rent for SFH, total units for multi-family)
-    # These are used for property evaluation, lender analysis, and market comparisons
-    df["MGR_PP"] = df["total_rent"] / df["purchase_price"] # Monthly Gross Rent : Purchase Price, goal is for it to be greater than 0.01
-    df["OpEx_Rent"] = df["operating_expenses_y2"] / df["total_rent"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
-    df["DSCR"] = df["total_rent"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
+def apply_investment_calculations(df):
+    df["mr_monthly_vacancy_costs"] = df["market_total_rent_estimate"] * ASSUMPTIONS['vacancy_rate']
+    df["mr_monthly_repair_costs"] = df["market_total_rent_estimate"] * ASSUMPTIONS['repair_savings_rate']
+    df["mr_operating_expenses"] = df['mr_monthly_vacancy_costs'] + df['mr_monthly_repair_costs'] + df['monthly_taxes'] + df['monthly_insurance']
+    df["mr_total_monthly_cost"] = df['monthly_mortgage'] + df['monthly_mip'] + df['mr_operating_expenses']
+    df["mr_net_rent_y1"] = df['market_total_rent_estimate'] - df['min_rent']
+    df["mr_annual_rent_y1"] = df["mr_net_rent_y1"] * 12 
+    df["mr_annual_rent_y2"] = df["market_total_rent_estimate"] * 12
+    df["mr_monthly_NOI_y1"] = df["mr_net_rent_y1"] - df["mr_operating_expenses"]
+    df["mr_monthly_NOI_y2"] = df["market_total_rent_estimate"] - df["mr_operating_expenses"]
+    df["mr_annual_NOI_y1"] = df["mr_monthly_NOI_y1"] * 12
+    df["mr_annual_NOI_y2"] = df["mr_monthly_NOI_y2"] * 12
+    df["mr_monthly_cash_flow_y1"] = df["mr_net_rent_y1"] - df["mr_total_monthly_cost"] + df["ammoritization_estimate"]
+    df["mr_monthly_cash_flow_y2"] = df["market_total_rent_estimate"] - df["mr_total_monthly_cost"] + df["ammoritization_estimate"]
+    df["mr_annual_cash_flow_y1"] = df["mr_monthly_cash_flow_y1"] * 12
+    df["mr_annual_cash_flow_y2"] = df["mr_monthly_cash_flow_y2"] * 12
+    state_rate = get_state_tax_rate(ASSUMPTIONS['state_tax_code'])
+    combined_tax_rate = FEDERAL_TAX_RATE + state_rate
+    df["cap_rate_y1"] = df["mr_annual_NOI_y1"] / df["purchase_price"]
+    df["cap_rate_y2"] = df["mr_annual_NOI_y2"] / df["purchase_price"]
+    df["CoC_y1"] = df["mr_annual_cash_flow_y1"] / df["cash_needed"]
+    df["CoC_y2"] = df["mr_annual_cash_flow_y2"] / df["cash_needed"]
+    df["GRM_y1"] = df["purchase_price"] / df["mr_annual_rent_y1"] # Gross Rent Multiplier (lower = better)
+    df["GRM_y2"] = df["purchase_price"] / df["mr_annual_rent_y2"]
+    df["MGR_PP"] = df["market_total_rent_estimate"] / df["purchase_price"] # Monthly Gross Rent : Purchase Price, goal is for it to be greater than 0.01
+    df["OpEx_Rent"] = df["mr_operating_expenses"] / df["market_total_rent_estimate"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
+    df["DSCR"] = df["market_total_rent_estimate"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
     df["ltv_ratio"] = df["loan_amount"] / df["purchase_price"] # Loan-to-Value ratio
     df["price_per_door"] = df.apply(
         lambda row: row["purchase_price"] / row["beds"] if row["units"] == 0 else row["purchase_price"] / row["units"],
         axis=1
     ) # Price per unit/door (or per bedroom for single family)
-    df["rent_per_sqft"] = df["total_rent"] / df["square_ft"] # Monthly rent per square foot (Y2 for SFH)
-    df["break_even_occupancy"] = df["total_monthly_cost_y2"] / df["total_rent"] # Break-even occupancy rate
+    df["rent_per_sqft"] = df["market_total_rent_estimate"] / df["square_ft"] # Monthly rent per square foot (Y2 for SFH)
+    df["break_even_occupancy"] = df["mr_total_monthly_cost"] / df["market_total_rent_estimate"] # Break-even occupancy rate
     df["break_even_vacancy"] = 1.0 - df["break_even_occupancy"]
-    df["oer"] = df["operating_expenses_y2"] / df["total_rent"] # Operating Expense Ratio (standard industry metric)
-    df["egi"] = df["total_rent"] - df["monthly_vacancy_costs_y2"] # Effective Gross Income
-    df["debt_yield"] = df["annual_NOI_y2"] / df["loan_amount"] # Debt Yield (lender metric)
+    df["oer"] = df["mr_operating_expenses"] / df["market_total_rent_estimate"] # Operating Expense Ratio (standard industry metric)
+    df["egi"] = df["market_total_rent_estimate"] - df["mr_monthly_vacancy_costs"] # Effective Gross Income
+    df["debt_yield"] = df["mr_annual_NOI_y2"] / df["loan_amount"] # Debt Yield (lender metric)
     df["5y_forecast"] = df.apply(get_expected_gains, axis=1, args=(5,ASSUMPTIONS,LOAN,))
     df["10y_forecast"] = df.apply(get_expected_gains, axis=1, args=(10,ASSUMPTIONS,LOAN,))
     df["20y_forecast"] = df.apply(get_expected_gains, axis=1, args=(20,ASSUMPTIONS,LOAN,))
@@ -203,8 +192,8 @@ def apply_calculations_on_dataframe(df):
     df['costs_to_income'] = df["piti"] / ASSUMPTIONS['after_tax_monthly_income']
     df["monthly_depreciation"] = (df["purchase_price"] * (1 - LAND_VALUE_PCT)) / DEPRECIATION_YEARS / 12
     df["tax_savings_monthly"] = df["monthly_depreciation"] * combined_tax_rate
-    df["after_tax_cash_flow_y1"] = df["monthly_cash_flow_y1"] + df["tax_savings_monthly"]
-    df["after_tax_cash_flow_y2"] = df["monthly_cash_flow_y2"] + df["tax_savings_monthly"]
+    df["after_tax_cash_flow_y1"] = df["mr_monthly_cash_flow_y1"] + df["tax_savings_monthly"]
+    df["after_tax_cash_flow_y2"] = df["mr_monthly_cash_flow_y2"] + df["tax_savings_monthly"]
     df["future_value_5yr"] = df.apply(
         lambda row: row["purchase_price"] * ((1 + (ASSUMPTIONS['appreciation_rate'] if row["units"] == 0 else ASSUMPTIONS['mf_appreciation_rate'])) ** 5),
         axis=1
@@ -227,7 +216,7 @@ def apply_calculations_on_dataframe(df):
     df["avg_annual_return_10yr"] = ((df["10y_forecast"] / df["cash_needed"]) / 10) * 100
     df["avg_annual_return_20yr"] = ((df["20y_forecast"] / df["cash_needed"]) / 20) * 100
     df["roe_y2"] = df.apply(calculate_roe, axis=1, args=[LOAN,])
-    df["leverage_benefit"] = df["CoC_y2"] - (df["annual_NOI_y2"] / df["purchase_price"])
+    df["leverage_benefit"] = df["CoC_y2"] - (df["mr_annual_NOI_y2"] / df["purchase_price"])
     df["payback_period_years"] = df.apply(calculate_payback_period, axis=1)
     df["irr_5yr"] = df.apply(calculate_irr, axis=1, args=(5,ASSUMPTIONS))
     df["irr_10yr"] = df.apply(calculate_irr, axis=1, args=(10,ASSUMPTIONS))
@@ -242,9 +231,9 @@ def apply_calculations_on_dataframe(df):
     df["value_gap_pct_10yr"] = (df["npv_10yr"] / df["cash_needed"]) * 100
     df["value_gap_pct_20yr"] = (df["npv_20yr"] / df["cash_needed"]) * 100
     df["beats_market"] = df["npv_10yr"] > 0
-    df["cash_flow_y1_downside_10pct"] = (df["net_rent_y1"] * 0.9) - df["total_monthly_cost_y1"]
-    df["cash_flow_y2_downside_10pct"] = (df["total_rent"] * 0.9) - df["total_monthly_cost_y2"]
-    df["fha_self_sufficiency_ratio"] = (df["total_rent"] * 0.75) / df["piti"]  # Uses Y2 rent (whole-property for SFH)
+    df["cash_flow_y1_downside_10pct"] = (df["mr_net_rent_y1"] * 0.9) - df["mr_total_monthly_cost"]
+    df["cash_flow_y2_downside_10pct"] = (df["market_total_rent_estimate"] * 0.9) - df["mr_total_monthly_cost"]
+    df["fha_self_sufficiency_ratio"] = (df["market_total_rent_estimate"] * 0.75) / df["piti"]  # Uses Y2 rent (whole-property for SFH)
     return df
 
 def reload_dataframe():
@@ -266,6 +255,7 @@ def reload_dataframe():
     neighborhoods_df = neighborhoods.get_neighborhoods_dataframe(supabase)
     df = df.merge(neighborhoods_df, on="address1", how="left")
     df = apply_calculations_on_dataframe(df=df)
+    df = apply_investment_calculations(df=df)
     console.print("[green]Property data reloaded successfully![/green]")
 
 load_assumptions()
@@ -293,7 +283,7 @@ def get_all_phase1_qualifying_properties(active=True):
         f"{status_criteria} "
         "& square_ft >= 1000 "
         "& cash_needed <= 25000 "
-        "& ((units == 0 & monthly_cash_flow_y2 >= -200) | (units > 0 & monthly_cash_flow_y2 >= -200)) "
+        "& ((units == 0 & monthly_cash_flow >= -200) | (units > 0 & monthly_cash_flow >= -200)) "
         # "& MGR_PP > 0.01 "
         # "& OpEx_Rent < 0.5 "
         # "& DSCR > 1.25 "
@@ -419,13 +409,13 @@ def get_additional_room_rental_df():
     dataframe = df.copy()
     df2 = dataframe.query('min_rent_unit_beds > 1').copy()
     df2["additional_room_rent"] = df2.apply(calculate_additional_room_rent, axis=1)
-    df2["net_rent_y1"] = df2["net_rent_y1"] + df2["additional_room_rent"]
-    df2["monthly_cash_flow_y1"] = df2["net_rent_y1"] - df2["total_monthly_cost_y1"]
-    df2["annual_cash_flow_y1"] = df2["monthly_cash_flow_y1"] * 12
-    df2["annual_NOI_y1"] = (df2["net_rent_y1"] - df2["operating_expenses_y1"]) * 12
-    df2["cap_rate_y1"] = df2["annual_NOI_y1"] / df2["purchase_price"]
-    df2["CoC_y1"] = df2["annual_cash_flow_y1"] / df2["cash_needed"]
-    df2["GRM_y1"] = df2["purchase_price"] / df2["annual_rent_y1"]
+    df2["total_rent"] = df2["total_rent"] + df2["additional_room_rent"]
+    df2["monthly_cash_flow"] = df2["total_rent"] - df2["total_monthly_cost"]
+    df2["annual_cash_flow"] = df2["monthly_cash_flow"] * 12
+    df2["mr_annual_NOI_y1"] = (df2["mr_net_rent_y1"] - df2["mr_operating_expenses"]) * 12
+    df2["mr_cap_rate_y1"] = df2["mr_annual_NOI_y1"] / df2["purchase_price"]
+    df2["mr_CoC_y1"] = df2["mr_annual_cash_flow_y1"] / df2["cash_needed"]
+    df2["mr_GRM_y1"] = df2["purchase_price"] / df2["mr_annual_rent_y1"]
     return df2
 
 def get_reduced_pp_df(reduction_factor):
