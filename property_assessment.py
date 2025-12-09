@@ -47,6 +47,9 @@ FIELD_CONFIG = {
 
     # Other Notes
     "Whitepages notes": ("whitepages_notes", "editor"),
+
+    # Neighborhood (junction table relationship)
+    "Neighborhood": ("neighborhood", "neighborhood_special"),
 }
 
 
@@ -246,6 +249,60 @@ def handle_days_to_date_field(field_label: str, field_name: str, current_value: 
     return new_value
 
 
+def handle_neighborhood_field(
+    field_label: str,
+    property_id: str,
+    current_neighborhood: str,
+    supabase_client: Client,
+    console: Console
+):
+    """
+    Handle neighborhood selection/assignment.
+
+    Args:
+        field_label: Display label for the field
+        property_id: Property address1 (primary key)
+        current_neighborhood: Current neighborhood name (or None)
+        supabase_client: Supabase client instance
+        console: Rich console for output
+
+    Returns:
+        neighborhood_id (int or None) - ID of selected/created neighborhood, or None to clear
+    """
+    from add_property import get_or_create_neighborhood
+
+    current_display = current_neighborhood if current_neighborhood else "Not set"
+
+    # Prompt user for new neighborhood name
+    new_neighborhood_name = questionary.text(
+        f"{field_label} (currently: {current_display})",
+        default=current_neighborhood if current_neighborhood else ""
+    ).ask()
+
+    # Handle clearing the neighborhood (empty input)
+    if not new_neighborhood_name or not new_neighborhood_name.strip():
+        console.print(f"\n[yellow]Current:[/yellow] {current_display}")
+        console.print(f"[green]New:[/green] Not set\n")
+        return None
+
+    # Get or create neighborhood (handles normalization internally)
+    neighborhood_id, was_created = get_or_create_neighborhood(
+        new_neighborhood_name.strip(),
+        supabase_client
+    )
+
+    if not neighborhood_id:
+        console.print("[red]Failed to create/find neighborhood[/red]")
+        return None
+
+    # Show preview with creation status
+    status = "Created new" if was_created else "Using existing"
+    console.print(f"\n[yellow]Current:[/yellow] {current_display}")
+    console.print(f"[green]New:[/green] {new_neighborhood_name.strip()} ({status} neighborhood)\n")
+
+    return neighborhood_id
+
+
 def edit_property_assessment(property_id: str, supabase_client: Client, console: Console):
     """
     Edit property assessment fields using appropriate input methods.
@@ -270,16 +327,32 @@ def edit_property_assessment(property_id: str, supabase_client: Client, console:
 
         for field_label in FIELD_CONFIG.keys():
             field_name, field_type = FIELD_CONFIG[field_label]
-            current_value = current_data.get(field_name)
 
-            # Determine if field has a value
-            has_value = False
-            if current_value is not None:
-                # Empty strings count as null
-                if isinstance(current_value, str):
-                    has_value = bool(current_value.strip())
-                else:
-                    has_value = True
+            # Special handling for neighborhood field (check junction table)
+            if field_type == "neighborhood_special":
+                try:
+                    neighborhood_check = (
+                        supabase_client.table("property_neighborhood")
+                        .select("neighborhood_id")
+                        .eq("address1", property_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    has_value = bool(neighborhood_check.data and len(neighborhood_check.data) > 0)
+                except:
+                    has_value = False
+            else:
+                # Normal fields - check properties table
+                current_value = current_data.get(field_name)
+
+                # Determine if field has a value
+                has_value = False
+                if current_value is not None:
+                    # Empty strings count as null
+                    if isinstance(current_value, str):
+                        has_value = bool(current_value.strip())
+                    else:
+                        has_value = True
 
             # Add checkmark or spacing
             indicator = "✓ " if has_value else "  "
@@ -306,6 +379,60 @@ def edit_property_assessment(property_id: str, supabase_client: Client, console:
 
         # Handle the field based on its type
         new_value = None
+
+        # Special handling for neighborhood field (junction table relationship)
+        if field_type == "neighborhood_special":
+            # Fetch current neighborhood from junction table
+            try:
+                neighborhood_response = (
+                    supabase_client.table("property_neighborhood")
+                    .select("neighborhoods(name)")
+                    .eq("address1", property_id)
+                    .limit(1)
+                    .execute()
+                )
+
+                current_neighborhood = None
+                if neighborhood_response.data and len(neighborhood_response.data) > 0:
+                    neighborhood_dict = neighborhood_response.data[0].get("neighborhoods")
+                    if neighborhood_dict and isinstance(neighborhood_dict, dict):
+                        current_neighborhood = neighborhood_dict.get("name")
+            except Exception as e:
+                console.print(f"[red]Error fetching current neighborhood: {e}[/red]")
+                current_neighborhood = None
+
+            # Get new neighborhood ID from handler
+            neighborhood_id = handle_neighborhood_field(
+                field_choice,
+                property_id,
+                current_neighborhood,
+                supabase_client,
+                console
+            )
+
+            # Confirm and save to junction table
+            if questionary.confirm("Save this change to the database?").ask():
+                try:
+                    # Delete existing relationship(s) for this property
+                    supabase_client.table("property_neighborhood")\
+                        .delete()\
+                        .eq("address1", property_id)\
+                        .execute()
+
+                    # Insert new relationship (if neighborhood_id is not None)
+                    if neighborhood_id:
+                        supabase_client.table("property_neighborhood").insert({
+                            "address1": property_id,
+                            "neighborhood_id": neighborhood_id
+                        }).execute()
+                        console.print(f"[green]✓ Successfully updated {field_choice}[/green]")
+                    else:
+                        # User cleared the neighborhood - delete was sufficient
+                        console.print(f"[green]✓ Successfully cleared {field_choice}[/green]")
+                except Exception as e:
+                    console.print(f"[red]Error updating neighborhood: {str(e)}[/red]")
+
+            continue  # Skip the normal save logic below
 
         if field_type == "editor":
             new_value = handle_editor_field(field_choice, field_name, current_value, console)

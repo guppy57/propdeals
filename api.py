@@ -161,7 +161,6 @@ async def get_phase1_qualifiers_route():
         raise HTTPException(status_code=404, detail="No properties found")
     
     assumptions_response = supabase.table('assumptions').select("*").eq("id", 1).limit(1).single().execute()
-    deal_score_total = 43
     
     try:
         current, contingent, creative = get_all_phase1_qualifying_properties()
@@ -176,7 +175,6 @@ async def get_phase1_qualifiers_route():
 
         return {
             "assumptions": assumptions_response.data,
-            "deal_score_total": deal_score_total,
             "properties": {
                 "current_prices": current,
                 "contingent_10prcnt_price_reduction": contingent,
