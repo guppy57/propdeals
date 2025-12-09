@@ -103,7 +103,6 @@ def load_loan(loan_id):
         loan_length_years, \
         mip_upfront_rate, \
         mip_annual_rate, \
-        lender_fees, \
         upfront_discounts
     console.print("[yellow]Reloading FHA loan data...[/yellow]")
     loan_provider = LoansProvider(supabase_client=supabase, console=console)
@@ -114,7 +113,6 @@ def load_loan(loan_id):
     loan_length_years = loan.years
     mip_upfront_rate = loan.mip_upfront_rate
     mip_annual_rate = loan.mip_annual_rate
-    lender_fees = loan.lender_fees
     upfront_discounts = loan.upfront_discounts
     console.print("[green]FHA loan data reloaded successfully![/green]")
 
@@ -380,19 +378,6 @@ def apply_calculations_on_dataframe(df):
     df[cols] = df[cols].fillna(0)
     df["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
     df["home_age"] = 2025 - df["built_in"].fillna(2025)
-
-    # calculate each component of the closing cost individually
-    # home inspector
-    # appraisal
-    # title
-    # title insurance
-    # document fee
-    # home owners insurance
-    # home owners insurance escrow
-    # real estate agent commission
-    # property tax escrow
-
-    df["closing_costs"] = (df["purchase_price"] * closing_costs_rate) + lender_fees
     df["down_payment"] = df["purchase_price"] * down_payment_rate
     df["5_pct_loan"] = df["purchase_price"] * 0.05
     df["loan_amount"] = df["purchase_price"] - df["down_payment"] + (df["purchase_price"] * mip_upfront_rate)
@@ -400,14 +385,13 @@ def apply_calculations_on_dataframe(df):
     df["monthly_mip"] = (df["loan_amount"] * mip_annual_rate) / 12
     df["monthly_taxes"] = (df["purchase_price"] * property_tax_rate) / 12
     df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
+    df["closing_costs"] = df["purchase_price"] * closing_costs_rate
     df["cash_needed"] = df["closing_costs"] + df["down_payment"] - upfront_discounts - (IA_FIRSTHOME_GRANT_AMT if (ia_fhb_prog_upfront_option == "GRANT" and using_ia_fhb_prog) else 0)
-
     df["quick_monthly_rent_estimate"] = (df["purchase_price"] + df["closing_costs"]) * 0.0075
     df['ammoritization_estimate'] = (df['loan_amount'] * 0.017) / 12
     df["total_rent"] = df['quick_monthly_rent_estimate']
     df["my_rent"] = df['quick_monthly_rent_estimate'] * 0.25 # quick and dirty calculation
     df["net_rent_y1"] = df['total_rent'] - df['my_rent']
-
     df["annual_rent_y1"] = df["net_rent_y1"] * 12
     # Year 1 operating expenses (before changing total_rent for SFH)
     # For SFH: uses aggregated per-room rent (house-hacking scenario)
@@ -434,12 +418,10 @@ def apply_calculations_on_dataframe(df):
     df["monthly_NOI_y1"] = df["net_rent_y1"] - df["operating_expenses_y1"]
     df["annual_NOI_y1"] = df["monthly_NOI_y1"] * 12
     df["annual_NOI_y2"] = df["monthly_NOI_y2"] * 12
-
     df["monthly_cash_flow_y1"] = df["net_rent_y1"] - df["total_monthly_cost_y1"] + df['ammoritization_estimate']
     df["monthly_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost_y2"] + df['ammoritization_estimate']
     df["annual_cash_flow_y1"] = df["monthly_cash_flow_y1"] * 12
     df["annual_cash_flow_y2"] = df["monthly_cash_flow_y2"] * 12
-
     df["cap_rate_y1"] = df["annual_NOI_y1"] / df["purchase_price"]
     df["cap_rate_y2"] = df["annual_NOI_y2"] / df["purchase_price"]
     df["CoC_y1"] = df["annual_cash_flow_y1"] / df["cash_needed"]
@@ -587,19 +569,19 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
     table.add_column("Costs/mo", justify="right", style="yellow")
     table.add_column("CF/mo Y1", justify="right", no_wrap=True)
     table.add_column("CF/mo Y2", justify="right", no_wrap=True)
-    table.add_column("NOI Y2", justify="right", style="yellow")
-    table.add_column("CapR Y1", justify="right", style="blue")
-    table.add_column("CapR Y2", justify="right", style="blue")
-    table.add_column("CoC Y2", justify="right", style="purple")
-    table.add_column("1% Rule", justify="right", style="cyan")
-    table.add_column("50% Rule", justify="right", style="magenta")
-    table.add_column("DSCR", justify="right", style="blue")
+    # table.add_column("NOI Y2", justify="right", style="yellow")
+    # table.add_column("CapR Y1", justify="right", style="blue")
+    # table.add_column("CapR Y2", justify="right", style="blue")
+    # table.add_column("CoC Y2", justify="right", style="purple")
+    # table.add_column("1% Rule", justify="right", style="cyan")
+    # table.add_column("50% Rule", justify="right", style="magenta")
+    # table.add_column("DSCR", justify="right", style="blue")
     table.add_column("Cost/Inc", justify="right", style="bold white")
-    table.add_column("DS", justify="right", style="bold white")  # deal score
-    table.add_column("MS", justify="right", style="bold white")  # mobility score
-    table.add_column("10Y", justify="right", style="bold white")  # 10 year investment growth
+    # table.add_column("DS", justify="right", style="bold white")  # deal score
+    # table.add_column("MS", justify="right", style="bold white")  # mobility score
+    # table.add_column("10Y", justify="right", style="bold white")  # 10 year investment growth
     table.add_column("IRR 10Y", justify="right", style="bold white")  
-    table.add_column("NPV10Y", justify="right", style="bold white") # Net present value 10 years
+    # table.add_column("NPV10Y", justify="right", style="bold white") # Net present value 10 years
 
     if show_status:
         table.add_column("Status", justify="right", style="bold white")
@@ -677,19 +659,19 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             format_currency(row["total_monthly_cost_y2"]),
             f"[{cf_y1_style}]{format_currency(row['monthly_cash_flow_y1'])}[/{cf_y1_style}]",
             f"[{cf_y2_style}]{format_currency(row['monthly_cash_flow_y2'])}[/{cf_y2_style}]",
-            f"[{noi_style}]{format_currency(row['monthly_NOI_y2'])}[/{noi_style}]",
-            format_percentage(row["cap_rate_y1"]),
-            format_percentage(row["cap_rate_y2"]),
-            format_percentage(row["CoC_y2"]),
-            f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
-            f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
-            f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
+            # f"[{noi_style}]{format_currency(row['monthly_NOI_y2'])}[/{noi_style}]",
+            # format_percentage(row["cap_rate_y1"]),
+            # format_percentage(row["cap_rate_y2"]),
+            # format_percentage(row["CoC_y2"]),
+            # f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]",
+            # f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
+            # f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
             f"[{costs_to_income_style}]{format_percentage(row['costs_to_income'])}[/{costs_to_income_style}]",
-            f"[{deal_score_style}]{int(row['deal_score'])}/43[/{deal_score_style}]",
-            f"[{mobility_score_style}]{int(row['mobility_score'])}[/{mobility_score_style}]",
-            f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]",
+            # f"[{deal_score_style}]{int(row['deal_score'])}/43[/{deal_score_style}]",
+            # f"[{mobility_score_style}]{int(row['mobility_score'])}[/{mobility_score_style}]",
+            # f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]",
             f"[{irr_10yr_style}]{format_percentage(row['irr_10yr'])}[/{irr_10yr_style}]",
-            f"[{npv_style}]{format_currency(row["npv_10yr"])}[/{npv_style}]"
+            # f"[{npv_style}]{format_currency(row["npv_10yr"])}[/{npv_style}]"
         ])
 
         if show_status:
@@ -959,12 +941,12 @@ def get_all_phase1_qualifying_properties(active=True):
       - Cash needed must be below $25,000
       - SFH/MF: Monthly Cashflow with cheapest unit not rented above -400 (house hacking)
       - SFH/MF: Fully rented monthly cashflow above -200
-      - Square Feet must be greater than or equal to 950 
+      - Square Feet must be greater than or equal to 1000
     """
     status_criteria = "status == 'active'" if active else "status != 'active'"
     criteria = (
         f"{status_criteria} "
-        "& square_ft >= 950 "
+        "& square_ft >= 1000 "
         # "& MGR_PP > 0.01 "
         # "& OpEx_Rent < 0.5 "
         # "& DSCR > 1.25 "
@@ -1129,13 +1111,8 @@ def create_phase1_research_list_table(df, title):
     table.add_column("Cash", justify="right")
     table.add_column("Price", justify="right")
     table.add_column("Type", justify="center")
-    table.add_column("Qual Type", justify="center")
     table.add_column("SqFt", justify="right")
     table.add_column("Config", justify="center")
-    table.add_column("IRR 5Y", justify="right")
-    table.add_column("Payback", justify="right")
-    table.add_column("BE Vac", justify="right")
-    table.add_column("PITI", justify="right")
     table.add_column("Cost/Inc", justify="right")
 
     # Calculate percentiles for price and cash_needed (for styling)
@@ -1145,14 +1122,6 @@ def create_phase1_research_list_table(df, title):
     cash_75 = df['cash_needed'].quantile(0.75)
 
     # Calculate percentiles for new columns (for styling)
-    irr_5yr_25 = df['irr_5yr'].quantile(0.25)
-    irr_5yr_75 = df['irr_5yr'].quantile(0.75)
-    payback_25 = df['payback_period_years'].quantile(0.25)
-    payback_75 = df['payback_period_years'].quantile(0.75)
-    be_vac_25 = df['break_even_vacancy'].quantile(0.25)
-    be_vac_75 = df['break_even_vacancy'].quantile(0.75)
-    piti_25 = df['piti'].quantile(0.25)
-    piti_75 = df['piti'].quantile(0.75)
     cost_inc_25 = df['costs_to_income'].quantile(0.25)
     cost_inc_75 = df['costs_to_income'].quantile(0.75)
 
@@ -1213,50 +1182,6 @@ def create_phase1_research_list_table(df, title):
         neighborhood = row['neighborhood'] if pd.notna(row['neighborhood']) else 'N/A'
         neighborhood_display = f"{grade} - {neighborhood}"
 
-        # Style IRR 5Y (higher is better: top 25% green, middle yellow, bottom 25% red)
-        irr_5yr_value = row['irr_5yr']
-        if irr_5yr_value >= irr_5yr_75:
-            irr_5yr_display = f"[green]{format_percentage(irr_5yr_value)}[/green]"
-        elif irr_5yr_value >= irr_5yr_25:
-            irr_5yr_display = f"[yellow]{format_percentage(irr_5yr_value)}[/yellow]"
-        else:
-            irr_5yr_display = f"[red]{format_percentage(irr_5yr_value)}[/red]"
-
-        # Style Payback (lower is better: bottom 25% green, middle yellow, top 25% red)
-        payback_value = row['payback_period_years']
-        if math.isinf(payback_value):
-            payback_display = "[red]Never[/red]"
-        elif payback_value <= payback_25:
-            payback_display = f"[green]{payback_value:.1f} yr[/green]"
-        elif payback_value <= payback_75:
-            payback_display = f"[yellow]{payback_value:.1f} yr[/yellow]"
-        else:
-            payback_display = f"[red]{payback_value:.1f} yr[/red]"
-
-        # Style Break-even Vacancy (higher is better: top 25% green, middle yellow, bottom 25% red)
-        be_vac_value = row['break_even_vacancy']
-        break_even_occupancy = 1.0 - be_vac_value
-        if break_even_occupancy >= 1:
-            be_vac_formatted = "---"
-        else:
-            be_vac_formatted = express_percent_as_months_and_days(be_vac_value)
-
-        if be_vac_value >= be_vac_75:
-            be_vac_display = f"[green]{be_vac_formatted}[/green]"
-        elif be_vac_value >= be_vac_25:
-            be_vac_display = f"[yellow]{be_vac_formatted}[/yellow]"
-        else:
-            be_vac_display = f"[red]{be_vac_formatted}[/red]"
-
-        # Style PITI (lower is better: bottom 25% green, middle yellow, top 25% red)
-        piti_value = row['piti']
-        if piti_value <= piti_25:
-            piti_display = f"[green]{format_currency(piti_value)}[/green]"
-        elif piti_value <= piti_75:
-            piti_display = f"[yellow]{format_currency(piti_value)}[/yellow]"
-        else:
-            piti_display = f"[red]{format_currency(piti_value)}[/red]"
-
         # Style Cost/Income (lower is better: bottom 25% green, middle yellow, top 25% red)
         cost_inc_value = row['costs_to_income']
         if cost_inc_value <= cost_inc_25:
@@ -1274,13 +1199,8 @@ def create_phase1_research_list_table(df, title):
             cash_display,
             price_display,
             prop_type,
-            row['qualification_type'] if pd.notna(row['qualification_type']) else 'N/A',
-            format_number(row['square_ft']),
+            f"{row['square_ft']}",
             config,
-            irr_5yr_display,
-            payback_display,
-            be_vac_display,
-            piti_display,
             cost_inc_display
         )
 
