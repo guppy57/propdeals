@@ -250,7 +250,6 @@ def reload_dataframe():
     min_rent_units = rents.loc[min_rent_indices, ["address1", "unit_num", "beds"]].reset_index(drop=True)
     min_rent_units.columns = ["address1", "min_rent_unit", "min_rent_unit_beds"]
     rent_summary = rent_summary.merge(min_rent_units, on="address1", how="left")
-    rent_summary["market_estimate_net_rent_y1"] = rent_summary["market_total_rent_estimate"] - rent_summary["min_rent"]
     df = df.merge(rent_summary, on="address1", how="left")
     neighborhoods_df = neighborhoods.get_neighborhoods_dataframe(supabase)
     df = df.merge(neighborhoods_df, on="address1", how="left")
@@ -275,7 +274,6 @@ def get_all_phase1_qualifying_properties(active=True):
       - 1% rule (monthly gross rent must be 1% or more of purchase price)
       - 50% rule (operating expenses must be 50% or lower than gross rent)
       - Debt Service Coverage Ratio should be above 1.25
-      - Triplexes / Fourplexes must pass FHA self-sufficiency test (Gross Rent * 0.75 >= PITI)
       - Net Present Value in 10 years must be positive, thus beating the stock market
     """
     status_criteria = "status == 'active'" if active else "status != 'active'"
@@ -284,11 +282,10 @@ def get_all_phase1_qualifying_properties(active=True):
         "& square_ft >= 1000 "
         "& cash_needed <= 25000 "
         "& ((units == 0 & monthly_cash_flow >= -200) | (units > 0 & monthly_cash_flow >= -200)) "
-        # "& MGR_PP > 0.01 "
-        # "& OpEx_Rent < 0.5 "
-        # "& DSCR > 1.25 "
+        "& MGR_PP > 0.01 "
+        "& OpEx_Rent < 0.5 "
+        "& DSCR > 1.25 "
         # "& monthly_cash_flow_y1 >= -400 "
-        # "& ((units >= 3 & fha_self_sufficiency_ratio >= 1) | (units < 3)) "
         # "& beats_market "
     )
 

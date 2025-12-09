@@ -61,6 +61,10 @@ def display_all_properties(
     table.add_column("Costs/mo", justify="right", style="yellow")
     table.add_column("CF", justify="right", no_wrap=True)
     table.add_column("Cost/Inc", justify="right", style="bold white")
+    table.add_column("MGR_PP", justify="right")
+    table.add_column("OpEx_Rent", justify="right")
+    table.add_column("DSCR", justify="right")
+    table.add_column("NPV10", justify="right")
 
     if show_status:
         table.add_column("Status", justify="right", style="bold white")
@@ -106,6 +110,10 @@ def display_all_properties(
                 format_currency(row["total_monthly_cost"]),
                 f"[{cf_style}]{format_currency(row['monthly_cash_flow'])}[/{cf_style}]",
                 f"[{costs_to_income_style}]{format_percentage(row['costs_to_income'])}[/{costs_to_income_style}]",
+                f"{format_percentage(row["MGR_PP"])}",
+                f"{format_percentage(row["OpEx_Rent"])}",
+                f"{format_percentage(row["DSCR"])}",
+                f"{format_currency(row["npv_10yr"])}"
             ]
         )
 
