@@ -1,6 +1,7 @@
 from rich.table import Table
 from rich.panel import Panel
 import pandas as pd
+import questionary
 from helpers import (
     calculate_additional_room_rent,
     calculate_quintile_colors_for_metrics,
@@ -720,3 +721,150 @@ def display_property_metrics(console, df, get_combined_phase1_qualifiers, proper
     table.add_row("[white]PHASE 1 DISQUALIFIED[/white]")
     add_rows(given_table=table, given_df=not_phase1)
     console.print(table)
+
+def display_rent_estimates_comparison(
+    property_id: str,
+    estimates: dict,
+    existing_estimates: dict,
+    unit_configs: list,
+    result_cost: float,
+    selected_report_info: str,
+    console,
+) -> bool:
+    """
+    Display detailed comparison between current and new rent estimates.
+
+    Returns True if user wants to update database, False otherwise.
+    """
+    estimates_table = Table(
+        title=f"Rent Estimate Comparison for {property_id}",
+        show_header=True,
+        header_style="bold green",
+    )
+    estimates_table.add_column("Unit", style="cyan", width=6)
+    estimates_table.add_column("Config", style="yellow", width=12)
+    estimates_table.add_column("Current Rent", justify="right", style="white", width=12)
+    estimates_table.add_column("New Primary", justify="right", style="green", width=12)
+    estimates_table.add_column("New Range", justify="right", style="blue", width=15)
+    estimates_table.add_column("Difference", justify="right", style="bold", width=12)
+    estimates_table.add_column("Change %", justify="right", style="bold", width=10)
+
+    total_current_primary = 0
+    total_new_low = 0
+    total_new_primary = 0
+    total_new_high = 0
+
+    for config in unit_configs:
+        for unit in config["units"]:
+            unit_num = unit["unit_num"]
+            config_key = config["config_key"]
+            base_name = f"unit_{unit_num}_{config_key}"
+
+            new_low = estimates.get(f"{base_name}_rent_estimate_low", 0)
+            new_primary = estimates.get(f"{base_name}_rent_estimate", 0)
+            new_high = estimates.get(f"{base_name}_rent_estimate_high", 0)
+            existing_data = existing_estimates.get(base_name, {})
+            current_primary = existing_data.get("rent_estimate", 0)
+            difference = new_primary - current_primary
+            change_percent = (
+                (difference / current_primary * 100) if current_primary > 0 else 0
+            )
+            total_current_primary += current_primary
+            total_new_low += new_low
+            total_new_primary += new_primary
+            total_new_high += new_high
+
+            config_display = f"{config['beds']}b{config['baths']}b"
+
+            if difference > 0:
+                diff_style = "green"
+                diff_symbol = "+"
+                change_style = "green"
+                change_percent_formatted = f"+{change_percent:.1f}%"
+            elif difference < 0:
+                diff_style = "red"
+                diff_symbol = ""
+                change_style = "red"
+                change_percent_formatted = f"{change_percent:.1f}%"
+            else:
+                diff_style = "white"
+                diff_symbol = ""
+                change_style = "white"
+                change_percent_formatted = f"{change_percent:.1f}%"
+
+            estimates_table.add_row(
+                f"Unit {unit_num}",
+                config_display,
+                f"${current_primary:,.0f}",
+                f"[bold]${new_primary:,.0f}[/bold]",
+                f"${new_low:,.0f}-{new_high:,.0f}",
+                f"[{diff_style}]{diff_symbol}${abs(difference):,.0f}[/{diff_style}]",
+                f"[{change_style}]{change_percent_formatted}[/{change_style}]",
+            )
+
+    total_difference = total_new_primary - total_current_primary
+    total_change_percent = (
+        (total_difference / total_current_primary * 100)
+        if total_current_primary > 0
+        else 0
+    )
+
+    if total_difference > 0:
+        total_diff_style = "green"
+        total_diff_symbol = "+"
+        total_change_style = "green"
+        total_change_percent_formatted = f"+{total_change_percent:.1f}%"
+    elif total_difference < 0:
+        total_diff_style = "red"
+        total_diff_symbol = ""
+        total_change_style = "red"
+        total_change_percent_formatted = f"{total_change_percent:.1f}%"
+    else:
+        total_diff_style = "white"
+        total_diff_symbol = ""
+        total_change_style = "white"
+        total_change_percent_formatted = f"{total_change_percent:.1f}%"
+
+    estimates_table.add_section()
+    estimates_table.add_row(
+        "[bold]TOTAL[/bold]",
+        "[bold]All[/bold]",
+        f"[bold]${total_current_primary:,.0f}[/bold]",
+        f"[bold green]${total_new_primary:,.0f}[/bold green]",
+        f"[bold]${total_new_low:,.0f}-{total_new_high:,.0f}[/bold]",
+        f"[bold {total_diff_style}]{total_diff_symbol}${abs(total_difference):,.0f}[/bold {total_diff_style}]",
+        f"[bold {total_change_style}]{total_change_percent_formatted}[/bold {total_change_style}]",
+    )
+
+    console.print("\n")
+    console.print(estimates_table)
+
+    range_amount = total_new_high - total_new_low
+    range_percent = (
+        (range_amount / total_new_primary * 100) if total_new_primary > 0 else 0
+    )
+    unit_count = sum(len(config["units"]) for config in unit_configs)
+
+    console.print(
+        Panel(
+            f"[bold cyan]Rent Estimate Analysis Summary[/bold cyan]\n\n"
+            f"Total Units Analyzed: {unit_count}\n"
+            f"Current Total Rent: ${total_current_primary:,.0f}/month\n"
+            f"New Total Range: ${total_new_low:,.0f} - ${total_new_high:,.0f}\n"
+            f"New Primary Estimate: ${total_new_primary:,.0f}/month\n"
+            f"Total Monthly Change: {total_diff_symbol}${abs(total_difference):,.0f} ({total_diff_symbol}{total_change_percent:.1f}%)\n"
+            f"Range Spread: ${range_amount:,.0f} ({range_percent:.1f}%)\n"
+            f"Based on Report: {selected_report_info[:50]}...\n"
+            f"Generation Cost: ${result_cost:.4f}",
+            title="Comparison Summary",
+            border_style="cyan",
+        )
+    )
+
+    console.print("\n")
+    update_database = questionary.confirm(
+        "Would you like to update the database with these new rent estimates?",
+        default=False,
+    ).ask()
+
+    return update_database
