@@ -2,7 +2,6 @@ import math
 import os
 from datetime import datetime
 
-import numpy_financial as npf
 import pandas as pd
 import questionary
 from dotenv import load_dotenv
@@ -21,6 +20,17 @@ from helpers import (
     format_currency,
     format_number,
     format_percentage,
+    is_property_assessment_done_vectorized,
+    is_property_maps_done_vectorized,
+    get_expected_gains,
+    calculate_payback_period,
+    get_state_tax_rate,
+    calculate_net_proceeds,
+    calculate_irr,
+    calculate_additional_room_rent,
+    calculate_npv,
+    calculate_quintile_colors_for_metrics,
+    calculate_roe
 )
 from inspections import InspectionsClient
 from loans import LoansProvider
@@ -46,309 +56,66 @@ DEPRECIATION_YEARS = 27.5  # Residential property depreciation period
 IA_FIRSTHOME_GRANT_AMT = 2500
 
 def load_assumptions():
-    global \
-        appreciation_rate, \
-        mf_appreciation_rate, \
-        rent_appreciation_rate, \
-        property_tax_rate, \
-        home_insurance_rate, \
-        vacancy_rate, \
-        repair_savings_rate, \
-        closing_costs_rate, \
-        live_in_unit_setting, \
-        after_tax_monthly_income, \
-        state_tax_code, \
-        discount_rate, \
-        using_ia_fhb_prog, \
-        ia_fhb_prog_upfront_option
-    
+    global ASSUMPTIONS 
     console.print("[yellow]Reloading assumptions...[/yellow]")
-    assumptions_get_response = (
-        supabase.table("assumptions")
-        .select("*")
-        .eq("id", 1)
-        .limit(1)
-        .single()
-        .execute()
-    )
-    appreciation_rate = float(assumptions_get_response.data["appreciation_rate"])
-    mf_appreciation_rate = float(
-        appreciation_rate - 0.01
-    )  # multi-family properties appreciate slower than single family
-    rent_appreciation_rate = float(
-        assumptions_get_response.data["rent_appreciation_rate"]
-    )
-    property_tax_rate = float(assumptions_get_response.data["property_tax_rate"])
-    home_insurance_rate = float(assumptions_get_response.data["home_insurance_rate"])
-    vacancy_rate = float(assumptions_get_response.data["vacancy_rate"])
-    repair_savings_rate = float(assumptions_get_response.data["repair_savings_rate"])
-    closing_costs_rate = float(assumptions_get_response.data["closing_costs_rate"])
-    live_in_unit_setting = assumptions_get_response.data["live_in_unit_setting"]
-    gross_annual_income = assumptions_get_response.data["gross_annual_income"]
-    state_tax_code = assumptions_get_response.data["state_tax_code"]
-    after_tax_monthly_income = calculate_monthly_take_home(gross_annual_income, state_tax_code)
-    discount_rate = assumptions_get_response.data["discount_rate"]
-    # Iowa FirstHome buyers program for Single Family properties
-    using_ia_fhb_prog = assumptions_get_response.data["using_ia_fhb_prog"] 
-    ia_fhb_prog_upfront_option = assumptions_get_response.data["ia_fhb_prog_upfront_option"]
+    assumptions_get_response = supabase.table("assumptions").select("*").eq("id", 1).limit(1).single().execute()
+    ASSUMPTIONS = {
+        "appreciation_rate": float(assumptions_get_response.data["appreciation_rate"]),
+        "mf_appreciation_rate": float(assumptions_get_response.data["appreciation_rate"]) - 0.01,
+        "rent_appreciation_rate": float(assumptions_get_response.data["rent_appreciation_rate"]),
+        "property_tax_rate": float(assumptions_get_response.data["property_tax_rate"]),
+        "home_insurance_rate": float(assumptions_get_response.data["home_insurance_rate"]),
+        "vacancy_rate": float(assumptions_get_response.data["vacancy_rate"]),
+        "repair_savings_rate": float(assumptions_get_response.data["repair_savings_rate"]),
+        "closing_costs_rate": float(assumptions_get_response.data["closing_costs_rate"]),
+        "live_in_unit_setting": assumptions_get_response.data["live_in_unit_setting"],
+        "gross_annual_income": assumptions_get_response.data["gross_annual_income"],
+        "state_tax_code": assumptions_get_response.data["state_tax_code"],
+        "after_tax_monthly_income": calculate_monthly_take_home(
+            assumptions_get_response.data["gross_annual_income"],
+            assumptions_get_response.data["state_tax_code"]
+        ),
+        "discount_rate": assumptions_get_response.data["discount_rate"],
+        "using_ia_fhb_prog": assumptions_get_response.data["using_ia_fhb_prog"],
+        "ia_fhb_prog_upfront_option": assumptions_get_response.data["ia_fhb_prog_upfront_option"]
+    }
     console.print(
         f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]"
     )
 
 def load_loan(loan_id):
-    global \
-        interest_rate, \
-        apr_rate, \
-        down_payment_rate, \
-        loan_length_years, \
-        mip_upfront_rate, \
-        mip_annual_rate, \
-        upfront_discounts
+    global LOAN
     console.print("[yellow]Reloading FHA loan data...[/yellow]")
     loan_provider = LoansProvider(supabase_client=supabase, console=console)
     loan = loan_provider.get_loan_by_id(loan_id)
-    interest_rate = loan.interest_rate
-    apr_rate = loan.apr_rate
-    down_payment_rate = loan.down_payment_rate
-    loan_length_years = loan.years
-    mip_upfront_rate = loan.mip_upfront_rate
-    mip_annual_rate = loan.mip_annual_rate
-    upfront_discounts = loan.upfront_discounts
-    console.print("[green]FHA loan data reloaded successfully![/green]")
-
-def get_mobility_score(row):
-    score = (row["walk_score"] * 0.6) + (row["transit_score"] * 0.30) + (row["bike_score"] * 0.10)
-    return score
-
-def get_rentability_score(row) -> float:
-    score = 0.0
-
-    # determine factors that make something more or less rentable
-    # in-unit laundry, shared basement or not, renovated units, proximity to certain locations
-    # then make a score out of it
-
-    return score
-
-def get_seller_motivation_score(row) -> str:
-    """
-    Calculate seller motivation score based on multiple factors.
-    Returns: 'low', 'medium', or 'high'
-    """
-    listed_date = row.get('listed_date')
-    if listed_date and pd.notna(listed_date):
-        if isinstance(listed_date, str):
-            listed_datetime = datetime.fromisoformat(listed_date.replace('Z', '+00:00').split('T')[0])
-        else:
-            listed_datetime = pd.to_datetime(listed_date)
-        days_on_market = (datetime.now() - listed_datetime).days
-    else:
-        days_on_market = 0  # Default to 0 if no listing date available
-    
-    property_condition: str = row['property_condition']
-    price_reductions: bool = row['has_reduced_price']
-    seller_circumstances: str = row.get('seller_circumstance')
-    score = 0
-    
-    if days_on_market > 30 and days_on_market < 60:
-        score += 1
-    elif days_on_market < 90:
-        score += 2
-    else: 
-        score += 3
-    
-    if price_reductions:
-        score += 2
-    
-    high_motivation_circumstances = ['estate_sale', 'financial_distress', 'divorce', 'relocation', 'inherited']
-    medium_motivation_circumstances = ['downsizing', 'upgrading', 'portfolio_liquidation']
-    
-    if seller_circumstances in high_motivation_circumstances:
-        score += 3
-    elif seller_circumstances in medium_motivation_circumstances:
-        score += 2
-
-    if property_condition == "medium":
-        score += 1
-    elif property_condition == "low":
-        score += 2
-    
-    if score <= 3:
-        return 'low'
-    elif score <= 7:
-        return 'medium'
-    else:
-        return 'high'
-
-def get_expected_gains(row, length_years):
-    current_home_value = row["purchase_price"]
-    loan_amount = row["loan_amount"]
-    y1_cashflow = row["annual_cash_flow_y1"]
-    y2_cashflow = row["annual_cash_flow_y2"]
-
-    # Year 1 is the base year (no appreciation applied)
-    cumulative_cashflow = y1_cashflow
-    for year in range(2, length_years + 1):
-        # Year 2 starts with base y2_cashflow, then compounds
-        yearly_cashflow = y2_cashflow * ((1 + rent_appreciation_rate) ** (year - 2))
-        cumulative_cashflow += yearly_cashflow
-
-    rate = appreciation_rate if row["units"] == 0 else mf_appreciation_rate
-    appreciation_gains = current_home_value * ((1 + rate) ** length_years - 1)
-    monthly_rate = apr_rate / 12
-    num_payments = loan_length_years * 12
-    total_payments_in_period = length_years * 12
-    remaining_balance = loan_amount * (
-        ((1 + monthly_rate) ** num_payments - (1 + monthly_rate) ** total_payments_in_period) /
-        ((1 + monthly_rate) ** num_payments - 1)
-    )
-    equity_gains = loan_amount - remaining_balance
-    return cumulative_cashflow + appreciation_gains + equity_gains
-
-def get_state_tax_rate(state_code):
-    """Get state marginal tax rate from state code"""
-    state_rates = {
-        'IA': 0.0482,  # Iowa 4.82%
-        'IL': 0.0495,  # Illinois 4.95%
+    LOAN = {
+        "interest_rate": loan.interest_rate,
+        "apr_rate": loan.apr_rate,
+        "down_payment_rate": loan.down_payment_rate,
+        "loan_length_years": loan.years,
+        "mip_upfront_rate": loan.mip_upfront_rate,
+        "mip_annual_rate": loan.mip_annual_rate,
+        "upfront_discounts": loan.upfront_discounts
     }
-    return state_rates.get(state_code, 0.05)  # Default to 5% if state not found
-
-def calculate_payback_period(row):
-    """Calculate payback period accounting for Year 1 losses"""
-    if row["annual_cash_flow_y1"] < 0:
-        # Year 1 we lose money, need to recover initial investment + Year 1 losses
-        total_to_recover = row["cash_needed"] + abs(row["annual_cash_flow_y1"])
-    else:
-        # Year 1 profitable, deduct from recovery needed
-        total_to_recover = row["cash_needed"] - row["annual_cash_flow_y1"]
-
-    if row["annual_cash_flow_y2"] <= 0:
-        return float('inf')  # Never pays back
-
-    # +1 for Year 1 already passed
-    payback_years = 1 + (total_to_recover / row["annual_cash_flow_y2"])
-    return payback_years
-
-def calculate_net_proceeds(row, years, selling_costs_rate=0.07, capital_gains_rate=0.15):
-    """Calculate net proceeds from sale after N years"""
-    # Future property value (single family vs multi-family appreciation rates)
-    rate = appreciation_rate if row["units"] == 0 else mf_appreciation_rate
-    future_value = row["purchase_price"] * ((1 + rate) ** years)
-
-    # Remaining loan balance
-    loan_amount = row["loan_amount"]
-    monthly_rate = apr_rate / 12
-    num_payments = loan_length_years * 12
-    total_payments_in_period = years * 12
-    additional_loan = row["5_pct_loan"] if (row["units"] == 0 and using_ia_fhb_prog and ia_fhb_prog_upfront_option == "LOAN") else 0
-    remaining_balance = (loan_amount * (
-        ((1 + monthly_rate) ** num_payments - (1 + monthly_rate) ** total_payments_in_period) /
-        ((1 + monthly_rate) ** num_payments - 1)
-    )) + additional_loan
-
-    # Selling costs (agent commission + closing costs)
-    selling_costs = future_value * selling_costs_rate
-
-    # Capital gains tax (only on appreciation)
-    capital_gain = future_value - row["purchase_price"]
-    capital_gains_tax = capital_gain * capital_gains_rate if capital_gain > 0 else 0
-
-    # Net proceeds = Future value - Loan payoff - Selling costs - Taxes
-    net_proceeds = future_value - remaining_balance - selling_costs - capital_gains_tax
-
-    return net_proceeds
-
-def calculate_irr(row, years):
-    """Calculate Internal Rate of Return over N years"""
-    try:
-        # Build cash flow array
-        cash_flows = [-row["cash_needed"]]  # Year 0: initial investment (outflow)
-
-        # Year 1 cash flow
-        cash_flows.append(row["annual_cash_flow_y1"])
-
-        # Years 2 through N: compounded with rent appreciation
-        for year in range(2, years + 1):
-            yearly_cashflow = row["annual_cash_flow_y2"] * ((1 + rent_appreciation_rate) ** (year - 2))
-            cash_flows.append(yearly_cashflow)
-
-        # Final year: add net proceeds from sale
-        net_proceeds = calculate_net_proceeds(row, years)
-        cash_flows[-1] += net_proceeds
-
-        # Calculate IRR
-        irr = npf.irr(cash_flows)
-        return irr if not math.isnan(irr) else 0
-    except Exception:
-        return 0  # Return 0 if calculation fails
-
-def calculate_npv(row, years):
-    """Calculate Net Present Value over N years using discount_rate"""
-    try:
-        # Build cash flow array (same as IRR)
-        cash_flows = [-row["cash_needed"]]  # Year 0: initial investment (outflow)
-
-        # Year 1 cash flow
-        cash_flows.append(row["annual_cash_flow_y1"])
-
-        # Years 2 through N: compounded with rent appreciation
-        for year in range(2, years + 1):
-            yearly_cashflow = row["annual_cash_flow_y2"] * ((1 + rent_appreciation_rate) ** (year - 2))
-            cash_flows.append(yearly_cashflow)
-
-        # Final year: add net proceeds from sale
-        net_proceeds = calculate_net_proceeds(row, years)
-        cash_flows[-1] += net_proceeds
-
-        # Calculate NPV: discount each cash flow back to present
-        npv = 0
-        for year, cash_flow in enumerate(cash_flows):
-            npv += cash_flow / ((1 + discount_rate) ** year)
-
-        return npv
-    except Exception:
-        return 0  # Return 0 if calculation fails
-
-def calculate_roe(row):
-    """Calculate Return on Equity for Year 2"""
-    # Equity after Year 1 = down payment + principal paid in Year 1
-    loan_amount = row["loan_amount"]
-    monthly_rate = apr_rate / 12
-    num_payments = loan_length_years * 12
-
-    # Remaining balance after 1 year (12 payments)
-    remaining_balance_y1 = loan_amount * (
-        ((1 + monthly_rate) ** num_payments - (1 + monthly_rate) ** 12) /
-        ((1 + monthly_rate) ** num_payments - 1)
-    )
-
-    # Principal paid in Year 1
-    principal_paid_y1 = loan_amount - remaining_balance_y1
-
-    # Current equity = down payment + principal paid
-    current_equity = row["down_payment"] + principal_paid_y1
-
-    # ROE = Annual cash flow Y2 / Current equity
-    if current_equity > 0:
-        return row["annual_cash_flow_y2"] / current_equity
-    return 0
+    console.print("[green]Loan data reloaded successfully![/green]")
 
 def apply_calculations_on_dataframe(df):
-    state_rate = get_state_tax_rate(state_tax_code)
+    state_rate = get_state_tax_rate(ASSUMPTIONS['state_tax_code'])
     combined_tax_rate = FEDERAL_TAX_RATE + state_rate
     cols = ["walk_score", "transit_score", "bike_score"]
     df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
     df[cols] = df[cols].fillna(0)
     df["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
     df["home_age"] = 2025 - df["built_in"].fillna(2025)
-    df["down_payment"] = df["purchase_price"] * down_payment_rate
+    df["down_payment"] = df["purchase_price"] * LOAN['down_payment_rate'] 
     df["5_pct_loan"] = df["purchase_price"] * 0.05
-    df["loan_amount"] = df["purchase_price"] - df["down_payment"] + (df["purchase_price"] * mip_upfront_rate)
-    df["monthly_mortgage"] = df["loan_amount"].apply(lambda x: calculate_mortgage(x, apr_rate, loan_length_years))
-    df["monthly_mip"] = (df["loan_amount"] * mip_annual_rate) / 12
-    df["monthly_taxes"] = (df["purchase_price"] * property_tax_rate) / 12
-    df["monthly_insurance"] = (df["purchase_price"] * home_insurance_rate) / 12
-    df["closing_costs"] = df["purchase_price"] * closing_costs_rate
-    df["cash_needed"] = df["closing_costs"] + df["down_payment"] - upfront_discounts - (IA_FIRSTHOME_GRANT_AMT if (ia_fhb_prog_upfront_option == "GRANT" and using_ia_fhb_prog) else 0)
+    df["loan_amount"] = df["purchase_price"] - df["down_payment"] + (df["purchase_price"] * LOAN['mip_upfront_rate'])
+    df["monthly_mortgage"] = df["loan_amount"].apply(lambda x: calculate_mortgage(x, LOAN['apr_rate'], LOAN['loan_length_years']))
+    df["monthly_mip"] = (df["loan_amount"] * LOAN['mip_annual_rate']) / 12
+    df["monthly_taxes"] = (df["purchase_price"] * ASSUMPTIONS['property_tax_rate']) / 12
+    df["monthly_insurance"] = (df["purchase_price"] * ASSUMPTIONS['home_insurance_rate']) / 12
+    df["closing_costs"] = df["purchase_price"] * ASSUMPTIONS['closing_costs_rate']
+    df["cash_needed"] = df["closing_costs"] + df["down_payment"] - LOAN['upfront_discounts'] - (IA_FIRSTHOME_GRANT_AMT if (ASSUMPTIONS['ia_fhb_prog_upfront_option'] == "GRANT" and ASSUMPTIONS['using_ia_fhb_prog']) else 0)
     df["quick_monthly_rent_estimate"] = (df["purchase_price"] + df["closing_costs"]) * 0.0075
     df['ammoritization_estimate'] = (df['loan_amount'] * 0.017) / 12
     df["total_rent"] = df['quick_monthly_rent_estimate']
@@ -358,8 +125,8 @@ def apply_calculations_on_dataframe(df):
     # Year 1 operating expenses (before changing total_rent for SFH)
     # For SFH: uses aggregated per-room rent (house-hacking scenario)
     # For multi-family: uses total rent from all units
-    df["monthly_vacancy_costs_y1"] = df["total_rent"] * vacancy_rate
-    df["monthly_repair_costs_y1"] = df["total_rent"] * repair_savings_rate
+    df["monthly_vacancy_costs_y1"] = df["total_rent"] * ASSUMPTIONS['vacancy_rate']
+    df["monthly_repair_costs_y1"] = df["total_rent"] * ASSUMPTIONS['repair_savings_rate']
     df["operating_expenses_y1"] = df["monthly_vacancy_costs_y1"] + df["monthly_repair_costs_y1"] + df["monthly_taxes"] + df["monthly_insurance"]
     # For single family homes (units == 0): switch total_rent from aggregated per-room to whole-property rent
     # This affects all Year 2 calculations and Y2-based metrics below
@@ -370,8 +137,8 @@ def apply_calculations_on_dataframe(df):
     # Year 2 operating expenses (after changing total_rent for SFH)
     # For SFH: uses whole-property rent (full rental scenario)
     # For multi-family: uses total rent from all units (same as Y1)
-    df["monthly_vacancy_costs_y2"] = df["total_rent"] * vacancy_rate
-    df["monthly_repair_costs_y2"] = df["total_rent"] * repair_savings_rate
+    df["monthly_vacancy_costs_y2"] = df["total_rent"] * ASSUMPTIONS['vacancy_rate']
+    df["monthly_repair_costs_y2"] = df["total_rent"] * ASSUMPTIONS['repair_savings_rate']
     df["operating_expenses_y2"] = df["monthly_vacancy_costs_y2"] + df["monthly_repair_costs_y2"] + df["monthly_taxes"] + df["monthly_insurance"]
     # Total monthly cost uses Y2 operating expenses (conservative for Y1, accurate for Y2)
     df["total_monthly_cost_y1"] = df["monthly_mortgage"] + df["monthly_mip"] + df["operating_expenses_y1"]
@@ -411,46 +178,46 @@ def apply_calculations_on_dataframe(df):
     df["oer"] = df["operating_expenses_y2"] / df["total_rent"] # Operating Expense Ratio (standard industry metric)
     df["egi"] = df["total_rent"] - df["monthly_vacancy_costs_y2"] # Effective Gross Income
     df["debt_yield"] = df["annual_NOI_y2"] / df["loan_amount"] # Debt Yield (lender metric)
-    df["5y_forecast"] = df.apply(get_expected_gains, axis=1, args=(5,))
-    df["10y_forecast"] = df.apply(get_expected_gains, axis=1, args=(10,))
-    df["20y_forecast"] = df.apply(get_expected_gains, axis=1, args=(20,))
-    df["mobility_score"] = df.apply(get_mobility_score, axis=1)
+    df["5y_forecast"] = df.apply(get_expected_gains, axis=1, args=(5,ASSUMPTIONS,LOAN,))
+    df["10y_forecast"] = df.apply(get_expected_gains, axis=1, args=(10,ASSUMPTIONS,LOAN,))
+    df["20y_forecast"] = df.apply(get_expected_gains, axis=1, args=(20,ASSUMPTIONS,LOAN,))
+    df["mobility_score"] = (df["walk_score"] * 0.6) + (df["transit_score"] * 0.30) + (df["bike_score"] * 0.10)
     df["piti"] = df['monthly_mortgage'] + df['monthly_mip'] + df['monthly_taxes'] + df['monthly_insurance']
-    df['costs_to_income'] = df["piti"] / after_tax_monthly_income
+    df['costs_to_income'] = df["piti"] / ASSUMPTIONS['after_tax_monthly_income']
     df["monthly_depreciation"] = (df["purchase_price"] * (1 - LAND_VALUE_PCT)) / DEPRECIATION_YEARS / 12
     df["tax_savings_monthly"] = df["monthly_depreciation"] * combined_tax_rate
     df["after_tax_cash_flow_y1"] = df["monthly_cash_flow_y1"] + df["tax_savings_monthly"]
     df["after_tax_cash_flow_y2"] = df["monthly_cash_flow_y2"] + df["tax_savings_monthly"]
     df["future_value_5yr"] = df.apply(
-        lambda row: row["purchase_price"] * ((1 + (appreciation_rate if row["units"] == 0 else mf_appreciation_rate)) ** 5),
+        lambda row: row["purchase_price"] * ((1 + (ASSUMPTIONS['appreciation_rate'] if row["units"] == 0 else ASSUMPTIONS['mf_appreciation_rate'])) ** 5),
         axis=1
     )
     df["future_value_10yr"] = df.apply(
-        lambda row: row["purchase_price"] * ((1 + (appreciation_rate if row["units"] == 0 else mf_appreciation_rate)) ** 10),
+        lambda row: row["purchase_price"] * ((1 + (ASSUMPTIONS['appreciation_rate'] if row["units"] == 0 else ASSUMPTIONS['mf_appreciation_rate'])) ** 10),
         axis=1
     )
     df["future_value_20yr"] = df.apply(
-        lambda row: row["purchase_price"] * ((1 + (appreciation_rate if row["units"] == 0 else mf_appreciation_rate)) ** 20),
+        lambda row: row["purchase_price"] * ((1 + (ASSUMPTIONS['appreciation_rate'] if row["units"] == 0 else ASSUMPTIONS['mf_appreciation_rate'])) ** 20),
         axis=1
     )
-    df["net_proceeds_5yr"] = df.apply(calculate_net_proceeds, axis=1, args=(5, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
-    df["net_proceeds_10yr"] = df.apply(calculate_net_proceeds, axis=1, args=(10, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
-    df["net_proceeds_20yr"] = df.apply(calculate_net_proceeds, axis=1, args=(20, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE))
+    df["net_proceeds_5yr"] = df.apply(calculate_net_proceeds, axis=1, args=(5, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, ASSUMPTIONS, LOAN))
+    df["net_proceeds_10yr"] = df.apply(calculate_net_proceeds, axis=1, args=(10, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, ASSUMPTIONS, LOAN))
+    df["net_proceeds_20yr"] = df.apply(calculate_net_proceeds, axis=1, args=(20, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, ASSUMPTIONS, LOAN))
     df["equity_multiple_5yr"] = (df["5y_forecast"] + df["cash_needed"]) / df["cash_needed"]
     df["equity_multiple_10yr"] = (df["10y_forecast"] + df["cash_needed"]) / df["cash_needed"]
     df["equity_multiple_20yr"] = (df["20y_forecast"] + df["cash_needed"]) / df["cash_needed"]
     df["avg_annual_return_5yr"] = ((df["5y_forecast"] / df["cash_needed"]) / 5) * 100
     df["avg_annual_return_10yr"] = ((df["10y_forecast"] / df["cash_needed"]) / 10) * 100
     df["avg_annual_return_20yr"] = ((df["20y_forecast"] / df["cash_needed"]) / 20) * 100
-    df["roe_y2"] = df.apply(calculate_roe, axis=1)
+    df["roe_y2"] = df.apply(calculate_roe, axis=1, args=[LOAN,])
     df["leverage_benefit"] = df["CoC_y2"] - (df["annual_NOI_y2"] / df["purchase_price"])
     df["payback_period_years"] = df.apply(calculate_payback_period, axis=1)
-    df["irr_5yr"] = df.apply(calculate_irr, axis=1, args=(5,))
-    df["irr_10yr"] = df.apply(calculate_irr, axis=1, args=(10,))
-    df["irr_20yr"] = df.apply(calculate_irr, axis=1, args=(20,))
-    df["npv_5yr"] = df.apply(calculate_npv, axis=1, args=(5,))
-    df["npv_10yr"] = df.apply(calculate_npv, axis=1, args=(10,))
-    df["npv_20yr"] = df.apply(calculate_npv, axis=1, args=(20,))
+    df["irr_5yr"] = df.apply(calculate_irr, axis=1, args=(5,ASSUMPTIONS))
+    df["irr_10yr"] = df.apply(calculate_irr, axis=1, args=(10,ASSUMPTIONS))
+    df["irr_20yr"] = df.apply(calculate_irr, axis=1, args=(20,ASSUMPTIONS))
+    df["npv_5yr"] = df.apply(calculate_npv, axis=1, args=(5,ASSUMPTIONS))
+    df["npv_10yr"] = df.apply(calculate_npv, axis=1, args=(10,ASSUMPTIONS))
+    df["npv_20yr"] = df.apply(calculate_npv, axis=1, args=(20,ASSUMPTIONS))
     df["fair_value_5yr"] = df["purchase_price"] + df["npv_5yr"]
     df["fair_value_10yr"] = df["purchase_price"] + df["npv_10yr"]
     df["fair_value_20yr"] = df["purchase_price"] + df["npv_20yr"]
@@ -691,98 +458,6 @@ def display_y2_calculations(properties_df=None):
 
     console.print(table)
 
-def calculate_quintile_colors_for_metrics(dataframe):
-    """
-    Calculate quintile-based colors for all metrics across ALL properties.
-    Uses 3-color scheme: Green (top 40%), Yellow (middle 20%), Red (bottom 40%).
-
-    Returns a dictionary mapping (address, metric_name) -> color_string
-    """
-    import numpy as np
-
-    # Define which metrics should be colored with "lower is better" logic
-    lower_is_better = {
-        'price_per_door',
-        'break_even_occupancy',
-        'oer',
-        'payback_period_years'
-    }
-
-    # Metric column name to actual dataframe column mapping
-    metric_columns = {
-        'price_per_door': 'price_per_door',
-        'rent_per_sqft': 'rent_per_sqft',
-        'break_even_occupancy': 'break_even_occupancy',
-        'break_even_vacancy': 'break_even_vacancy',
-        'oer': 'oer',
-        'egi': 'egi',
-        'debt_yield': 'debt_yield',
-        'monthly_depreciation': 'monthly_depreciation',
-        'tax_savings_monthly': 'tax_savings_monthly',
-        'after_tax_cash_flow_y1': 'after_tax_cash_flow_y1',
-        'after_tax_cash_flow_y2': 'after_tax_cash_flow_y2',
-        'future_value_10yr': 'future_value_10yr',
-        'net_proceeds_10yr': 'net_proceeds_10yr',
-        'equity_multiple_10yr': 'equity_multiple_10yr',
-        'avg_annual_return_10yr': 'avg_annual_return_10yr',
-        'roe_y2': 'roe_y2',
-        'leverage_benefit': 'leverage_benefit',
-        'payback_period_years': 'payback_period_years',
-        'irr_10yr': 'irr_10yr',
-        'npv_10yr': 'npv_10yr',
-        'cash_flow_y2_downside_10pct': 'cash_flow_y2_downside_10pct'
-    }
-
-    color_map = {}
-
-    for metric_name, col_name in metric_columns.items():
-        if col_name not in dataframe.columns:
-            continue
-
-        # Filter out special values (inf, -inf, NaN)
-        valid_mask = ~(dataframe[col_name].isna() |
-                      np.isinf(dataframe[col_name]))
-        valid_data = dataframe[valid_mask][col_name]
-
-        if len(valid_data) == 0:
-            # No valid data, skip this metric
-            continue
-
-        # Calculate 40th and 60th percentiles
-        p40 = np.percentile(valid_data, 40)
-        p60 = np.percentile(valid_data, 60)
-
-        # Assign colors to each property for this metric
-        for idx, row in dataframe.iterrows():
-            address = row['address1']
-            value = row[col_name]
-
-            # Handle special values with gray color
-            if pd.isna(value) or np.isinf(value):
-                color = 'dim white'
-            else:
-                # Determine color based on quintile and direction
-                if metric_name in lower_is_better:
-                    # Lower is better: green for low values, red for high
-                    if value <= p40:
-                        color = 'green'
-                    elif value <= p60:
-                        color = 'yellow'
-                    else:
-                        color = 'red'
-                else:
-                    # Higher is better: green for high values, red for low
-                    if value >= p60:
-                        color = 'green'
-                    elif value >= p40:
-                        color = 'yellow'
-                    else:
-                        color = 'red'
-
-            color_map[(address, metric_name)] = color
-
-    return color_map
-
 def display_property_metrics(properties_df=None):
     dataframe = df if properties_df is None else properties_df
     console.print("\n[bold]Column Key:[/bold]")
@@ -1013,8 +688,6 @@ def get_all_phase2_properties():
     if not completed_df.empty:
         completed_df['property_condition'] = completed_df.apply(lambda row: inspections.get_property_condition(row), axis=1) # TODO - finish this
         completed_df['has_inspection_dealbreakers'] = completed_df.apply(lambda row: inspections.has_dealbreakers(row), axis=1) # TODO - finish this
-        completed_df['seller_motivation_score'] = completed_df.apply(lambda row: get_seller_motivation_score(row), axis=1)  # TODO - finish this
-        completed_df['rentability_score'] = completed_df.apply(lambda row: get_rentability_score(row), axis=1)  # TODO - finish this
         completed_df['total_diy_repair_costs'] = completed_df.apply(lambda row: inspections.get_total_diy_repair_costs(row), axis=1)  # TODO - finish this
         completed_df['total_pro_repair_costs'] = completed_df.apply(lambda row: inspections.get_total_pro_repair_costs(row), axis=1)  # TODO - finish this
         completed_df['est_diy_repair_costs'] = completed_df.apply(lambda row: inspections.get_est_diy_repair_costs(row), axis=1)  # TODO - finish this
@@ -1283,17 +956,6 @@ def display_all_phase2_qualifying_properties():
     else:
       display_all_properties(properties_df=dfs["disqualifiers"], title="Phase 2 Disqualifiers")
 
-def display_creative_pricing_all_properties():
-    creative_df = get_additional_room_rental_df()
-    display_all_properties(
-      properties_df=creative_df,
-      title="All properties with additional rooms rented",
-      show_min_rent_data=True
-    )
-
-def calculate_additional_room_rent(row):
-    return int(row['min_rent_unit_beds'] - 1) * 400
-
 def get_additional_room_rental_df():
     dataframe = df.copy()
     df2 = dataframe.query('min_rent_unit_beds > 1').copy()
@@ -1342,7 +1004,6 @@ def handle_status_change(property_id):
           print("Update response has no 'data' attribute")
     except Exception as e:
         print(f"Changing statusfor {property_id} failed: {str(e)}")
-
 
 def display_all_properties_info(properties_df):
     """Display all properties with basic info: address, sqft, age, units, mobility scores, and electricity cost"""
@@ -1692,69 +1353,6 @@ def analyze_property(property_id):
 
     console.print(projections_table)
 
-    criteria_table = Table(title="Investment Criteria Breakdown", show_header=True, header_style="bold magenta")
-    criteria_table.add_column("Criteria", style="yellow", width=25)
-    criteria_table.add_column("Score", justify="right", style="white", width=8)
-    criteria_table.add_column("Max", justify="right", style="dim white", width=5)
-    criteria_table.add_column("Details", style="dim cyan")
-    
-    cf_y2_score = (3 if row["monthly_cash_flow_y2"] > 500 else 2 if row["monthly_cash_flow_y2"] > 400 else 1 if row["monthly_cash_flow_y2"] > 200 else 0)
-    cf_y1_bonus = (3 if row["monthly_cash_flow_y1"] > 0 else 2 if row["monthly_cash_flow_y1"] > -350 else 0)
-    coc_score = (3 if row["CoC_y2"] > 0.15 else 2 if row["CoC_y2"] > 0.12 else 1 if row["CoC_y2"] > 0.08 else 0)
-    cap_score = (1 if row["cap_rate_y2"] > 0.06 else 0)
-    mgr_score = (2 if row["MGR_PP"] >= 0.01 else 1 if row["MGR_PP"] >= 0.008 else 0)
-    opex_score = (2 if 0.4 <= row["OpEx_Rent"] <= 0.6 else 1 if 0.3 <= row["OpEx_Rent"] <= 0.7 else 0)
-    dscr_score = (2 if row["DSCR"] >= 1.25 else 1 if row["DSCR"] >= 1.1 else 0)
-    cash_score = (2 if row["cash_needed"] < 20000 else 1 if row["cash_needed"] < 30000 else 0)
-    grm_score = (1 if row["GRM_y2"] < 12 else 0)
-    sqft_score = (3 if row["cost_per_sqrft"] < 80 else 2 if row["cost_per_sqrft"] < 100 else 1 if row["cost_per_sqrft"] < 150 else 0)
-    age_score = (3 if pd.notna(row["home_age"]) and row["home_age"] < 10 else 2 if pd.notna(row["home_age"]) and row["home_age"] < 20 else 1 if pd.notna(row["home_age"]) and row["home_age"] < 30 else 0)
-    multi_family_score = (1 if row["units"] > 0 else 0)
-    liquidity_score = (2 if row["units"] == 0 else 1 if row["units"] == 2 else 0)
-
-    # New scoring metrics
-    irr_score = (2 if row["irr_10yr"] >= 0.15 else 1 if row["irr_10yr"] >= 0.12 else 0)
-    at_cf_score = (2 if row["after_tax_cash_flow_y2"] > 600 else 1 if row["after_tax_cash_flow_y2"] > 400 else 0)
-    payback_score = (2 if row["payback_period_years"] < 7 and row["payback_period_years"] != float('inf') else
-                     1 if row["payback_period_years"] < 10 and row["payback_period_years"] != float('inf') else 0)
-    downside_y1_score = (2 if row["cash_flow_y1_downside_10pct"] > 0 else 1 if row["cash_flow_y1_downside_10pct"] > -200 else 0)
-    downside_y2_score = (1 if row["cash_flow_y2_downside_10pct"] > 0 else 0)
-    equity_mult_score = (2 if row["equity_multiple_10yr"] >= 3 else 1 if row["equity_multiple_10yr"] >= 2 else 0)
-    roe_score = (2 if row["roe_y2"] >= 0.20 else 1 if row["roe_y2"] >= 0.15 else 0)
-    leverage_score = (2 if row["leverage_benefit"] >= 0.05 else 1 if row["leverage_benefit"] >= 0.02 else 0)
-    breakeven_score = (1 if row["break_even_occupancy"] < 0.80 else 0)
-    proceeds_score = (1 if row["net_proceeds_10yr"] > 100000 else 0)
-    npv_score = (1 if row["npv_10yr"] > 20000 else 0)
-
-    criteria_table.add_row("Cash Flow Y2", f"[white]{cf_y2_score}[/white]", "3", f"${row['monthly_cash_flow_y2']:.0f}/month")
-    criteria_table.add_row("Cash Flow Y1 Bonus", f"[white]{cf_y1_bonus}[/white]", "3", f"${row['monthly_cash_flow_y1']:.0f}/month")
-    criteria_table.add_row("Cash-on-Cash Return", f"[white]{coc_score}[/white]", "3", f"{row['CoC_y2']:.1%}")
-    criteria_table.add_row("Cap Rate", f"[white]{cap_score}[/white]", "1", f"{row['cap_rate_y2']:.1%}")
-    criteria_table.add_row("1% Rule", f"[white]{mgr_score}[/white]", "2", f"{row['MGR_PP']:.2%}")
-    criteria_table.add_row("50% Rule", f"[white]{opex_score}[/white]", "2", f"{row['OpEx_Rent']:.1%}")
-    criteria_table.add_row("DSCR", f"[white]{dscr_score}[/white]", "2", f"{row['DSCR']:.2f}")
-    criteria_table.add_row("Cash Needed", f"[white]{cash_score}[/white]", "2", f"${row['cash_needed']:,.0f}")
-    criteria_table.add_row("GRM", f"[white]{grm_score}[/white]", "1", f"{row['GRM_y2']:.1f}")
-    criteria_table.add_row("Cost per Sqft", f"[white]{sqft_score}[/white]", "3", f"${row['cost_per_sqrft']:.0f}")
-    criteria_table.add_row("Property Age", f"[white]{age_score}[/white]", "3", f"{row['home_age']:.0f} years" if pd.notna(row['home_age']) else 'N/A')
-    property_type = "SFH" if row["units"] == 0 else f"{row["units"]}-Unit"
-    criteria_table.add_row("Multi-Family Bonus", f"[white]{multi_family_score}[/white]", "1", property_type)
-    liquidity_label = "SFH" if row["units"] == 0 else "Duplex" if row["units"] == 2 else "3/4-Plex"
-    criteria_table.add_row("Liquidity Score", f"[white]{liquidity_score}[/white]", "2", liquidity_label)
-    criteria_table.add_row("IRR (10yr)", f"[white]{irr_score}[/white]", "2", f"{row['irr_10yr']:.1%}")
-    criteria_table.add_row("After-Tax CF Y2", f"[white]{at_cf_score}[/white]", "2", f"${row['after_tax_cash_flow_y2']:.0f}/month")
-    payback_display = f"{row['payback_period_years']:.1f} yrs" if row['payback_period_years'] != float('inf') else "Never"
-    criteria_table.add_row("Payback Period", f"[white]{payback_score}[/white]", "2", payback_display)
-    criteria_table.add_row("Y1 Rent Drop Resilience (10%)", f"[white]{downside_y1_score}[/white]", "2", f"${row['cash_flow_y1_downside_10pct']:.0f}/month")
-    criteria_table.add_row("Y2 Rent Drop Resilience (10%)", f"[white]{downside_y2_score}[/white]", "1", f"${row['cash_flow_y2_downside_10pct']:.0f}/month")
-    criteria_table.add_row("Equity Multiple (10yr)", f"[white]{equity_mult_score}[/white]", "2", f"{row['equity_multiple_10yr']:.2f}x")
-    criteria_table.add_row("Return on Equity Y2", f"[white]{roe_score}[/white]", "2", f"{row['roe_y2']:.1%}")
-    criteria_table.add_row("Leverage Benefit", f"[white]{leverage_score}[/white]", "2", f"{row['leverage_benefit']:.1%}")
-    criteria_table.add_row("Break-Even Occupancy", f"[white]{breakeven_score}[/white]", "1", f"{row['break_even_occupancy']:.1%}")
-    criteria_table.add_row("Net Proceeds (10yr)", f"[white]{proceeds_score}[/white]", "1", f"${row['net_proceeds_10yr']:,.0f}")
-    criteria_table.add_row("NPV (10yr)", f"[white]{npv_score}[/white]", "1", f"${row['npv_10yr']:,.0f}")
-    console.print(criteria_table)
-
     mobility_table = Table(title="Mobility Score Breakdown", show_header=True, header_style="bold magenta")
     mobility_table.add_column("Metric", style="yellow", width=25)
     mobility_table.add_column("Score", justify="right", style="white", width=8)
@@ -1887,32 +1485,29 @@ def analyze_property(property_id):
         downloads_folder = os.getenv("DOWNLOADS_FOLDER", ".")
         safe_address = property_id.replace(' ', '_').replace(',', '').replace('.', '')
         output_path = os.path.join(downloads_folder, f"{safe_address}_analysis.pdf")
-
         row = df[df['address1'] == property_id].iloc[0]
 
-        # Prepare loan info dict
         loan_info = {
-            'interest_rate': interest_rate,
-            'apr_rate': apr_rate,
-            'down_payment_rate': down_payment_rate,
-            'years': loan_length_years,
-            'mip_upfront_rate': mip_upfront_rate,
-            'mip_annual_rate': mip_annual_rate,
+            'interest_rate': LOAN['interest_rate'],
+            'apr_rate': LOAN['apr_rate'],
+            'down_payment_rate': LOAN['down_payment_rate'],
+            'years': LOAN['loan_length_years'],
+            'mip_upfront_rate': LOAN['mip_upfront_rate'],
+            'mip_annual_rate': LOAN['mip_annual_rate'],
         }
 
-        # Prepare assumptions dict
-        assumptions = {
-            'appreciation_rate': appreciation_rate,
-            'rent_appreciation_rate': rent_appreciation_rate,
-            'property_tax_rate': property_tax_rate,
-            'home_insurance_rate': home_insurance_rate,
-            'vacancy_rate': vacancy_rate,
-            'repair_savings_rate': repair_savings_rate,
-            'closing_costs_rate': closing_costs_rate,
-            'discount_rate': discount_rate,
+        assumptions_info = {
+            'appreciation_rate': ASSUMPTIONS['appreciation_rate'],
+            'rent_appreciation_rate': ASSUMPTIONS['rent_appreciation_rate'],
+            'property_tax_rate': ASSUMPTIONS['property_tax_rate'],
+            'home_insurance_rate': ASSUMPTIONS['home_insurance_rate'],
+            'vacancy_rate': ASSUMPTIONS['vacancy_rate'],
+            'repair_savings_rate': ASSUMPTIONS['repair_savings_rate'],
+            'closing_costs_rate': ASSUMPTIONS['closing_costs_rate'],
+            'discount_rate': ASSUMPTIONS['discount_rate'],
         }
 
-        result_path = export_property_analysis(row, rents, after_tax_monthly_income, loan_info, assumptions, output_path)
+        result_path = export_property_analysis(row, rents, ASSUMPTIONS['after_tax_monthly_income'], loan_info, assumptions_info, output_path)
         console.print(f"[green]PDF exported successfully to: {result_path}[/green]")
 
 def handle_property_wide_research_generation(property_id: str):
@@ -2123,7 +1718,6 @@ def handle_view_research_reports(property_id: str):
             else:
                 console.print("[red]Error loading report.[/red]")
 
-
 def handle_risk_assessment(property_id: str):
     """Handle viewing and generating risk assessment reports"""
     # Check for existing risk assessment reports
@@ -2238,7 +1832,6 @@ def handle_risk_assessment(property_id: str):
                             console.print(md)
                 except Exception as e:
                     console.print(f"[red]Error displaying report: {str(e)}[/red]")
-
 
 def handle_property_summary(property_id: str):
     """Handle viewing and generating property narrative summary reports"""
@@ -2365,7 +1958,6 @@ def handle_property_summary(property_id: str):
                             console.print(md)
                 except Exception as e:
                     console.print(f"[red]Error displaying report: {str(e)}[/red]")
-
 
 def display_rent_estimates_comparison(property_id: str, estimates: dict, existing_estimates: dict, 
                                     unit_configs: list, result_cost: float, selected_report_info: str) -> bool:
@@ -2514,133 +2106,6 @@ def display_new_property_qualification(address1):
         f"[{cre_style}]{creative_msg}[/{cre_style}]",
         title="Phase 1 Qualification Results"
     ))
-
-def is_property_maps_done(row) -> bool:
-    places = ['gas_station', 'school', 'university', 'grocery_or_supermarket', 'hospital', 'park', 'transit_station']
-    is_done = True
-
-    for place in places:
-        distance = row.get(f'{place}_distance_miles')
-        count = row.get(f'{place}_count_5mi')
-
-        if pd.isna(distance) and distance is None:
-            is_done = False
-        if pd.isna(count) and count is None:
-            is_done = False
-
-    return is_done
-
-def is_property_assessment_done(row) -> bool:
-    bool_fields = [
-        'obtained_county_records', 'has_short_ownership_pattern',
-        'has_deed_restrictions', 'has_hao', 'has_historic_preservation',
-        'has_easements', 'in_flood_zone', 'has_open_pulled_permits',
-        'has_work_done_wo_permits'
-    ]
-
-    other_fields = [
-        'previous_owner_count', 'last_purchase_price', 'last_purchase_date'
-    ]
-
-    text_fields = [
-        'setbacks', 'easements', 'county_record_notes',
-        'permit_notes', 'whitepages_notes'
-    ]
-
-    for field in bool_fields + other_fields:
-        value = row.get(field)
-        if value is None or pd.isna(value):
-            return False
-
-    for field in text_fields:
-        value = row.get(field)
-        if value is None or pd.isna(value) or value == '':
-            return False
-
-    return True
-
-def is_property_maps_done_vectorized(df: pd.DataFrame) -> pd.Series:
-    """
-    Vectorized version of is_property_maps_done.
-    Returns a Series of bool indicating whether each property has complete maps data.
-
-    Args:
-        df: DataFrame with properties
-
-    Returns:
-        Series of bool values
-    """
-    places = ['gas_station', 'school', 'university', 'grocery_or_supermarket',
-              'hospital', 'park', 'transit_station']
-
-    # Start with all True
-    is_done = pd.Series(True, index=df.index)
-
-    # For each place type, check both distance and count columns
-    for place in places:
-        distance_col = f'{place}_distance_miles'
-        count_col = f'{place}_count_5mi'
-
-        # Mark as not done if either column is missing or has null/NaN
-        if distance_col in df.columns:
-            is_done &= df[distance_col].notna()
-        else:
-            is_done = False  # Column doesn't exist at all
-
-        if count_col in df.columns:
-            is_done &= df[count_col].notna()
-        else:
-            is_done = False  # Column doesn't exist at all
-
-    return is_done
-
-
-def is_property_assessment_done_vectorized(df: pd.DataFrame) -> pd.Series:
-    """
-    Vectorized version of is_property_assessment_done.
-    Returns a Series of bool indicating whether each property has complete assessment data.
-
-    Args:
-        df: DataFrame with properties
-
-    Returns:
-        Series of bool values
-    """
-    bool_fields = [
-        'obtained_county_records', 'has_short_ownership_pattern',
-        'has_deed_restrictions', 'has_hao', 'has_historic_preservation',
-        'has_easements', 'in_flood_zone', 'has_open_pulled_permits',
-        'has_work_done_wo_permits'
-    ]
-
-    other_fields = [
-        'previous_owner_count', 'last_purchase_price', 'last_purchase_date'
-    ]
-
-    text_fields = [
-        'setbacks', 'easements', 'county_record_notes',
-        'permit_notes', 'whitepages_notes'
-    ]
-
-    # Start with all True
-    is_done = pd.Series(True, index=df.index)
-
-    # Check bool_fields and other_fields - must not be None or NaN
-    for field in bool_fields + other_fields:
-        if field in df.columns:
-            is_done &= df[field].notna()
-        else:
-            is_done = False  # Column doesn't exist
-
-    # Check text_fields - must not be None, NaN, or empty string
-    for field in text_fields:
-        if field in df.columns:
-            # Must be not null AND not empty string
-            is_done &= df[field].notna() & (df[field] != '')
-        else:
-            is_done = False  # Column doesn't exist
-
-    return is_done
 
 def get_phase2_data_checklist():
     """
@@ -2947,273 +2412,6 @@ def handle_changing_loan():
 
 using_application = True
 
-def calculate_property_type_statistics(df_active, metric_column):
-    """
-    Calculate average, min, and max for a metric grouped by property type.
-
-    Args:
-        df_active: DataFrame filtered to active properties
-        metric_column: Column name to calculate statistics for
-
-    Returns:
-        Dictionary with property types as keys (0=SFH, 2=2PX, 3=3PX, 4=4PX)
-        Each value is a dict with 'avg', 'min', 'max', 'count'
-    """
-    stats = {}
-
-    for units in [0, 2, 3, 4]:
-        prop_type_df = df_active[df_active['units'] == units]
-
-        if len(prop_type_df) > 0 and metric_column in prop_type_df.columns:
-            # Filter out NaN values
-            values = prop_type_df[metric_column].dropna()
-
-            if len(values) > 0:
-                stats[units] = {
-                    'avg': values.mean(),
-                    'min': values.min(),
-                    'max': values.max(),
-                    'count': len(values)
-                }
-            else:
-                stats[units] = {'avg': None, 'min': None, 'max': None, 'count': 0}
-        else:
-            stats[units] = {'avg': None, 'min': None, 'max': None, 'count': 0}
-
-    return stats
-
-def display_market_summary_table(df_active):
-    """Display high-level summary table with most critical metrics by property type."""
-    console.print("\n[bold cyan]═" * 80 + "[/bold cyan]")
-    console.print("[bold cyan]MARKET SUMMARY - Active Properties by Type[/bold cyan]")
-    console.print("[bold cyan]═" * 80 + "[/bold cyan]\n")
-
-    table = Table(show_header=True, header_style="bold magenta", title="Key Market Metrics")
-
-    # Define columns
-    table.add_column("Metric", style="cyan", no_wrap=True)
-    table.add_column("SFH", justify="right", style="yellow")
-    table.add_column("Duplex", justify="right", style="red")
-    table.add_column("Triplex", justify="right", style="blue")
-    table.add_column("Fourplex", justify="right", style="green")
-
-    # Property type labels
-    prop_type_labels = {0: "SFH", 2: "Duplex", 3: "Triplex", 4: "Fourplex"}
-
-    # Metrics to display
-    metrics = [
-        ("Count", "units", "count", format_number, False),
-        ("Avg Price", "purchase_price", "avg", format_currency, True),
-        ("Avg Cash Needed", "cash_needed", "avg", format_currency, True),
-        ("Avg Monthly CF Y2", "monthly_cash_flow_y2", "avg", format_currency, True),
-        ("Avg Cap Rate Y2", "cap_rate_y2", "avg", format_percentage, True),
-        ("Phase 1 Qualified %", None, "phase1_pct", format_percentage, False),
-    ]
-
-    # Get Phase 1 qualifiers for percentage calculation
-    phase1_df = get_combined_phase1_qualifiers(active=True)
-
-    for metric_label, metric_col, stat_type, format_func, show_range in metrics:
-        row = [metric_label]
-
-        for units in [0, 2, 3, 4]:
-            prop_type_df = df_active[df_active['units'] == units]
-            count = len(prop_type_df)
-
-            if count == 0:
-                row.append("[dim]N/A[/dim]")
-                continue
-
-            if stat_type == "count":
-                row.append(str(count))
-            elif stat_type == "phase1_pct":
-                phase1_count = len(phase1_df[phase1_df['units'] == units])
-                pct = (phase1_count / count) * 100 if count > 0 else 0
-                row.append(format_percentage(pct / 100))
-            else:
-                stats = calculate_property_type_statistics(df_active, metric_col)
-
-                if stats[units]['avg'] is None:
-                    row.append("[dim]N/A[/dim]")
-                else:
-                    avg_val = stats[units]['avg']
-                    if show_range:
-                        min_val = stats[units]['min']
-                        max_val = stats[units]['max']
-                        cell = f"{format_func(avg_val)}\n[dim]({format_func(min_val)}-{format_func(max_val)})[/dim]"
-                    else:
-                        cell = format_func(avg_val)
-                    row.append(cell)
-
-        table.add_row(*row)
-
-    console.print(table)
-    console.print()
-
-def display_category_table(df_active, category_name, metrics_config):
-    """
-    Display detailed statistics table for a specific category.
-
-    Args:
-        df_active: DataFrame filtered to active properties
-        category_name: Name of the category
-        metrics_config: List of tuples (label, column_name, format_function, invert_for_best)
-    """
-    console.print(f"\n[bold cyan]{'═' * 80}[/bold cyan]")
-    console.print(f"[bold cyan]{category_name}[/bold cyan]")
-    console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
-
-    table = Table(show_header=True, header_style="bold magenta", title=category_name)
-
-    table.add_column("Metric", style="cyan", no_wrap=True)
-    table.add_column("SFH", justify="right")
-    table.add_column("Duplex", justify="right")
-    table.add_column("Triplex", justify="right")
-    table.add_column("Fourplex", justify="right")
-
-    for metric_label, metric_col, format_func, invert_for_best in metrics_config:
-        row = [metric_label]
-        values_by_type = {}
-
-        # Calculate stats for each property type
-        for units in [0, 2, 3, 4]:
-            stats = calculate_property_type_statistics(df_active, metric_col)
-
-            if stats[units]['avg'] is None:
-                values_by_type[units] = None
-            else:
-                values_by_type[units] = {
-                    'avg': stats[units]['avg'],
-                    'min': stats[units]['min'],
-                    'max': stats[units]['max']
-                }
-
-        # Find best and worst (for color coding)
-        valid_avgs = {k: v['avg'] for k, v in values_by_type.items() if v is not None}
-
-        best_units = None
-        worst_units = None
-        if valid_avgs:
-            if invert_for_best:
-                # Lower is better (e.g., costs, risk metrics)
-                best_units = min(valid_avgs, key=valid_avgs.get)
-                worst_units = max(valid_avgs, key=valid_avgs.get)
-            else:
-                # Higher is better (e.g., returns, cash flow)
-                best_units = max(valid_avgs, key=valid_avgs.get)
-                worst_units = min(valid_avgs, key=valid_avgs.get)
-
-        # Build row with color coding
-        for units in [0, 2, 3, 4]:
-            if values_by_type[units] is None:
-                row.append("[dim]N/A[/dim]")
-            else:
-                avg_val = values_by_type[units]['avg']
-                min_val = values_by_type[units]['min']
-                max_val = values_by_type[units]['max']
-
-                # Format the cell
-                formatted_avg = format_func(avg_val)
-                formatted_min = format_func(min_val)
-                formatted_max = format_func(max_val)
-
-                # Apply color coding
-                if units == best_units:
-                    cell = f"[bold green]{formatted_avg}[/bold green]\n[dim]({formatted_min}-{formatted_max})[/dim]"
-                elif units == worst_units:
-                    cell = f"[bold red]{formatted_avg}[/bold red]\n[dim]({formatted_min}-{formatted_max})[/dim]"
-                else:
-                    cell = f"{formatted_avg}\n[dim]({formatted_min}-{formatted_max})[/dim]"
-
-                row.append(cell)
-
-        table.add_row(*row)
-
-    console.print(table)
-    console.print()
-
-def run_market_analysis_by_property_type():
-    """Main function to display market analysis with summary and drill-down categories."""
-    df_active = df.query("status == 'active'")
-
-    # Display summary table first
-    display_market_summary_table(df_active)
-
-    # Show drill-down menu
-    categories = {
-        "Market Overview": [
-            ("Property Count", "units", format_number, False),
-            ("Avg Property Age (years)", "built_in", lambda x: format_number(2025 - x), True),
-            ("Avg Square Footage", "square_ft", format_number, False),
-            ("% Beat Market (NPV>0)", "beats_market", lambda x: format_percentage(x), False),
-        ],
-        "Pricing & Investment Requirements": [
-            ("Purchase Price", "purchase_price", format_currency, False),
-            ("Cash Needed", "cash_needed", format_currency, True),
-            ("Down Payment", "down_payment", format_currency, False),
-            ("Closing Costs", "closing_costs", format_currency, True),
-            ("Price per Door/Bed", "price_per_door", format_currency, True),
-            ("Cost per Sq Ft", "purchase_price", lambda x: format_currency(x), False),
-        ],
-        "Income Analysis": [
-            ("Total Monthly Rent Y2", "total_rent", format_currency, False),
-            ("Net Rent Y1 (House-hack)", "net_rent_y1", format_currency, False),
-            ("Rent per Sq Ft", "rent_per_sqft", format_currency, False),
-            ("MGR/PP (1% Rule)", "MGR_PP", format_percentage, False),
-        ],
-        "Cash Flow Performance": [
-            ("Monthly CF Y1", "monthly_cash_flow_y1", format_currency, False),
-            ("Monthly CF Y2", "monthly_cash_flow_y2", format_currency, False),
-            ("After-Tax CF Y2", "after_tax_cash_flow_y2", format_currency, False),
-            ("Annual CF Y2", "annual_cash_flow_y2", format_currency, False),
-            ("CF Y2 (10% Rent Drop)", "cash_flow_y2_downside_10pct", format_currency, False),
-        ],
-        "Returns & Investment Performance": [
-            ("Cap Rate Y2", "cap_rate_y2", format_percentage, False),
-            ("Cash-on-Cash Y2", "CoC_y2", format_percentage, False),
-            ("IRR (10-year)", "irr_10yr", format_percentage, False),
-            ("NPV (10-year)", "npv_10yr", format_currency, False),
-            ("Equity Multiple (10yr)", "equity_multiple_10yr", format_number, False),
-            ("Avg Annual Return % (10yr)", "avg_annual_return_10yr", format_percentage, False),
-        ],
-        "Risk & Qualification Metrics": [
-            ("DSCR", "DSCR", format_number, False),
-            ("FHA Self-Sufficiency", "fha_self_sufficiency_ratio", format_percentage, False),
-            ("Operating Expense Ratio", "oer", format_percentage, True),
-            ("Break-Even Occupancy %", "break_even_occupancy", format_percentage, True),
-            ("OpEx to Rent (50% Rule)", "OpEx_Rent", format_percentage, True),
-            ("Housing Cost to Income", "costs_to_income", format_percentage, True),
-        ],
-        "Quality & Location Scores": [
-            ("Mobility Score", "mobility_score", format_number, False),
-            ("Walk Score", "walk_score", format_number, False),
-            ("Transit Score", "transit_score", format_number, False),
-            ("Bike Score", "bike_score", format_number, False),
-        ],
-        "Long-Term Value (10-year)": [
-            ("Net Proceeds", "net_proceeds_10yr", format_currency, False),
-            ("Future Value", "future_value_10yr", format_currency, False),
-            ("Investment Gain", "5y_forecast", format_currency, False),
-            ("Return on Equity Y2", "roe_y2", format_percentage, False),
-            ("Leverage Benefit", "leverage_benefit", format_percentage, False),
-            ("Payback Period (years)", "payback_period_years", format_number, True),
-        ],
-    }
-
-    using_market_analysis = True
-    choices = list(categories.keys()) + ["Go back"]
-
-    while using_market_analysis:
-        option = questionary.select(
-            "Select a category to view detailed breakdown:",
-            choices=choices
-        ).ask()
-
-        if option == "Go back":
-            using_market_analysis = False
-        else:
-            display_category_table(df_active, option, categories[option])
-
 def run_all_properties_options():
     using_all_properties = True
     choices = [
@@ -3223,12 +2421,9 @@ def run_all_properties_options():
         "Phase 2 - Qualifiers",
         "All properties - Active",
         "All properties - Y2 Calculations",
-        "All properties - Reduce price and recalculate",
         "All properties - Property Info",
-        "All properties - Creative Pricing",
         "All properties - Investment Metrics",
-        "All properties - Sold / Passed (FHA)",
-        "Market Analysis by Property Type",
+        "All properties - Sold / Passed",
         "Go back",
     ]
 
@@ -3239,7 +2434,7 @@ def run_all_properties_options():
 
         if option == "Go back":
             using_all_properties = False
-        elif option == "All properties - Active (FHA)":
+        elif option == "All properties - Active":
             dataframe = df.query("status == 'active'")
             display_all_properties(
                 properties_df=dataframe, title="All active properties using FHA", show_prop_type=True
@@ -3252,20 +2447,11 @@ def run_all_properties_options():
             display_phase1_total_rent_differences()
         elif option == "All properties - Y2 Calculations":
             display_y2_calculations()
-        elif option == "All properties - Reduce price and recalculate":
-            percent = questionary.text(
-                "Enter a percent to reduce purchase price by"
-            ).ask()
-            converted = float(int(percent)) / 100.0
-            reduced_df = get_reduced_pp_df(reduction_factor=converted)
-            display_all_properties(properties_df=reduced_df, title=f"{converted}% Price Reduction")
         elif option == "All properties - Property Info":
             display_all_properties_info(properties_df=df)
-        elif option == "All properties - Creative Pricing":
-            display_creative_pricing_all_properties()
         elif option == "All properties - Investment Metrics":
             display_property_metrics()
-        elif option == "All properties - Sold / Passed (FHA)":
+        elif option == "All properties - Sold / Passed":
             dataframe = df.query("status != 'active'")
             display_all_properties(
                 properties_df=dataframe,
@@ -3274,8 +2460,6 @@ def run_all_properties_options():
             )
         elif option == "Phase 2 - Qualifiers":
             display_all_phase2_qualifying_properties()
-        elif option == "Market Analysis by Property Type":
-            run_market_analysis_by_property_type()
 
 def run_loans_options():
   using_loans = True
