@@ -116,44 +116,6 @@ def load_loan(loan_id):
     upfront_discounts = loan.upfront_discounts
     console.print("[green]FHA loan data reloaded successfully![/green]")
 
-def get_deal_score(row):
-    score = 0
-    # Y2 cashflow scoring - property-type specific to align with phase 1 criteria
-    if row["units"] == 0:  # Single family
-        score += (3 if row["monthly_cash_flow_y2"] > 300 else
-                  2 if row["monthly_cash_flow_y2"] >= -50 else 0)  # SFH phase 1 requires >= -$50
-    else:  # Multi-family
-        score += (3 if row["monthly_cash_flow_y2"] > 500 else
-                  2 if row["monthly_cash_flow_y2"] > 400 else
-                  1 if row["monthly_cash_flow_y2"] > 200 else 0)  # Multi-family phase 1 requires > $400
-    score += (3 if row["monthly_cash_flow_y1"] > 0 else 2 if row["monthly_cash_flow_y1"] > -400 else 0)  # House-hacking bonus (aligned with phase 1)
-    score += (3 if row["CoC_y2"] > 0.15 else 
-              2 if row["CoC_y2"] > 0.12 else 
-              1 if row["CoC_y2"] > 0.08 else 0)
-    score += (1 if row["cap_rate_y2"] > 0.06 else 0)
-    score += (2 if row["MGR_PP"] >= 0.01 else 1 if row["MGR_PP"] >= 0.008 else 0)  # 1% rule
-    score += (2 if 0.4 <= row["OpEx_Rent"] <= 0.6 else 1 if 0.3 <= row["OpEx_Rent"] <= 0.7 else 0)  # 50% rule
-    score += (2 if row["DSCR"] >= 1.25 else 1 if row["DSCR"] >= 1.1 else 0)
-    score += (2 if row["cash_needed"] < 20000 else 1 if row["cash_needed"] < 30000 else 0)
-    score += (1 if row["GRM_y2"] < 12 else 0)  # Lower GRM is better
-    score += (3 if row["cost_per_sqrft"] < 80 else 2 if row["cost_per_sqrft"] < 100 else 1 if row["cost_per_sqrft"] < 150 else 0)
-    score += (3 if pd.notna(row["home_age"]) and row["home_age"] < 10 else 2 if pd.notna(row["home_age"]) and row["home_age"] < 20 else 1 if pd.notna(row["home_age"]) and row["home_age"] < 30 else 0)
-    score += (1 if row["units"] > 0 else 0)  # Multi-family bonus
-    score += (2 if row["units"] == 0 else 1 if row["units"] == 2 else 0)  # Liquidity score
-    score += (2 if row["irr_10yr"] >= 0.15 else 1 if row["irr_10yr"] >= 0.12 else 0)  # IRR 10yr
-    score += (2 if row["after_tax_cash_flow_y2"] > 600 else 1 if row["after_tax_cash_flow_y2"] > 400 else 0)  # After-tax CF Y2
-    score += (2 if row["payback_period_years"] < 7 and row["payback_period_years"] != float('inf') else
-              1 if row["payback_period_years"] < 10 and row["payback_period_years"] != float('inf') else 0)  # Payback period
-    score += (2 if row["cash_flow_y1_downside_10pct"] > 0 else 1 if row["cash_flow_y1_downside_10pct"] > -200 else 0)  # Y1 downside resilience (heavier weight)
-    score += (1 if row["cash_flow_y2_downside_10pct"] > 0 else 0)  # Y2 downside resilience
-    score += (2 if row["equity_multiple_10yr"] >= 3 else 1 if row["equity_multiple_10yr"] >= 2 else 0)  # Equity multiple 10yr
-    score += (2 if row["roe_y2"] >= 0.20 else 1 if row["roe_y2"] >= 0.15 else 0)  # ROE Y2
-    score += (2 if row["leverage_benefit"] >= 0.05 else 1 if row["leverage_benefit"] >= 0.02 else 0)  # Leverage benefit
-    score += (1 if row["break_even_occupancy"] < 0.80 else 0)  # Break-even occupancy
-    score += (1 if row["net_proceeds_10yr"] > 100000 else 0)  # Net proceeds 10yr
-    score += (1 if row["npv_10yr"] > 20000 else 0)  # NPV 10yr (beats market)
-    return score
-
 def get_mobility_score(row):
     score = (row["walk_score"] * 0.6) + (row["transit_score"] * 0.30) + (row["bike_score"] * 0.10)
     return score
@@ -422,6 +384,11 @@ def apply_calculations_on_dataframe(df):
     df["monthly_cash_flow_y2"] = df["total_rent"] - df["total_monthly_cost_y2"] + df['ammoritization_estimate']
     df["annual_cash_flow_y1"] = df["monthly_cash_flow_y1"] * 12
     df["annual_cash_flow_y2"] = df["monthly_cash_flow_y2"] * 12
+
+
+    # all of these calculations for investmentment metrics are useful if you use the quick and dirty rent estimate
+    # so instead, these have to use the ESTIMATED MARKET RENT
+
     df["cap_rate_y1"] = df["annual_NOI_y1"] / df["purchase_price"]
     df["cap_rate_y2"] = df["annual_NOI_y2"] / df["purchase_price"]
     df["CoC_y1"] = df["annual_cash_flow_y1"] / df["cash_needed"]
@@ -493,7 +460,6 @@ def apply_calculations_on_dataframe(df):
     df["beats_market"] = df["npv_10yr"] > 0
     df["cash_flow_y1_downside_10pct"] = (df["net_rent_y1"] * 0.9) - df["total_monthly_cost_y1"]
     df["cash_flow_y2_downside_10pct"] = (df["total_rent"] * 0.9) - df["total_monthly_cost_y2"]
-    df["deal_score"] = df.apply(get_deal_score, axis=1)
     df["fha_self_sufficiency_ratio"] = (df["total_rent"] * 0.75) / df["piti"]  # Uses Y2 rent (whole-property for SFH)
     return df
 
@@ -605,12 +571,6 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
         dscr_style = "green" if row["DSCR"] >= 1.25 else "red"
         mgr_pp_style = "green" if row["MGR_PP"] >= 0.01 else "red"
 
-        deal_score_style = (
-            "green"
-            if row["deal_score"] >= 35
-            else ("yellow" if row["deal_score"] >= 25 else "red")
-        )
-
         mobility_score_style = (
             "green"
             if row["mobility_score"] >= mobility_75th_percentile
@@ -667,7 +627,6 @@ def display_all_properties(properties_df, title, show_status=False, show_min_ren
             # f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]",
             # f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]",
             f"[{costs_to_income_style}]{format_percentage(row['costs_to_income'])}[/{costs_to_income_style}]",
-            # f"[{deal_score_style}]{int(row['deal_score'])}/43[/{deal_score_style}]",
             # f"[{mobility_score_style}]{int(row['mobility_score'])}[/{mobility_score_style}]",
             # f"[{forecast_10y_style}]{format_currency(row['10y_forecast'])}[/{forecast_10y_style}]",
             f"[{irr_10yr_style}]{format_percentage(row['irr_10yr'])}[/{irr_10yr_style}]",
@@ -936,35 +895,32 @@ def display_property_metrics(properties_df=None):
 def get_all_phase1_qualifying_properties(active=True):
     """
     This method filters all properties based on our criteria for what is a financially viable property
-    Current criteria:
+    Current criteria using quick rent estimates:
       - status = 'active'
       - Cash needed must be below $25,000
       - SFH/MF: Monthly Cashflow with cheapest unit not rented above -400 (house hacking)
       - SFH/MF: Fully rented monthly cashflow above -200
       - Square Feet must be greater than or equal to 1000
-    """
-    status_criteria = "status == 'active'" if active else "status != 'active'"
-    criteria = (
-        f"{status_criteria} "
-        "& square_ft >= 1000 "
-        # "& MGR_PP > 0.01 "
-        # "& OpEx_Rent < 0.5 "
-        # "& DSCR > 1.25 "
-        "& cash_needed <= 25000 "
-        # "& monthly_cash_flow_y1 >= -400 "
-        "& ((units == 0 & monthly_cash_flow_y2 >= -200) | (units > 0 & monthly_cash_flow_y2 >= -200)) "
-        # "& ((units >= 3 & fha_self_sufficiency_ratio >= 1) | (units < 3)) "
-        # "& beats_market "
-    )
-
-    """
-    Old criteria before new model:
+    Additional criteria when using market rent estimates:
       - 1% rule (monthly gross rent must be 1% or more of purchase price)
       - 50% rule (operating expenses must be 50% or lower than gross rent)
       - Debt Service Coverage Ratio should be above 1.25
       - Triplexes / Fourplexes must pass FHA self-sufficiency test (Gross Rent * 0.75 >= PITI)
       - Net Present Value in 10 years must be positive, thus beating the stock market
     """
+    status_criteria = "status == 'active'" if active else "status != 'active'"
+    criteria = (
+        f"{status_criteria} "
+        "& square_ft >= 1000 "
+        "& cash_needed <= 25000 "
+        "& ((units == 0 & monthly_cash_flow_y2 >= -200) | (units > 0 & monthly_cash_flow_y2 >= -200)) "
+        # "& MGR_PP > 0.01 "
+        # "& OpEx_Rent < 0.5 "
+        # "& DSCR > 1.25 "
+        # "& monthly_cash_flow_y1 >= -400 "
+        # "& ((units >= 3 & fha_self_sufficiency_ratio >= 1) | (units < 3)) "
+        # "& beats_market "
+    )
 
     base_df = df.copy()
     filtered_df = base_df.query(criteria).copy()
@@ -1349,7 +1305,6 @@ def get_additional_room_rental_df():
     df2["cap_rate_y1"] = df2["annual_NOI_y1"] / df2["purchase_price"]
     df2["CoC_y1"] = df2["annual_cash_flow_y1"] / df2["cash_needed"]
     df2["GRM_y1"] = df2["purchase_price"] / df2["annual_rent_y1"]
-    df2["deal_score"] = df2.apply(get_deal_score, axis=1)
     return df2
 
 def get_reduced_pp_df(reduction_factor):
@@ -1771,8 +1726,6 @@ def analyze_property(property_id):
     proceeds_score = (1 if row["net_proceeds_10yr"] > 100000 else 0)
     npv_score = (1 if row["npv_10yr"] > 20000 else 0)
 
-    deal_score_style = ("green" if row['deal_score'] >= 35 else "yellow" if row['deal_score'] >= 25 else "red")
-    
     criteria_table.add_row("Cash Flow Y2", f"[white]{cf_y2_score}[/white]", "3", f"${row['monthly_cash_flow_y2']:.0f}/month")
     criteria_table.add_row("Cash Flow Y1 Bonus", f"[white]{cf_y1_bonus}[/white]", "3", f"${row['monthly_cash_flow_y1']:.0f}/month")
     criteria_table.add_row("Cash-on-Cash Return", f"[white]{coc_score}[/white]", "3", f"{row['CoC_y2']:.1%}")
@@ -1800,9 +1753,6 @@ def analyze_property(property_id):
     criteria_table.add_row("Break-Even Occupancy", f"[white]{breakeven_score}[/white]", "1", f"{row['break_even_occupancy']:.1%}")
     criteria_table.add_row("Net Proceeds (10yr)", f"[white]{proceeds_score}[/white]", "1", f"${row['net_proceeds_10yr']:,.0f}")
     criteria_table.add_row("NPV (10yr)", f"[white]{npv_score}[/white]", "1", f"${row['npv_10yr']:,.0f}")
-    criteria_table.add_row("[bold]TOTAL SCORE[/bold]", f"[bold {deal_score_style}]{int(row['deal_score'])}[/bold {deal_score_style}]", "[bold]43[/bold]",
-                          f"[bold {deal_score_style}]{'Excellent' if row['deal_score'] >= 35 else 'Good' if row['deal_score'] >= 25 else 'Poor'}[/bold {deal_score_style}]")
-    
     console.print(criteria_table)
 
     mobility_table = Table(title="Mobility Score Breakdown", show_header=True, header_style="bold magenta")
@@ -3058,7 +3008,6 @@ def display_market_summary_table(df_active):
         ("Avg Monthly CF Y2", "monthly_cash_flow_y2", "avg", format_currency, True),
         ("Avg Cap Rate Y2", "cap_rate_y2", "avg", format_percentage, True),
         ("Phase 1 Qualified %", None, "phase1_pct", format_percentage, False),
-        ("Avg Deal Score", "deal_score", "avg", format_number, True),
     ]
 
     # Get Phase 1 qualifiers for percentage calculation
@@ -3236,7 +3185,6 @@ def run_market_analysis_by_property_type():
             ("Housing Cost to Income", "costs_to_income", format_percentage, True),
         ],
         "Quality & Location Scores": [
-            ("Deal Score (out of 43)", "deal_score", format_number, False),
             ("Mobility Score", "mobility_score", format_number, False),
             ("Walk Score", "walk_score", format_number, False),
             ("Transit Score", "transit_score", format_number, False),
@@ -3273,7 +3221,8 @@ def run_all_properties_options():
         "Phase 1 - Total Rent Differences",
         "Phase 1.5 - Research List",
         "Phase 2 - Qualifiers",
-        "All properties - Active (FHA)",
+        "All properties - Active",
+        "All properties - Y2 Calculations",
         "All properties - Reduce price and recalculate",
         "All properties - Property Info",
         "All properties - Creative Pricing",
@@ -3301,6 +3250,8 @@ def run_all_properties_options():
             display_phase1_research_list()
         elif option == "Phase 1 - Total Rent Differences":
             display_phase1_total_rent_differences()
+        elif option == "All properties - Y2 Calculations":
+            display_y2_calculations()
         elif option == "All properties - Reduce price and recalculate":
             percent = questionary.text(
                 "Enter a percent to reduce purchase price by"
