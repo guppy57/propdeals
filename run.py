@@ -78,7 +78,7 @@ def load_assumptions():
     assumptions_get_response = supabase.table("assumptions").select("*").eq("id", 1).limit(1).single().execute()
     ASSUMPTIONS = {
         "appreciation_rate": float(assumptions_get_response.data["appreciation_rate"]),
-        "mf_appreciation_rate": float(assumptions_get_response.data["appreciation_rate"]) - 0.01,
+        "mf_appreciation_rate": (float(assumptions_get_response.data["appreciation_rate"]) - 0.01),
         "rent_appreciation_rate": float(assumptions_get_response.data["rent_appreciation_rate"]),
         "property_tax_rate": float(assumptions_get_response.data["property_tax_rate"]),
         "home_insurance_rate": float(assumptions_get_response.data["home_insurance_rate"]),
@@ -218,12 +218,12 @@ def apply_investment_calculations(df):
     df["roe_y2"] = df.apply(calculate_roe, axis=1, args=[LOAN,])
     df["leverage_benefit"] = df["CoC_y2"] - (df["mr_annual_NOI_y2"] / df["purchase_price"])
     df["payback_period_years"] = df.apply(calculate_payback_period, axis=1)
-    df["irr_5yr"] = df.apply(calculate_irr, axis=1, args=(5,ASSUMPTIONS))
-    df["irr_10yr"] = df.apply(calculate_irr, axis=1, args=(10,ASSUMPTIONS))
-    df["irr_20yr"] = df.apply(calculate_irr, axis=1, args=(20,ASSUMPTIONS))
-    df["npv_5yr"] = df.apply(calculate_npv, axis=1, args=(5,ASSUMPTIONS))
-    df["npv_10yr"] = df.apply(calculate_npv, axis=1, args=(10,ASSUMPTIONS))
-    df["npv_20yr"] = df.apply(calculate_npv, axis=1, args=(20,ASSUMPTIONS))
+    df["irr_5yr"] = df.apply(calculate_irr, axis=1, args=(5,ASSUMPTIONS,LOAN))
+    df["irr_10yr"] = df.apply(calculate_irr, axis=1, args=(10,ASSUMPTIONS,LOAN))
+    df["irr_20yr"] = df.apply(calculate_irr, axis=1, args=(20,ASSUMPTIONS,LOAN))
+    df["npv_5yr"] = df.apply(calculate_npv, axis=1, args=(5,ASSUMPTIONS,LOAN))
+    df["npv_10yr"] = df.apply(calculate_npv, axis=1, args=(10,ASSUMPTIONS,LOAN))
+    df["npv_20yr"] = df.apply(calculate_npv, axis=1, args=(20,ASSUMPTIONS,LOAN))
     df["fair_value_5yr"] = df["purchase_price"] + df["npv_5yr"]
     df["fair_value_10yr"] = df["purchase_price"] + df["npv_10yr"]
     df["fair_value_20yr"] = df["purchase_price"] + df["npv_20yr"]
@@ -286,7 +286,7 @@ def get_all_phase1_qualifying_properties(active=True):
         "& OpEx_Rent < 0.5 "
         "& DSCR > 1.25 "
         # "& monthly_cash_flow_y1 >= -400 "
-        # "& beats_market "
+        "& beats_market "
     )
 
     base_df = df.copy()
