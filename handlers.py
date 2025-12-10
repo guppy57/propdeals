@@ -247,3 +247,43 @@ def handle_price_cut(property_id, current_price, supabase):
           print("Update response has no 'data' attribute")
     except Exception as e:
         print(f"Reducing price for {property_id} failed: {str(e)}")
+
+def handle_view_research_reports(property_id: str, supabase, console):
+    """Handle viewing existing research reports for a property"""
+    researcher = RentResearcher(supabase, console)
+    reports = researcher.get_reports_for_property(property_id)
+
+    if not reports:
+        console.print("[yellow]No research reports found for this property.[/yellow]")
+        return
+
+    while True:
+        report_choices = []
+        for report in reports:
+            created_date = report['created_at'][:10]  # Extract date part
+            status = report['status']
+            cost = report['api_cost']
+            report_choices.append(f"{created_date} - {status} (${cost:.4f}) - ID: {report['id'][:8]}")
+
+        report_choices.append("← Go back")
+
+        selected = questionary.select(
+            "Select a research report to view:",
+            choices=report_choices
+        ).ask()
+
+        if selected == "← Go back":
+            return
+
+        selected_id = None
+        for report in reports:
+            if report['id'][:8] in selected:
+                selected_id = report['id']
+                break
+
+        if selected_id:
+            report_data = researcher.get_report_by_id(selected_id)
+            if report_data:
+                researcher.display_report(report_data['report_content'])
+            else:
+                console.print("[red]Error loading report.[/red]")

@@ -17,7 +17,8 @@ from handlers import (
     handle_extract_neighborhood_grade,
     handle_rent_research_generation,
     handle_status_change,
-    handle_price_cut
+    handle_price_cut,
+    handle_view_research_reports
 )
 from display import (
     display_all_phase1_qualifying_properties,
@@ -735,7 +736,7 @@ def analyze_property(property_id):
     elif research_choice == "Generate new rent research":
         handle_rent_research_generation(property_id, supabase, console, handle_generate_rent_estimates)
     elif research_choice == "View existing research reports":
-        handle_view_research_reports(property_id)
+        handle_view_research_reports(property_id, supabase, console)
     elif research_choice == "Generate rent estimates from report":
         handle_generate_rent_estimates(property_id)
     elif research_choice == "Generate property-wide rent research":
@@ -783,45 +784,6 @@ def analyze_property(property_id):
 
         result_path = export_property_analysis(row, rents, ASSUMPTIONS['after_tax_monthly_income'], loan_info, assumptions_info, output_path)
         console.print(f"[green]PDF exported successfully to: {result_path}[/green]")
-
-def handle_view_research_reports(property_id: str):
-    researcher = RentResearcher(supabase, console)
-    reports = researcher.get_reports_for_property(property_id)
-
-    if not reports:
-        console.print("[yellow]No research reports found for this property.[/yellow]")
-        return
-
-    while True:
-        report_choices = []
-        for report in reports:
-            created_date = report['created_at'][:10]  # Extract date part
-            status = report['status']
-            cost = report['api_cost']
-            report_choices.append(f"{created_date} - {status} (${cost:.4f}) - ID: {report['id'][:8]}")
-
-        report_choices.append("← Go back")
-
-        selected = questionary.select(
-            "Select a research report to view:",
-            choices=report_choices
-        ).ask()
-
-        if selected == "← Go back":
-            return
-
-        selected_id = None
-        for report in reports:
-            if report['id'][:8] in selected:
-                selected_id = report['id']
-                break
-
-        if selected_id:
-            report_data = researcher.get_report_by_id(selected_id)
-            if report_data:
-                researcher.display_report(report_data['report_content'])
-            else:
-                console.print("[red]Error loading report.[/red]")
 
 def handle_risk_assessment(property_id: str):
     """Handle viewing and generating risk assessment reports"""
