@@ -317,7 +317,7 @@ def calculate_net_proceeds(
 
     return net_proceeds
 
-def calculate_irr(row, years, assumptions):
+def calculate_irr(row, years, assumptions, loan):
     """Calculate Internal Rate of Return over N years"""
     try:
         # Build cash flow array
@@ -334,7 +334,7 @@ def calculate_irr(row, years, assumptions):
             cash_flows.append(yearly_cashflow)
 
         # Final year: add net proceeds from sale
-        net_proceeds = calculate_net_proceeds(row, years)
+        net_proceeds = calculate_net_proceeds(row, years, assumptions=assumptions, loan=loan)
         cash_flows[-1] += net_proceeds
 
         # Calculate IRR
@@ -343,7 +343,7 @@ def calculate_irr(row, years, assumptions):
     except Exception:
         return 0  # Return 0 if calculation fails
 
-def calculate_npv(row, years, assumptions):
+def calculate_npv(row, years, assumptions, loan):
     """Calculate Net Present Value over N years using discount_rate"""
     try:
         # Build cash flow array (same as IRR)
@@ -360,7 +360,7 @@ def calculate_npv(row, years, assumptions):
             cash_flows.append(yearly_cashflow)
 
         # Final year: add net proceeds from sale
-        net_proceeds = calculate_net_proceeds(row, years)
+        net_proceeds = calculate_net_proceeds(row, years, assumptions=assumptions, loan=loan)
         cash_flows[-1] += net_proceeds
 
         # Calculate NPV: discount each cash flow back to present

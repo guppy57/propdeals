@@ -135,9 +135,6 @@ def apply_calculations_on_dataframe(df):
     df['ammoritization_estimate'] = (df['loan_amount'] * 0.017) / 12
     df["total_rent"] = df['quick_monthly_rent_estimate']
     df["annual_rent"] = df["total_rent"] * 12
-    # Year 1 operating expenses (before changing total_rent for SFH)
-    # For SFH: uses aggregated per-room rent (house-hacking scenario)
-    # For multi-family: uses total rent from all units
     df["monthly_vacancy_costs"] = df["total_rent"] * ASSUMPTIONS['vacancy_rate']
     df["monthly_repair_costs"] = df["total_rent"] * ASSUMPTIONS['repair_savings_rate']
     df["operating_expenses"] = df["monthly_vacancy_costs"] + df["monthly_repair_costs"] + df["monthly_taxes"] + df["monthly_insurance"]
@@ -218,12 +215,12 @@ def apply_investment_calculations(df):
     df["roe_y2"] = df.apply(calculate_roe, axis=1, args=[LOAN,])
     df["leverage_benefit"] = df["CoC_y2"] - (df["mr_annual_NOI_y2"] / df["purchase_price"])
     df["payback_period_years"] = df.apply(calculate_payback_period, axis=1)
-    df["irr_5yr"] = df.apply(calculate_irr, axis=1, args=(5,ASSUMPTIONS))
-    df["irr_10yr"] = df.apply(calculate_irr, axis=1, args=(10,ASSUMPTIONS))
-    df["irr_20yr"] = df.apply(calculate_irr, axis=1, args=(20,ASSUMPTIONS))
-    df["npv_5yr"] = df.apply(calculate_npv, axis=1, args=(5,ASSUMPTIONS))
-    df["npv_10yr"] = df.apply(calculate_npv, axis=1, args=(10,ASSUMPTIONS))
-    df["npv_20yr"] = df.apply(calculate_npv, axis=1, args=(20,ASSUMPTIONS))
+    df["irr_5yr"] = df.apply(calculate_irr, axis=1, args=(5,ASSUMPTIONS,LOAN))
+    df["irr_10yr"] = df.apply(calculate_irr, axis=1, args=(10,ASSUMPTIONS,LOAN))
+    df["irr_20yr"] = df.apply(calculate_irr, axis=1, args=(20,ASSUMPTIONS,LOAN))
+    df["npv_5yr"] = df.apply(calculate_npv, axis=1, args=(5,ASSUMPTIONS,LOAN))
+    df["npv_10yr"] = df.apply(calculate_npv, axis=1, args=(10,ASSUMPTIONS,LOAN))
+    df["npv_20yr"] = df.apply(calculate_npv, axis=1, args=(20,ASSUMPTIONS,LOAN))
     df["fair_value_5yr"] = df["purchase_price"] + df["npv_5yr"]
     df["fair_value_10yr"] = df["purchase_price"] + df["npv_10yr"]
     df["fair_value_20yr"] = df["purchase_price"] + df["npv_20yr"]
@@ -286,7 +283,7 @@ def get_all_phase1_qualifying_properties(active=True):
         "& OpEx_Rent < 0.5 "
         "& DSCR > 1.25 "
         # "& monthly_cash_flow_y1 >= -400 "
-        # "& beats_market "
+        "& beats_market "
     )
 
     base_df = df.copy()
@@ -322,7 +319,7 @@ def get_phase1_research_list():
     filtered = combined.query(criteria).copy()
     return filtered 
 
-def get_all_phase2_properties():
+def get_all_phase2_qualifiers():
     """
     This method filters phase 1 qualifiers based property condition, rentability, and affordability 
     Current criteria:
@@ -332,50 +329,6 @@ def get_all_phase2_properties():
       - Neighborhood Letter Grade must be C or higher
     """
     p1_df = get_combined_phase1_qualifiers()
-    checklist = get_phase2_data_checklist()
-
-    bg_research_keys = [
-      "has_listing",
-      "has_maps_data",
-      "has_neighborhood_analysis",
-      "has_taxes",
-      "has_property_assessment",
-      "has_zillow_link",
-      "has_built_in_year",
-      "has_neighborhood"
-    ]
-
-    physical_research_keys = [
-        "has_neighborhood_assessment",
-        "has_inspection_done",
-        "has_seller_circumstances",
-        "has_rent_dd",
-    ]
-
-    # List 1 - properties that need background research to determine if we TOUR
-    research_1 = [
-        address for address, checks in checklist.items()
-        if not all(checks[key] for key in bg_research_keys)
-    ]
-
-    # List 2 - properties that have bg research done but need physical research for Phase 2
-    research_2 = [
-        address for address, checks in checklist.items()
-        if all(checks[key] for key in bg_research_keys) and
-          not all(checks[key] for key in physical_research_keys)
-    ]
-
-    completed = [
-        address for address, checks in checklist.items()
-        if all(checks[key] for key in bg_research_keys + physical_research_keys) 
-    ]
-
-    research_1_df = p1_df[p1_df['address1'].isin(research_1)].copy()
-    research_2_df = p1_df[p1_df['address1'].isin(research_2)].copy()
-    completed_df = p1_df[p1_df['address1'].isin(completed)].copy()
-
-    qualifying_df = [] 
-    disqualifying_df = [] 
 
     if not completed_df.empty:
         completed_df['property_condition'] = completed_df.apply(lambda row: inspections.get_property_condition(row), axis=1) # TODO - finish this
@@ -597,8 +550,6 @@ def analyze_property(property_id):
     table.add_row("Break-Even Vacancy","",express_percent_as_months_and_days(row["break_even_vacancy"]))
     table.add_row("Effective Gross Income","",format_currency(row['egi']))
     table.add_row("Debt Yield","",format_percentage(row['debt_yield']))
-
-    # Property-level metrics (same for both years)
     table.add_row("LTV Ratio","",format_percentage(row['ltv_ratio']))
     price_per_label = "Price Per Bedroom" if is_single_family else "Price Per Door"
     table.add_row(price_per_label,"",format_currency(row['price_per_door']))
@@ -1113,81 +1064,6 @@ def handle_property_summary(property_id: str):
                 except Exception as e:
                     console.print(f"[red]Error displaying report: {str(e)}[/red]")
 
-def get_phase2_data_checklist():
-    """
-    Gets all phase 1 properties and their data checklist.
-    - Uses vectorized pandas operations instead of iterrows()
-    - Batches neighborhood database queries (1 query instead of N)
-    - Expected speedup: 15-30x depending on dataset size
-
-    Returns:
-        Dictionary mapping address1 -> dict of completion checks
-    """
-    combined_df = get_combined_phase1_qualifiers()
-    unique_neighborhoods = combined_df["neighborhood"].dropna().unique().tolist()
-    neighborhood_analysis_cache = neighborhoods.has_neighborhood_analysis_batch(unique_neighborhoods)
-    unique_addresses = combined_df["address1"].dropna().unique().tolist()
-    neighborhood_assessment_cache = neighborhoods.is_neighborhood_assessment_complete_batch(unique_addresses)
-    combined_df = combined_df.assign(
-        _has_listing=combined_df["listed_date"].notna(),
-        _has_taxes=combined_df["annual_tax_amount"].notna(),
-        _has_seller_circumstances=combined_df["seller_circumstances"].notna(),
-        _has_zillow_link=combined_df["zillow_link"].notna(),
-        _has_built_in_year=combined_df["built_in"].notna(),
-        _has_neighborhood=combined_df["neighborhood"].notna(),
-        _has_rent_dd=combined_df["rent_dd_completed"].fillna(False),
-        _has_inspection_done=False,
-        _has_maps_data=is_property_maps_done_vectorized(combined_df),
-        _has_property_assessment=is_property_assessment_done_vectorized(combined_df),
-        _has_neighborhood_analysis=combined_df["neighborhood"].map(
-            lambda n: neighborhood_analysis_cache.get(n, False)
-            if pd.notna(n)
-            else False
-        ),
-        _has_neighborhood_assessment=combined_df["address1"].map(
-            lambda addr: neighborhood_assessment_cache.get(addr, False)
-        ),
-    )
-
-    checklist = {
-        address: {
-            # required to determine if we tour the property
-            "has_listing": has_listing,
-            "has_maps_data": has_maps_data,
-            "has_rent_dd": has_rent_dd,
-            "has_neighborhood_analysis": has_neighborhood_analysis,
-            "has_taxes": has_taxes,
-            "has_property_assessment": has_property_assessment,
-            "has_zillow_link": has_zillow_link,
-            "has_built_in_year": has_built_in_year,
-            "has_neighborhood": has_neighborhood,
-            # required to determine if we can run phase 2 criteria against
-            "has_neighborhood_assessment": has_neighborhood_assessment,
-            "has_inspection_done": has_inspection_done,
-            "has_seller_circumstances": has_seller_circumstances,
-        }
-        for address, has_listing, has_inspection_done, has_maps_data, has_rent_dd,
-            has_neighborhood_analysis, has_neighborhood_assessment, has_taxes, has_seller_circumstances,
-            has_property_assessment, has_zillow_link, has_built_in_year, has_neighborhood
-        in zip(
-            combined_df["address1"],
-            combined_df["_has_listing"],
-            combined_df["_has_inspection_done"],
-            combined_df["_has_maps_data"],
-            combined_df["_has_rent_dd"],
-            combined_df["_has_neighborhood_analysis"],
-            combined_df["_has_neighborhood_assessment"],
-            combined_df["_has_taxes"],
-            combined_df["_has_seller_circumstances"],
-            combined_df["_has_property_assessment"],
-            combined_df["_has_zillow_link"],
-            combined_df["_has_built_in_year"],
-            combined_df["_has_neighborhood"]
-        )
-    }
-
-    return checklist
-
 def handle_generate_rent_estimates(property_id: str, report_id: str = None):
     """Handle generating rent estimates from an existing research report"""
     researcher = RentResearcher(supabase, console)
@@ -1448,7 +1324,7 @@ def run_all_properties_options():
                 console=console,
             )
         elif option == "Phase 2 - Qualifiers":
-            display_all_phase2_qualifying_properties(console, df, get_all_phase2_properties)
+            display_all_phase2_qualifying_properties(console, df, get_all_phase2_qualifiers)
 
 def run_loans_options():
   using_loans = True
