@@ -1,6 +1,7 @@
 import questionary
 from rent_research import RentResearcher
 from loans import LoansProvider
+from property_assessment import RiskAssessmentClient
 
 def handle_property_wide_research_generation(property_id: str, supabase, console):
     """Generate property-wide rent research for single family homes (whole-house rental analysis)"""
@@ -287,3 +288,118 @@ def handle_view_research_reports(property_id: str, supabase, console):
                 researcher.display_report(report_data['report_content'])
             else:
                 console.print("[red]Error loading report.[/red]")
+
+def handle_risk_assessment(property_id: str, supabase, console):
+    """Handle viewing and generating risk assessment reports"""
+    # Check for existing risk assessment reports
+    try:
+        response = supabase.table("research_reports").select("*").eq(
+            "property_id", property_id
+        ).eq("research_type", "property_risk_report").order("created_at", desc=True).execute()
+
+        existing_reports = response.data if response.data else []
+    except Exception as e:
+        console.print(f"[red]Error fetching risk assessment reports: {str(e)}[/red]")
+        return
+
+    # If no reports exist, ask if they want to generate one
+    if not existing_reports:
+        console.print("[yellow]No risk assessment report found for this property.[/yellow]")
+        generate = questionary.confirm("Would you like to generate a risk assessment report?").ask()
+
+        if generate:
+            client = RiskAssessmentClient(supabase, console)
+            report_id = client.generate_risk_assessment(property_id)
+
+            if report_id:
+                # Fetch and display the generated report
+                try:
+                    report_response = supabase.table("research_reports").select("*").eq(
+                        "id", report_id
+                    ).single().execute()
+
+                    if report_response.data:
+                        from rich.markdown import Markdown
+
+                        md = Markdown(report_response.data['report_content'])
+
+                        with console.pager():
+                            console.print(md)
+                except Exception as e:
+                    console.print(f"[red]Error displaying report: {str(e)}[/red]")
+        return
+
+    # If reports exist, ask if they want to view or generate new
+    action = questionary.select(
+        "Risk assessment report(s) exist for this property. What would you like to do?",
+        choices=[
+            "View existing report",
+            "Generate new report",
+            "← Go back"
+        ]
+    ).ask()
+
+    if action == "← Go back":
+        return
+    elif action == "Generate new report":
+        client = RiskAssessmentClient(supabase, console)
+        report_id = client.generate_risk_assessment(property_id)
+
+        if report_id:
+            # Fetch and display the generated report
+            try:
+                report_response = supabase.table("research_reports").select("*").eq(
+                    "id", report_id
+                ).single().execute()
+
+                if report_response.data:
+                    from rich.markdown import Markdown
+
+                    md = Markdown(report_response.data['report_content'])
+
+                    with console.pager():
+                        console.print(md)
+            except Exception as e:
+                console.print(f"[red]Error displaying report: {str(e)}[/red]")
+    elif action == "View existing report":
+        # Show list of existing reports
+        while True:
+            report_choices = []
+            for report in existing_reports:
+                created_date = report['created_at'][:10]  # Extract date part
+                status = report['status']
+                cost = report.get('api_cost', 0)
+                report_choices.append(f"{created_date} - {status} (${cost:.4f}) - ID: {report['id'][:8]}")
+
+            report_choices.append("← Go back")
+
+            selected = questionary.select(
+                "Select a risk assessment report to view:",
+                choices=report_choices
+            ).ask()
+
+            if selected == "← Go back":
+                return
+
+            # Find selected report
+            selected_id = None
+            for report in existing_reports:
+                if report['id'][:8] in selected:
+                    selected_id = report['id']
+                    break
+
+            if selected_id:
+                try:
+                    report_response = supabase.table("research_reports").select("*").eq(
+                        "id", selected_id
+                    ).single().execute()
+
+                    if report_response.data:
+                        from rich.markdown import Markdown
+
+                        md = Markdown(report_response.data['report_content'])
+
+                        with console.pager():
+                            console.print(md)
+                except Exception as e:
+                    console.print(f"[red]Error displaying report: {str(e)}[/red]")
