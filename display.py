@@ -60,6 +60,8 @@ def display_all_properties(
     table.add_column("Cash Needed", justify="right")
     table.add_column("Costs/mo", justify="right", style="yellow")
     table.add_column("CF", justify="right", no_wrap=True)
+    table.add_column("MR_CFY1", justify="right")
+    table.add_column("MR_CFY2", justify="right")
     table.add_column("Cost/Inc", justify="right", style="bold white")
     table.add_column("MGR_PP", justify="right")
     table.add_column("OpEx_Rent", justify="right")
@@ -102,6 +104,12 @@ def display_all_properties(
         if show_prop_type:
             pt_style = prop_type_styles[row["units"]]
             row_args.append(f"[{pt_style}]{prop_types[row['units']]}[/{pt_style}]")
+        
+        def get_color(amount):
+            return "green" if amount >= 0 else "red"
+        
+        mrcfy1 = row['mr_monthly_cash_flow_y1']
+        mrcfy2 = row['mr_monthly_cash_flow_y2']
 
         row_args.extend(
             [
@@ -109,6 +117,8 @@ def display_all_properties(
                 f"[{cash_style}]{format_currency(row['cash_needed'])}[/{cash_style}]",
                 format_currency(row["total_monthly_cost"]),
                 f"[{cf_style}]{format_currency(row['monthly_cash_flow'])}[/{cf_style}]",
+                f"[{get_color(mrcfy1)}]{format_currency(mrcfy1)}[/{get_color(mrcfy1)}]",
+                f"[{get_color(mrcfy2)}]{format_currency(mrcfy2)}[/{get_color(mrcfy2)}]",
                 f"[{costs_to_income_style}]{format_percentage(row['costs_to_income'])}[/{costs_to_income_style}]",
                 f"{format_percentage(row["MGR_PP"])}",
                 f"{format_percentage(row["OpEx_Rent"])}",
@@ -625,8 +635,8 @@ def display_property_metrics(console, df, get_combined_phase1_qualifiers, proper
                 colorize(format_percentage(row['debt_yield']), 'debt_yield'),
                 colorize(format_currency(row['monthly_depreciation']), 'monthly_depreciation'),
                 colorize(format_currency(row['tax_savings_monthly']), 'tax_savings_monthly'),
-                colorize(format_currency(row['mr_after_tax_cash_flow_y1']), 'mr_after_tax_cash_flow_y1'),
-                colorize(format_currency(row['mr_after_tax_cash_flow_y2']), 'mr_after_tax_cash_flow_y2'),
+                colorize(format_currency(row['after_tax_cash_flow_y1']), 'after_tax_cash_flow_y1'),
+                colorize(format_currency(row['after_tax_cash_flow_y2']), 'after_tax_cash_flow_y2'),
                 colorize(format_currency(row['future_value_10yr']), 'future_value_10yr'),
                 colorize(format_currency(row['net_proceeds_10yr']), 'net_proceeds_10yr'),
                 colorize(format_number(row['equity_multiple_10yr']), 'equity_multiple_10yr'),

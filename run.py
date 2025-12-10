@@ -79,7 +79,7 @@ def load_assumptions():
     assumptions_get_response = supabase.table("assumptions").select("*").eq("id", 1).limit(1).single().execute()
     ASSUMPTIONS = {
         "appreciation_rate": float(assumptions_get_response.data["appreciation_rate"]),
-        "mf_appreciation_rate": float(assumptions_get_response.data["appreciation_rate"]) - 0.01,
+        "mf_appreciation_rate": (float(assumptions_get_response.data["appreciation_rate"]) - 0.01),
         "rent_appreciation_rate": float(assumptions_get_response.data["rent_appreciation_rate"]),
         "property_tax_rate": float(assumptions_get_response.data["property_tax_rate"]),
         "home_insurance_rate": float(assumptions_get_response.data["home_insurance_rate"]),

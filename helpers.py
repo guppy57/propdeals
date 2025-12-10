@@ -318,6 +318,7 @@ def calculate_net_proceeds(
     return net_proceeds
 
 def calculate_irr(row, years, assumptions, loan):
+def calculate_irr(row, years, assumptions, loan):
     """Calculate Internal Rate of Return over N years"""
     try:
         # Build cash flow array
@@ -344,33 +345,31 @@ def calculate_irr(row, years, assumptions, loan):
         return 0  # Return 0 if calculation fails
 
 def calculate_npv(row, years, assumptions, loan):
+def calculate_npv(row, years, assumptions, loan):
     """Calculate Net Present Value over N years using discount_rate"""
-    try:
-        # Build cash flow array (same as IRR)
-        cash_flows = [-row["cash_needed"]]  # Year 0: initial investment (outflow)
+    # Build cash flow array (same as IRR)
+    cash_flows = [-row["cash_needed"]]  # Year 0: initial investment (outflow)
 
-        # Year 1 cash flow
-        cash_flows.append(row["mr_annual_cash_flow_y1"])
+    # Year 1 cash flow
+    cash_flows.append(row["mr_annual_cash_flow_y1"])
 
-        # Years 2 through N: compounded with rent appreciation
-        for year in range(2, years + 1):
-            yearly_cashflow = row["mr_annual_cash_flow_y2"] * (
-                (1 + assumptions['rent_appreciation_rate']) ** (year - 2)
-            )
-            cash_flows.append(yearly_cashflow)
+    # Years 2 through N: compounded with rent appreciation
+    for year in range(2, years + 1):
+        yearly_cashflow = row["mr_annual_cash_flow_y2"] * (
+            (1 + assumptions['rent_appreciation_rate']) ** (year - 2)
+        )
+        cash_flows.append(yearly_cashflow)
 
         # Final year: add net proceeds from sale
         net_proceeds = calculate_net_proceeds(row, years, assumptions=assumptions, loan=loan)
         cash_flows[-1] += net_proceeds
 
-        # Calculate NPV: discount each cash flow back to present
-        npv = 0
-        for year, cash_flow in enumerate(cash_flows):
-            npv += cash_flow / ((1 + assumptions['discount_rate']) ** year)
+    # Calculate NPV: discount each cash flow back to present
+    npv = 0
+    for year, cash_flow in enumerate(cash_flows):
+        npv += cash_flow / ((1 + assumptions['discount_rate']) ** year)
 
-        return npv
-    except Exception:
-        return 0  # Return 0 if calculation fails
+    return npv
 
 def calculate_roe(row, loan):
     """Calculate Return on Equity for Year 2"""
