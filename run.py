@@ -455,14 +455,14 @@ def analyze_property(property_id):
     console.print(Panel(f"[bold blue]Rental Income Summary[/bold blue]\n"
                       f"Total Monthly Rent (All Units): {format_currency(row['total_rent'])}\n"
                       f"Your Unit Rent (Not Collected): {format_currency(row['min_rent'])}\n"
-                      f"[bold]Net Monthly Income (Year 1): {format_currency(row['net_rent_y1'])}[/bold]\n"
+                      f"[bold]Net Monthly Income (Year 1): {format_currency(row['mr_net_rent_y1'])}[/bold]\n"
                       f"[bold]Full Rental Income (Year 2): {format_currency(row['total_rent'])}[/bold]\n\n"
                       f"[bold yellow]Operating Expenses:[/bold yellow]\n"
-                      f"Monthly Operating Expenses Y1: {format_currency(row['operating_expenses_y1'])} ({format_currency(row['operating_expenses_y1'] * 12)} annually)\n"
-                      f"Monthly Operating Expenses Y2: {format_currency(row['operating_expenses_y2'])} ({format_currency(row['operating_expenses_y2'] * 12)} annually)\n\n"
+                      f"Monthly Operating Expenses Y1: {format_currency(row['mr_operating_expenses'])} ({format_currency(row['mr_operating_expenses'] * 12)} annually)\n"
+                      f"Monthly Operating Expenses Y2: {format_currency(row['mr_operating_expenses'])} ({format_currency(row['mr_operating_expenses'] * 12)} annually)\n\n"
                       f"[bold green]Net Operating Income (NOI):[/bold green]\n"
-                      f"NOI Year 1 (Live-in): {format_currency(row['monthly_NOI_y1'])} ({format_currency(row['annual_NOI_y1'])} annually)\n"
-                      f"NOI Year 2 (All Rent): {format_currency(row['monthly_NOI_y2'])} ({format_currency(row['annual_NOI_y2'])} annually)\n\n"
+                      f"NOI Year 1 (Live-in): {format_currency(row['mr_monthly_NOI_y1'])} ({format_currency(row['mr_annual_NOI_y1'])} annually)\n"
+                      f"NOI Year 2 (All Rent): {format_currency(row['mr_monthly_NOI_y2'])} ({format_currency(row['mr_annual_NOI_y2'])} annually)\n\n"
                       f"[bold cyan]Personal Income & Housing Costs:[/bold cyan]\n"
                       f"After-Tax Monthly Income: {format_currency(ASSUMPTIONS['after_tax_monthly_income'])}\n"
                       f"Housing Cost to Income Ratio: {format_percentage(row['costs_to_income'])}",
@@ -476,32 +476,32 @@ def analyze_property(property_id):
 
     # Add common comparison rows
     table.add_row("Annual Rent",
-                  format_currency(row['annual_rent_y1']),
-                  format_currency(row['annual_rent_y2']))
+                  format_currency(row['mr_annual_rent_y1']),
+                  format_currency(row['mr_annual_rent_y2']))
 
     if is_single_family:
         table.add_row("Monthly Rent",
-                      format_currency(row['net_rent_y1']) + " (net)",
+                      format_currency(row['mr_net_rent_y1']) + " (net)",
                       format_currency(row['total_rent']))
 
     table.add_row("Operating Expenses",
-                  format_currency(row['operating_expenses_y1']),
-                  format_currency(row['operating_expenses_y2']))
+                  format_currency(row['mr_operating_expenses']),
+                  format_currency(row['mr_operating_expenses']))
     table.add_row("Total Monthly Cost",
-                  format_currency(row['total_monthly_cost_y1']),
-                  format_currency(row['total_monthly_cost_y2']))
+                  format_currency(row['mr_total_monthly_cost']),
+                  format_currency(row['mr_total_monthly_cost']))
     table.add_row("Monthly NOI",
-                  format_currency(row['monthly_NOI_y1']),
-                  format_currency(row['monthly_NOI_y2']))
+                  format_currency(row['mr_monthly_NOI_y1']),
+                  format_currency(row['mr_monthly_NOI_y2']))
     table.add_row("Annual NOI",
-                  format_currency(row['annual_NOI_y1']),
-                  format_currency(row['annual_NOI_y2']))
+                  format_currency(row['mr_annual_NOI_y1']),
+                  format_currency(row['mr_annual_NOI_y2']))
     table.add_row("[bold]Monthly Cash Flow[/bold]",
-                  f"[bold {'red' if row['monthly_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['monthly_cash_flow_y1'])}[/]",
-                  f"[bold {'red' if row['monthly_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['monthly_cash_flow_y2'])}[/]")
+                  f"[bold {'red' if row['mr_monthly_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['mr_monthly_cash_flow_y1'])}[/]",
+                  f"[bold {'red' if row['mr_monthly_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['mr_monthly_cash_flow_y2'])}[/]")
     table.add_row("[bold]Annual Cash Flow[/bold]",
-                  f"[bold {'red' if row['annual_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['annual_cash_flow_y1'])}[/]",
-                  f"[bold {'red' if row['annual_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['annual_cash_flow_y2'])}[/]")
+                  f"[bold {'red' if row['mr_annual_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['mr_annual_cash_flow_y1'])}[/]",
+                  f"[bold {'red' if row['mr_annual_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['mr_annual_cash_flow_y2'])}[/]")
     table.add_row("After-Tax Cash Flow",
                   format_currency(row['after_tax_cash_flow_y1']),
                   format_currency(row['after_tax_cash_flow_y2']))
@@ -529,8 +529,8 @@ def analyze_property(property_id):
 
     if is_single_family:
         # For SFH, show OER and break-even for both years
-        oer_y1 = row['operating_expenses_y1'] / row['total_rent'] if row['total_rent'] > 0 else 0
-        break_even_y1 = row['total_monthly_cost_y1'] / row['total_rent'] if row['total_rent'] > 0 else 0
+        oer_y1 = row['mr_operating_expenses'] / row['total_rent'] if row['total_rent'] > 0 else 0
+        break_even_y1 = row['mr_total_monthly_cost'] / row['total_rent'] if row['total_rent'] > 0 else 0
         oer_y1_style = "green" if 0.45 <= oer_y1 <= 0.55 else ("yellow" if 0.35 <= oer_y1 <= 0.65 else "red")
 
         table.add_row("Operating Expense Ratio",
@@ -662,12 +662,12 @@ def analyze_property(property_id):
     cost_table.add_row("MIP (Insurance)", format_currency(row['monthly_mip']), format_currency(row['monthly_mip'] * 12))
     cost_table.add_row("Property Taxes", format_currency(row['monthly_taxes']), format_currency(row['monthly_taxes'] * 12))
     cost_table.add_row("Home Insurance", format_currency(row['monthly_insurance']), format_currency(row['monthly_insurance'] * 12))
-    cost_table.add_row("Vacancy Reserve Y1", format_currency(row['monthly_vacancy_costs_y1']), format_currency(row['monthly_vacancy_costs_y1'] * 12))
-    cost_table.add_row("Vacancy Reserve Y2", format_currency(row['monthly_vacancy_costs_y2']), format_currency(row['monthly_vacancy_costs_y2'] * 12))
-    cost_table.add_row("Repair Reserve Y1", format_currency(row['monthly_repair_costs_y1']), format_currency(row['monthly_repair_costs_y1'] * 12))
-    cost_table.add_row("Repair Reserve Y2", format_currency(row['monthly_repair_costs_y2']), format_currency(row['monthly_repair_costs_y2'] * 12))
-    cost_table.add_row("[bold]Total Monthly Cost Y1[/bold]", f"[bold red]{format_currency(row['total_monthly_cost_y1'])}[/bold red]", f"[bold red]{format_currency(row['total_monthly_cost_y1'] * 12)}[/bold red]")
-    cost_table.add_row("[bold]Total Monthly Cost Y2[/bold]", f"[bold red]{format_currency(row['total_monthly_cost_y2'])}[/bold red]", f"[bold red]{format_currency(row['total_monthly_cost_y2'] * 12)}[/bold red]")
+    cost_table.add_row("Vacancy Reserve Y1", format_currency(row['mr_monthly_vacancy_costs']), format_currency(row['mr_monthly_vacancy_costs'] * 12))
+    cost_table.add_row("Vacancy Reserve Y2", format_currency(row['mr_monthly_vacancy_costs']), format_currency(row['mr_monthly_vacancy_costs'] * 12))
+    cost_table.add_row("Repair Reserve Y1", format_currency(row['mr_monthly_repair_costs']), format_currency(row['mr_monthly_repair_costs'] * 12))
+    cost_table.add_row("Repair Reserve Y2", format_currency(row['mr_monthly_repair_costs']), format_currency(row['mr_monthly_repair_costs'] * 12))
+    cost_table.add_row("[bold]Total Monthly Cost Y1[/bold]", f"[bold red]{format_currency(row['mr_total_monthly_cost'])}[/bold red]", f"[bold red]{format_currency(row['mr_total_monthly_cost'] * 12)}[/bold red]")
+    cost_table.add_row("[bold]Total Monthly Cost Y2[/bold]", f"[bold red]{format_currency(row['mr_total_monthly_cost'])}[/bold red]", f"[bold red]{format_currency(row['mr_total_monthly_cost'] * 12)}[/bold red]")
     cost_table.add_row("Electricity (est.)", format_currency(row['annual_electricity_cost_est'] / 12), format_currency(row['annual_electricity_cost_est']))
     
     console.print(cost_table)

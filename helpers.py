@@ -318,7 +318,6 @@ def calculate_net_proceeds(
     return net_proceeds
 
 def calculate_irr(row, years, assumptions, loan):
-def calculate_irr(row, years, assumptions, loan):
     """Calculate Internal Rate of Return over N years"""
     try:
         # Build cash flow array
@@ -344,7 +343,6 @@ def calculate_irr(row, years, assumptions, loan):
     except Exception:
         return 0  # Return 0 if calculation fails
 
-def calculate_npv(row, years, assumptions, loan):
 def calculate_npv(row, years, assumptions, loan):
     """Calculate Net Present Value over N years using discount_rate"""
     # Build cash flow array (same as IRR)
