@@ -440,6 +440,8 @@ def create_phase1_research_list_table(df, title):
     table.add_column(f"Address ({len(df)})", style="cyan", no_wrap=False)
     table.add_column("Neighborhood", style="dim")
     table.add_column("CF", justify="right")
+    table.add_column("MRCF1", justify="right")
+    table.add_column("MRCF2", justify="right")
     table.add_column("Cash", justify="right")
     table.add_column("Price", justify="right")
     table.add_column("Type", justify="center")
@@ -482,6 +484,18 @@ def create_phase1_research_list_table(df, title):
         else:
             cf_display = f"[green]{format_currency(cf_value)}[/green]"
 
+        mrcf1_value = row['mr_monthly_cash_flow_y1']
+        if mrcf1_value < 0:
+            mrcf1_value = f"[red]{format_currency(mrcf1_value)}[/red]"
+        else:
+            mrcf1_value = f"[green]{format_currency(mrcf1_value)}[/green]"
+        
+        mrcf2_value = row["mr_monthly_cash_flow_y2"]
+        if mrcf2_value < 0:
+            mrcf2_value = f"[red]{format_currency(mrcf2_value)}[/red]"
+        else:
+            mrcf2_value = f"[green]{format_currency(mrcf2_value)}[/green]"
+
         cash_value = row['cash_needed']
         if cash_value <= cash_25:
             cash_display = f"[green]{format_currency(cash_value)}[/green]"
@@ -514,6 +528,8 @@ def create_phase1_research_list_table(df, title):
             row['address1'],
             neighborhood_display,
             cf_display,
+            mrcf1_value,
+            mrcf2_value,
             cash_display,
             price_display,
             prop_type,

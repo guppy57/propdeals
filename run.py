@@ -34,7 +34,6 @@ from display import (
     display_phase1_total_rent_differences,
     display_property_metrics,
     display_y2_calculations,
-    display_rent_estimates_comparison,
 )
 from helpers import (
     calculate_monthly_take_home,
@@ -43,8 +42,6 @@ from helpers import (
     format_currency,
     format_number,
     format_percentage,
-    is_property_assessment_done_vectorized,
-    is_property_maps_done_vectorized,
     get_expected_gains,
     calculate_payback_period,
     get_state_tax_rate,
@@ -58,9 +55,7 @@ from inspections import InspectionsClient
 from loans import LoansProvider
 from neighborhood_assessment import edit_neighborhood_assessment
 from neighborhoods import NeighborhoodsClient
-from property_assessment import RiskAssessmentClient, edit_property_assessment
-from property_summary import PropertySummaryClient
-from rent_research import RentResearcher
+from property_assessment import edit_property_assessment
 
 load_dotenv()
 
@@ -685,7 +680,8 @@ def analyze_property(property_id):
         f"Lender Discounts: {format_currency(LOAN['upfront_discounts'])}\n"
         f"IA FirstHome Grant: {grant}\n" 
         f"[bold]Total Cash Needed: {format_currency(row['cash_needed'])}[/bold]\n"
-        f"Loan Amount: {format_currency(row['loan_amount'])}"
+        f"Loan Amount: {format_currency(row['loan_amount'])}\n"
+        f"[bold blue]Purchase Price: {format_currency(row['purchase_price'])}[/bold blue]"
     )
 
     if ASSUMPTIONS['using_ia_fhb_prog'] and ASSUMPTIONS['ia_fhb_prog_upfront_option'] == "LOAN" and row["units"] == 0:
