@@ -444,6 +444,7 @@ def create_phase1_research_list_table(df, title):
     table.add_column("MRCF2", justify="right")
     table.add_column("Cash", justify="right")
     table.add_column("Price", justify="right")
+    table.add_column("Est Value", justify="right")
     table.add_column("Type", justify="center")
     table.add_column("Qual", justify="center")
     table.add_column("Status", justify="center")
@@ -460,6 +461,8 @@ def create_phase1_research_list_table(df, title):
     # Calculate percentiles for new columns (for styling)
     cost_inc_25 = df['costs_to_income'].quantile(0.25)
     cost_inc_75 = df['costs_to_income'].quantile(0.75)
+    est_price_25 = df['est_price'].quantile(0.25)
+    est_price_75 = df['est_price'].quantile(0.75)
 
     # Add rows
     for _, row in df.iterrows():
@@ -514,6 +517,17 @@ def create_phase1_research_list_table(df, title):
         else:
             price_display = f"[red]{format_currency(price_value)}[/red]"
 
+        est_price_value = row.get('est_price')
+        if pd.notna(est_price_value) and est_price_value > 0:
+            if est_price_value <= est_price_25:
+                est_price_display = f"[green]{format_currency(est_price_value)}[/green]"
+            elif est_price_value <= est_price_75:
+                est_price_display = f"[yellow]{format_currency(est_price_value)}[/yellow]"
+            else:
+                est_price_display = f"[red]{format_currency(est_price_value)}[/red]"
+        else:
+            est_price_display = "N/A"
+
         grade = row['neighborhood_letter_grade'] if pd.notna(row['neighborhood_letter_grade']) else 'N/A'
         neighborhood = row['neighborhood'] if pd.notna(row['neighborhood']) else 'N/A'
         neighborhood_display = f"{grade} - {neighborhood}"
@@ -552,6 +566,7 @@ def create_phase1_research_list_table(df, title):
             mrcf2_value,
             cash_display,
             price_display,
+            est_price_display,
             prop_type,
             qual_type_display,
             status_display,
