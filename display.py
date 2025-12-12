@@ -359,7 +359,7 @@ def display_phase1_total_rent_differences(console, get_combined_phase1_qualifier
     Red = market estimate lower (optimistic quick estimate)
     """
     # Get Phase 1 qualifiers
-    dataframe = get_combined_phase1_qualifiers(active=True)
+    dataframe = get_combined_phase1_qualifiers()
 
     # Handle empty case
     if len(dataframe) == 0:
@@ -445,6 +445,8 @@ def create_phase1_research_list_table(df, title):
     table.add_column("Cash", justify="right")
     table.add_column("Price", justify="right")
     table.add_column("Type", justify="center")
+    table.add_column("Qual", justify="center")
+    table.add_column("Status", justify="center")
     table.add_column("SqFt", justify="right")
     table.add_column("Config", justify="center")
     table.add_column("Cost/Inc", justify="right")
@@ -524,6 +526,24 @@ def create_phase1_research_list_table(df, title):
         else:
             cost_inc_display = f"[red]{format_percentage(cost_inc_value)}[/red]"
 
+        # Format qualification type
+        qual_type = row.get('qualification_type', '')
+        if qual_type == 'current':
+            qual_type_display = "CUR"
+        elif qual_type == 'contingent':
+            qual_type_display = "CON"
+        elif qual_type == 'creative':
+            qual_type_display = "CRE"
+        else:
+            qual_type_display = qual_type
+
+        # Format status
+        status = row.get('status', '')
+        if status == 'pending sale':
+            status_display = "pending"
+        else:
+            status_display = status
+
         table.add_row(
             row['address1'],
             neighborhood_display,
@@ -533,6 +553,8 @@ def create_phase1_research_list_table(df, title):
             cash_display,
             price_display,
             prop_type,
+            qual_type_display,
+            status_display,
             f"{row['square_ft']}",
             config,
             cost_inc_display

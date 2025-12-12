@@ -258,7 +258,7 @@ load_assumptions()
 load_loan(LAST_USED_LOAN)
 reload_dataframe()
 
-def get_all_phase1_qualifying_properties(active=True):
+def get_all_phase1_qualifying_properties():
     """
     This method filters all properties based on our criteria for what is a financially viable property
     Current criteria using quick rent estimates:
@@ -273,10 +273,8 @@ def get_all_phase1_qualifying_properties(active=True):
       - Debt Service Coverage Ratio should be above 1.25
       - Net Present Value in 10 years must be positive, thus beating the stock market
     """
-    status_criteria = "status == 'active'" if active else "status != 'active'"
     criteria = (
-        f"{status_criteria} "
-        "& square_ft >= 1000 "
+        "square_ft >= 1000 "
         "& cash_needed <= 25000 "
         "& ((units == 0 & monthly_cash_flow >= -200) | (units > 0 & monthly_cash_flow >= -200)) "
         "& MGR_PP > 0.01 "
@@ -299,8 +297,8 @@ def get_all_phase1_qualifying_properties(active=True):
     creative_df["qualification_type"] = "creative"
     return filtered_df, reduced_df, creative_df 
 
-def get_combined_phase1_qualifiers(active=True):
-    current_df, reduced_df, creative_df = get_all_phase1_qualifying_properties(active=active)
+def get_combined_phase1_qualifiers():
+    current_df, reduced_df, creative_df = get_all_phase1_qualifying_properties()
     combined = pd.concat(
         [current_df, reduced_df, creative_df], ignore_index=True
     ).drop_duplicates(subset=["address1"], keep="first") 
@@ -315,7 +313,7 @@ def get_phase1_research_list():
     """
     current_df, contingent_df, creative_df = get_all_phase1_qualifying_properties()
     combined = pd.concat([current_df, contingent_df, creative_df], ignore_index=True).drop_duplicates(subset=["address1"], keep="first")
-    criteria = "(neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo"
+    criteria = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & status == 'active'"
     filtered = combined.query(criteria).copy()
     return filtered 
 
@@ -384,6 +382,10 @@ def analyze_property(property_id):
     table.add_column("Quick Estimate", justify="right", style="cyan")
     table.add_column("MR Year 1 (Live-in)", justify="right", style="green")
     table.add_column("MR Year 2 (All Rent)", justify="right", style="blue")
+    table.add_column("", style="dim white", no_wrap=True)  # Separator/Investment Metric column
+    table.add_column("5Y", justify="right", style="magenta")
+    table.add_column("10Y", justify="right", style="bright_magenta")
+    table.add_column("20Y", justify="right", style="bright_cyan")
     
     units_value = int(row['units'])
     if units_value == 0:
@@ -452,22 +454,6 @@ def analyze_property(property_id):
     
     console.print(rent_table)
     
-    console.print(Panel(f"[bold blue]Rental Income Summary[/bold blue]\n"
-                      f"Total Monthly Rent (All Units): {format_currency(row['total_rent'])}\n"
-                      f"Your Unit Rent (Not Collected): {format_currency(row['min_rent'])}\n"
-                      f"[bold]Net Monthly Income (Year 1): {format_currency(row['mr_net_rent_y1'])}[/bold]\n"
-                      f"[bold]Full Rental Income (Year 2): {format_currency(row['total_rent'])}[/bold]\n\n"
-                      f"[bold yellow]Operating Expenses:[/bold yellow]\n"
-                      f"Monthly Operating Expenses Y1: {format_currency(row['mr_operating_expenses'])} ({format_currency(row['mr_operating_expenses'] * 12)} annually)\n"
-                      f"Monthly Operating Expenses Y2: {format_currency(row['mr_operating_expenses'])} ({format_currency(row['mr_operating_expenses'] * 12)} annually)\n\n"
-                      f"[bold green]Net Operating Income (NOI):[/bold green]\n"
-                      f"NOI Year 1 (Live-in): {format_currency(row['mr_monthly_NOI_y1'])} ({format_currency(row['mr_annual_NOI_y1'])} annually)\n"
-                      f"NOI Year 2 (All Rent): {format_currency(row['mr_monthly_NOI_y2'])} ({format_currency(row['mr_annual_NOI_y2'])} annually)\n\n"
-                      f"[bold cyan]Personal Income & Housing Costs:[/bold cyan]\n"
-                      f"After-Tax Monthly Income: {format_currency(ASSUMPTIONS['after_tax_monthly_income'])}\n"
-                      f"Housing Cost to Income Ratio: {format_percentage(row['costs_to_income'])}",
-                      title="Income Breakdown"))
-
     if is_single_family:
         # For single family homes, update table title to clarify the comparison
         table.title = f"Investment Metrics: {property_id}"
@@ -475,90 +461,136 @@ def analyze_property(property_id):
         table.columns[2].header = "MR Year 1 (House Hacking)"
         table.columns[3].header = "MR Year 2 (Full Rental)"
 
-    # Add cost breakdown rows at the top
+    # Add cost breakdown rows at the top (with investment projections on the right)
     table.add_row("Mortgage Payment",
                   format_currency(row['monthly_mortgage']),
                   format_currency(row['monthly_mortgage']),
-                  format_currency(row['monthly_mortgage']))
+                  format_currency(row['monthly_mortgage']),
+                  "Investment Gain",
+                  format_currency(row['5y_forecast']),
+                  format_currency(row['10y_forecast']),
+                  format_currency(row['20y_forecast']))
     table.add_row("MIP (Insurance)",
                   format_currency(row['monthly_mip']),
                   format_currency(row['monthly_mip']),
-                  format_currency(row['monthly_mip']))
+                  format_currency(row['monthly_mip']),
+                  "Future Value",
+                  format_currency(row['future_value_5yr']),
+                  format_currency(row['future_value_10yr']),
+                  format_currency(row['future_value_20yr']))
     table.add_row("Property Taxes",
                   format_currency(row['monthly_taxes']),
                   format_currency(row['monthly_taxes']),
-                  format_currency(row['monthly_taxes']))
+                  format_currency(row['monthly_taxes']),
+                  "Net Proceeds",
+                  format_currency(row['net_proceeds_5yr']),
+                  format_currency(row['net_proceeds_10yr']),
+                  format_currency(row['net_proceeds_20yr']))
     table.add_row("Home Insurance",
                   format_currency(row['monthly_insurance']),
                   format_currency(row['monthly_insurance']),
-                  format_currency(row['monthly_insurance']))
+                  format_currency(row['monthly_insurance']),
+                  "Equity Multiple",
+                  format_number(row['equity_multiple_5yr']),
+                  format_number(row['equity_multiple_10yr']),
+                  format_number(row['equity_multiple_20yr']))
     table.add_row("Vacancy Reserve",
                   format_currency(row['monthly_vacancy_costs']),
                   format_currency(row['mr_monthly_vacancy_costs']),
-                  format_currency(row['mr_monthly_vacancy_costs']))
+                  format_currency(row['mr_monthly_vacancy_costs']),
+                  "Avg Annual Return %",
+                  format_percentage(row['avg_annual_return_5yr'] / 100),
+                  format_percentage(row['avg_annual_return_10yr'] / 100),
+                  format_percentage(row['avg_annual_return_20yr'] / 100))
     table.add_row("Repair Reserve",
                   format_currency(row['monthly_repair_costs']),
                   format_currency(row['mr_monthly_repair_costs']),
-                  format_currency(row['mr_monthly_repair_costs']))
+                  format_currency(row['mr_monthly_repair_costs']),
+                  "IRR",
+                  format_percentage(row['irr_5yr']),
+                  format_percentage(row['irr_10yr']),
+                  format_percentage(row['irr_20yr']))
     table.add_row("[bold]Total Monthly Cost[/bold]",
                   f"[bold red]{format_currency(row['total_monthly_cost'])}[/bold red]",
                   f"[bold red]{format_currency(row['mr_total_monthly_cost'])}[/bold red]",
-                  f"[bold red]{format_currency(row['mr_total_monthly_cost'])}[/bold red]")
+                  f"[bold red]{format_currency(row['mr_total_monthly_cost'])}[/bold red]",
+                  "NPV",
+                  format_currency(row['npv_5yr']),
+                  format_currency(row['npv_10yr']),
+                  format_currency(row['npv_20yr']))
 
     # Add common comparison rows
     table.add_row("Annual Rent",
                   format_currency(row['annual_rent']),
                   format_currency(row['mr_annual_rent_y1']),
-                  format_currency(row['mr_annual_rent_y2']))
+                  format_currency(row['mr_annual_rent_y2']),
+                  "Fair Value",
+                  format_currency(row['fair_value_5yr']),
+                  format_currency(row['fair_value_10yr']),
+                  format_currency(row['fair_value_20yr']))
 
     table.add_row("Monthly Rent",
                   format_currency(row['total_rent']),
                   format_currency(row['mr_net_rent_y1']) + " (net)" if not is_single_family else format_currency(row['mr_net_rent_y1']),
-                  format_currency(row['market_total_rent_estimate']))
+                  format_currency(row['market_total_rent_estimate']),
+                  "Value Gap %",
+                  format_percentage(row['value_gap_pct_5yr'] / 100),
+                  format_percentage(row['value_gap_pct_10yr'] / 100),
+                  format_percentage(row['value_gap_pct_20yr'] / 100))
 
     table.add_row("Operating Expenses",
                   format_currency(row['operating_expenses']),
                   format_currency(row['mr_operating_expenses']),
-                  format_currency(row['mr_operating_expenses']))
+                  format_currency(row['mr_operating_expenses']),
+                  "", "", "", "")
     table.add_row("[bold]Monthly Cash Flow[/bold]",
                   f"[bold {'red' if row['monthly_cash_flow'] < 0 else 'green'}]{format_currency(row['monthly_cash_flow'])}[/]",
                   f"[bold {'red' if row['mr_monthly_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['mr_monthly_cash_flow_y1'])}[/]",
-                  f"[bold {'red' if row['mr_monthly_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['mr_monthly_cash_flow_y2'])}[/]")
+                  f"[bold {'red' if row['mr_monthly_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['mr_monthly_cash_flow_y2'])}[/]",
+                  "", "", "", "")
     table.add_row("[bold]Annual Cash Flow[/bold]",
                   f"[bold {'red' if row['annual_cash_flow'] < 0 else 'green'}]{format_currency(row['annual_cash_flow'])}[/]",
                   f"[bold {'red' if row['mr_annual_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['mr_annual_cash_flow_y1'])}[/]",
-                  f"[bold {'red' if row['mr_annual_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['mr_annual_cash_flow_y2'])}[/]")
+                  f"[bold {'red' if row['mr_annual_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['mr_annual_cash_flow_y2'])}[/]",
+                  "", "", "", "")
     table.add_row("Monthly NOI",
                   "",
                   format_currency(row['mr_monthly_NOI_y1']),
-                  format_currency(row['mr_monthly_NOI_y2']))
+                  format_currency(row['mr_monthly_NOI_y2']),
+                  "", "", "", "")
     table.add_row("Annual NOI",
                   "",
                   format_currency(row['mr_annual_NOI_y1']),
-                  format_currency(row['mr_annual_NOI_y2']))
+                  format_currency(row['mr_annual_NOI_y2']),
+                  "", "", "", "")
     table.add_row("After-Tax Cash Flow",
                   "",
                   format_currency(row['after_tax_cash_flow_y1']),
-                  format_currency(row['after_tax_cash_flow_y2']))
+                  format_currency(row['after_tax_cash_flow_y2']),
+                  "", "", "", "")
     table.add_row("Cap Rate",
                   "",
                   format_percentage(row['cap_rate_y1']),
-                  format_percentage(row['cap_rate_y2']))
+                  format_percentage(row['cap_rate_y2']),
+                  "", "", "", "")
     table.add_row("Cash on Cash Return",
                   "",
                   format_percentage(row['CoC_y1']),
-                  format_percentage(row['CoC_y2']))
+                  format_percentage(row['CoC_y2']),
+                  "", "", "", "")
     table.add_row("Gross Rent Multiplier",
                   "",
                   format_number(row['GRM_y1']),
-                  format_number(row['GRM_y2']))
+                  format_number(row['GRM_y2']),
+                  "", "", "", "")
 
     downside_y1_style = "green" if row['cash_flow_y1_downside_10pct'] > 0 else "red"
     downside_y2_style = "green" if row['cash_flow_y2_downside_10pct'] > 0 else "red"
     table.add_row("Cash Flow (10% Rent Drop)",
                   "",
                   f"[{downside_y1_style}]{format_currency(row['cash_flow_y1_downside_10pct'])}[/{downside_y1_style}]",
-                  f"[{downside_y2_style}]{format_currency(row['cash_flow_y2_downside_10pct'])}[/{downside_y2_style}]")
+                  f"[{downside_y2_style}]{format_currency(row['cash_flow_y2_downside_10pct'])}[/{downside_y2_style}]",
+                  "", "", "", "")
 
     # Industry-standard metrics (primarily Y2-based for SFH)
     mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
@@ -578,144 +610,35 @@ def analyze_property(property_id):
         table.add_row("Operating Expense Ratio",
                       f"[{oer_quick_style}]{format_percentage(oer_quick)}[/{oer_quick_style}]",
                       f"[{oer_y1_style}]{format_percentage(oer_y1)}[/{oer_y1_style}]",
-                      f"[{opex_rent_style}]{format_percentage(row['oer'])}[/{opex_rent_style}]")
+                      f"[{opex_rent_style}]{format_percentage(row['oer'])}[/{opex_rent_style}]",
+                      "", "", "", "")
         table.add_row("Break-Even Occupancy",
                       format_percentage(break_even_quick),
                       format_percentage(break_even_y1),
-                      format_percentage(row['break_even_occupancy']))
+                      format_percentage(row['break_even_occupancy']),
+                      "", "", "", "")
     else:
-        table.add_row("Operating Expense Ratio","","",f"[{opex_rent_style}]{format_percentage(row['oer'])}[/{opex_rent_style}]")
-        table.add_row("Break-Even Occupancy","","",format_percentage(row['break_even_occupancy']))
+        table.add_row("Operating Expense Ratio","","",f"[{opex_rent_style}]{format_percentage(row['oer'])}[/{opex_rent_style}]","","","","")
+        table.add_row("Break-Even Occupancy","","",format_percentage(row['break_even_occupancy']),"","","","")
 
-    table.add_row("1% Rule (MGR/PP)","","",f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]")
-    table.add_row("50% Rule (OpEx/Rent)","","",f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]")
-    table.add_row("DSCR (Rent/Mortgage)","","",f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]")
-    table.add_row("FHA Self Sufficiency Ratio","","",f"[{fha_style}]{format_percentage(row['fha_self_sufficiency_ratio'])}[/{fha_style}]")
-    table.add_row("Rent Per Sqft","","",format_currency(row['rent_per_sqft']))
-    table.add_row("Break-Even Vacancy","","",express_percent_as_months_and_days(row["break_even_vacancy"]))
-    table.add_row("Effective Gross Income","","",format_currency(row['egi']))
-    table.add_row("Debt Yield","","",format_percentage(row['debt_yield']))
-    table.add_row("LTV Ratio","","",format_percentage(row['ltv_ratio']))
+    table.add_row("1% Rule (MGR/PP)","","",f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]","","","","")
+    table.add_row("50% Rule (OpEx/Rent)","","",f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]","","","","")
+    table.add_row("DSCR (Rent/Mortgage)","","",f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]","","","","")
+    table.add_row("FHA Self Sufficiency Ratio","","",f"[{fha_style}]{format_percentage(row['fha_self_sufficiency_ratio'])}[/{fha_style}]","","","","")
+    table.add_row("Rent Per Sqft","","",format_currency(row['rent_per_sqft']),"","","","")
+    table.add_row("Break-Even Vacancy","","",express_percent_as_months_and_days(row["break_even_vacancy"]),"","","","")
+    table.add_row("Effective Gross Income","","",format_currency(row['egi']),"","","","")
+    table.add_row("Debt Yield","","",format_percentage(row['debt_yield']),"","","","")
+    table.add_row("LTV Ratio","","",format_percentage(row['ltv_ratio']),"","","","")
     price_per_label = "Price Per Bedroom" if is_single_family else "Price Per Door"
-    table.add_row(price_per_label,"","",format_currency(row['price_per_door']))
-    table.add_row("Monthly Depreciation Deduction","","",format_currency(row['monthly_depreciation']))
-    table.add_row("Monthly Tax Savings","","",format_currency(row['tax_savings_monthly']))
-    table.add_row("Return on Equity (ROE) Y2","","",format_percentage(row['roe_y2']))
-    table.add_row("Leverage Benefit","","",format_percentage(row['leverage_benefit']))
+    table.add_row(price_per_label,"","",format_currency(row['price_per_door']),"","","","")
+    table.add_row("Monthly Depreciation Deduction","","",format_currency(row['monthly_depreciation']),"","","","")
+    table.add_row("Monthly Tax Savings","","",format_currency(row['tax_savings_monthly']),"","","","")
+    table.add_row("Return on Equity (ROE) Y2","","",format_percentage(row['roe_y2']),"","","","")
+    table.add_row("Leverage Benefit","","",format_percentage(row['leverage_benefit']),"","","","")
     payback_display = f"{row['payback_period_years']:.1f} years" if row['payback_period_years'] != float('inf') else "Never"
-    table.add_row("Payback Period","","",payback_display)
-
+    table.add_row("Payback Period","","",payback_display,"","","","")
     console.print(table)
-    projections_table = Table(title="Investment Projections", show_header=True, header_style="bold cyan")
-    projections_table.add_column("Metric", style="yellow", no_wrap=True)
-    projections_table.add_column("5Y", justify="right", style="green")
-    projections_table.add_column("10Y", justify="right", style="blue")
-    projections_table.add_column("20Y", justify="right", style="magenta")
-    projections_table.add_row(
-        "Investment Gain",
-        format_currency(row['5y_forecast']),
-        format_currency(row['10y_forecast']),
-        format_currency(row['20y_forecast'])
-    )
-    projections_table.add_row(
-        "Future Value",
-        format_currency(row['future_value_5yr']),
-        format_currency(row['future_value_10yr']),
-        format_currency(row['future_value_20yr'])
-    )
-    projections_table.add_row(
-        "Net Proceeds",
-        format_currency(row['net_proceeds_5yr']),
-        format_currency(row['net_proceeds_10yr']),
-        format_currency(row['net_proceeds_20yr'])
-    )
-    projections_table.add_row(
-        "Equity Multiple",
-        format_number(row['equity_multiple_5yr']),
-        format_number(row['equity_multiple_10yr']),
-        format_number(row['equity_multiple_20yr'])
-    )
-    projections_table.add_row(
-        "Avg Annual Return %",
-        format_percentage(row['avg_annual_return_5yr'] / 100),
-        format_percentage(row['avg_annual_return_10yr'] / 100),
-        format_percentage(row['avg_annual_return_20yr'] / 100)
-    )
-    projections_table.add_row(
-        "IRR",
-        format_percentage(row['irr_5yr']),
-        format_percentage(row['irr_10yr']),
-        format_percentage(row['irr_20yr'])
-    )
-    projections_table.add_row(
-        "NPV",
-        format_currency(row['npv_5yr']),
-        format_currency(row['npv_10yr']),
-        format_currency(row['npv_20yr'])
-    )
-    projections_table.add_row(
-        "Fair Value",
-        format_currency(row['fair_value_5yr']),
-        format_currency(row['fair_value_10yr']),
-        format_currency(row['fair_value_20yr'])
-    )
-    projections_table.add_row(
-        "Value Gap %",
-        format_percentage(row['value_gap_pct_5yr'] / 100),
-        format_percentage(row['value_gap_pct_10yr'] / 100),
-        format_percentage(row['value_gap_pct_20yr'] / 100)
-    )
-
-    console.print(projections_table)
-
-    # mobility_table = Table(title="Mobility Score Breakdown", show_header=True, header_style="bold magenta")
-    # mobility_table.add_column("Metric", style="yellow", width=25)
-    # mobility_table.add_column("Score", justify="right", style="white", width=8)
-    # mobility_table.add_column("Max", justify="right", style="dim white", width=5)
-    # mobility_table.add_column("Weight", justify="right", style="white", width=8)
-    # mobility_table.add_column("Result", justify="right", style="white", width=8)
-
-    # walk_score = row['walk_score']
-    # transit_score = row['transit_score']
-    # bike_score = row['bike_score']
-    
-    # walk_weight = 0.6
-    # transit_weight = 0.3
-    # bike_weight = 0.1
-
-    # walk_result = walk_score * walk_weight
-    # transit_result = transit_score * transit_weight
-    # bike_result = bike_score * bike_weight
-
-    # total_mobility_score = row['mobility_score']
-    # mobility_score_style = ("green" if total_mobility_score >= 75 else "yellow" if total_mobility_score >= 50 else "red")
-
-    # mobility_table.add_row("Walk Score", f"{walk_score:.0f}", "100", f"{walk_weight:.0%}", f"{walk_result:.2f}")
-    # mobility_table.add_row("Transit Score", f"{transit_score:.0f}", "100", f"{transit_weight:.0%}", f"{transit_result:.2f}")
-    # mobility_table.add_row("Bike Score", f"{bike_score:.0f}", "100", f"{bike_weight:.0%}", f"{bike_result:.2f}")
-    # mobility_table.add_row("[bold]TOTAL SCORE[/bold]", f"[{mobility_score_style}]{total_mobility_score:.2f}[/{mobility_score_style}]", "[bold]100[/bold]", "", f"[{mobility_score_style}]{total_mobility_score:.2f}[/{mobility_score_style}]")
-
-    # console.print(mobility_table)
-
-    # Cost breakdown table moved to Property Details table above
-    # cost_table = Table(title="Cost Breakdown", show_header=True, header_style="bold red")
-    # cost_table.add_column("Cost Type", style="yellow")
-    # cost_table.add_column("Monthly Amount", justify="right", style="red")
-    # cost_table.add_column("Annual Amount", justify="right", style="red")
-
-    # cost_table.add_row("Mortgage Payment", format_currency(row['monthly_mortgage']), format_currency(row['monthly_mortgage'] * 12))
-    # cost_table.add_row("MIP (Insurance)", format_currency(row['monthly_mip']), format_currency(row['monthly_mip'] * 12))
-    # cost_table.add_row("Property Taxes", format_currency(row['monthly_taxes']), format_currency(row['monthly_taxes'] * 12))
-    # cost_table.add_row("Home Insurance", format_currency(row['monthly_insurance']), format_currency(row['monthly_insurance'] * 12))
-    # cost_table.add_row("Vacancy Reserve Y1", format_currency(row['mr_monthly_vacancy_costs']), format_currency(row['mr_monthly_vacancy_costs'] * 12))
-    # cost_table.add_row("Vacancy Reserve Y2", format_currency(row['mr_monthly_vacancy_costs']), format_currency(row['mr_monthly_vacancy_costs'] * 12))
-    # cost_table.add_row("Repair Reserve Y1", format_currency(row['mr_monthly_repair_costs']), format_currency(row['mr_monthly_repair_costs'] * 12))
-    # cost_table.add_row("Repair Reserve Y2", format_currency(row['mr_monthly_repair_costs']), format_currency(row['mr_monthly_repair_costs'] * 12))
-    # cost_table.add_row("[bold]Total Monthly Cost Y1[/bold]", f"[bold red]{format_currency(row['mr_total_monthly_cost'])}[/bold red]", f"[bold red]{format_currency(row['mr_total_monthly_cost'] * 12)}[/bold red]")
-    # cost_table.add_row("[bold]Total Monthly Cost Y2[/bold]", f"[bold red]{format_currency(row['mr_total_monthly_cost'])}[/bold red]", f"[bold red]{format_currency(row['mr_total_monthly_cost'] * 12)}[/bold red]")
-    # cost_table.add_row("Electricity (est.)", format_currency(row['annual_electricity_cost_est'] / 12), format_currency(row['annual_electricity_cost_est']))
-
-    # console.print(cost_table)
 
     grant = format_currency(IA_FIRSTHOME_GRANT_AMT) if ASSUMPTIONS['ia_fhb_prog_upfront_option'] == "GRANT" and ASSUMPTIONS['using_ia_fhb_prog'] else "[dim]Not using grant option for Iowa First Home[/dim]"
 

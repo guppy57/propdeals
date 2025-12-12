@@ -258,7 +258,7 @@ def import_properties(csv_filepath: str) -> Dict[str, Any]:
 
                 # Get Phase 1 qualifying properties
                 console.print("  [cyan]→[/cyan] Fetching Phase 1 qualifiers...")
-                phase1_df = get_combined_phase1_qualifiers(active=True)
+                phase1_df = get_combined_phase1_qualifiers()
                 qualifying_addresses = phase1_df["address1"].tolist()
 
                 # Find intersection: addresses that were imported AND qualify for Phase 1
