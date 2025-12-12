@@ -840,3 +840,105 @@ def display_rent_estimates_comparison(
     ).ask()
 
     return update_database
+
+
+def display_property_value_comparison(console, properties_data):
+    """
+    Display property value comparison table with purchase price vs estimated price.
+
+    Args:
+        console: Rich Console instance
+        properties_data: List of dicts with keys: address1, purchase_price, est_price, est_price_low, est_price_high
+    """
+    if not properties_data:
+        console.print("[dim]No property data to display[/dim]")
+        return
+
+    # Calculate differences and sort by absolute percent difference
+    for prop in properties_data:
+        purchase_price = prop.get('purchase_price', 0)
+        est_price = prop.get('est_price', 0)
+
+        if purchase_price and purchase_price > 0 and est_price and est_price > 0:
+            prop['difference_dollar'] = est_price - purchase_price
+            prop['difference_percent'] = (est_price - purchase_price) / purchase_price
+            prop['abs_difference_percent'] = abs(prop['difference_percent'])
+        else:
+            prop['difference_dollar'] = None
+            prop['difference_percent'] = None
+            prop['abs_difference_percent'] = 0
+
+    # Sort by largest absolute percent difference first
+    sorted_data = sorted(properties_data, key=lambda x: x['abs_difference_percent'], reverse=True)
+
+    # Create Rich table
+    table = Table(
+        title=f"Property Value Comparison ({len(sorted_data)} properties)",
+        show_header=True,
+        header_style="bold magenta"
+    )
+
+    # Add columns
+    table.add_column("Address", style="cyan", no_wrap=False)
+    table.add_column("Purchase Price", justify="right")
+    table.add_column("Est Price", justify="right")
+    table.add_column("Est Range", justify="right", style="dim")
+    table.add_column("Difference $", justify="right")
+    table.add_column("Difference %", justify="right")
+
+    # Add rows
+    for prop in sorted_data:
+        address = prop.get('address1', 'N/A')
+        purchase_price = prop.get('purchase_price', 0)
+        est_price = prop.get('est_price', 0)
+        est_price_low = prop.get('est_price_low', 0)
+        est_price_high = prop.get('est_price_high', 0)
+        difference_dollar = prop.get('difference_dollar')
+        difference_percent = prop.get('difference_percent')
+
+        # Format purchase price
+        if purchase_price and purchase_price > 0:
+            purchase_display = format_currency(purchase_price)
+        else:
+            purchase_display = "N/A"
+
+        # Format estimated price
+        if est_price and est_price > 0:
+            est_display = format_currency(est_price)
+        else:
+            est_display = "N/A"
+
+        # Format range
+        if est_price_low and est_price_high:
+            range_display = f"{format_currency(est_price_low)} - {format_currency(est_price_high)}"
+        else:
+            range_display = "N/A"
+
+        # Format differences with color coding
+        if difference_dollar is not None and difference_percent is not None:
+            # Positive difference = estimated price > purchase price (green)
+            # Negative difference = estimated price < purchase price (red)
+            if difference_dollar > 0:
+                diff_dollar_display = f"[green]+{format_currency(difference_dollar)}[/green]"
+                diff_percent_display = f"[green]+{format_percentage(difference_percent)}[/green]"
+            elif difference_dollar < 0:
+                diff_dollar_display = f"[red]{format_currency(difference_dollar)}[/red]"
+                diff_percent_display = f"[red]{format_percentage(difference_percent)}[/red]"
+            else:
+                diff_dollar_display = format_currency(0)
+                diff_percent_display = format_percentage(0)
+        else:
+            diff_dollar_display = "N/A"
+            diff_percent_display = "N/A"
+
+        table.add_row(
+            address,
+            purchase_display,
+            est_display,
+            range_display,
+            diff_dollar_display,
+            diff_percent_display
+        )
+
+    console.print("\n")
+    console.print(table)
