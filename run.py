@@ -56,6 +56,7 @@ from loans import LoansProvider
 from neighborhood_assessment import edit_neighborhood_assessment
 from neighborhoods import NeighborhoodsClient
 from property_assessment import edit_property_assessment
+from scripts import ScriptsProvider
 
 load_dotenv()
 
@@ -808,6 +809,20 @@ def run_all_properties_options():
         elif option == "Phase 2 - Qualifiers":
             display_all_phase2_qualifying_properties(console, df, get_all_phase2_qualifiers)
 
+def run_scripts_options():
+  using_scripts = True
+  choices = ["Go back", "Add property valuations to all Phase 1 properties"]
+  scripts = ScriptsProvider(supabase_client=supabase, console=console)
+
+  while using_scripts:
+    option = questionary.select("Select a script", choices=choices).ask()
+    if option == "Go back":
+      using_scripts = False
+    elif option == "Add property valuations to all Phase 1 properties":
+      phase1_df = get_combined_phase1_qualifiers()
+      scripts.run_add_property_values_script(properties_df=phase1_df)
+      reload_dataframe()
+
 def run_loans_options():
   using_loans = True
   choices = ["Go back", "Add new loan", "View loans", "Change loans for session"]
@@ -852,7 +867,7 @@ def run_loans_options():
 
 if __name__ == "__main__":
   while using_application:
-    choices = ['All properties', 'One property', 'One property - phase 1 research list', "Add new property", "Loans", "Refresh data", "Quit"]
+    choices = ['All properties', 'One property', 'One property - phase 1 research list', "Add new property", "Scripts", "Loans", "Refresh data", "Quit"]
     option = questionary.select("What would you like to analyze?", choices=choices).ask()
 
     if option == "Quit":
@@ -894,6 +909,8 @@ if __name__ == "__main__":
       handle_rent_research_after_add(property_details['address1'], supabase, console, neighborhoods)
       reload_dataframe()
       display_new_property_qualification(console, property_details['address1'], get_all_phase1_qualifying_properties)
+    elif option == "Scripts":
+      run_scripts_options()
     elif option == "Loans":
       run_loans_options()
     elif option == "Refresh data":
