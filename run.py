@@ -121,120 +121,140 @@ def load_loan(loan_id):
     console.print("[green]Loan data reloaded successfully![/green]")
 
 def apply_calculations_on_dataframe(df):
+    # Convert and clean existing columns
     cols = ["walk_score", "transit_score", "bike_score"]
     df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
     df[cols] = df[cols].fillna(0)
-    df["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
-    df["home_age"] = 2025 - df["built_in"].fillna(2025)
-    df["down_payment"] = df["purchase_price"] * LOAN['down_payment_rate'] 
-    df["5_pct_loan"] = df["purchase_price"] * 0.05
-    df["loan_amount"] = df["purchase_price"] - df["down_payment"] + (df["purchase_price"] * LOAN['mip_upfront_rate'])
-    df["monthly_mortgage"] = df["loan_amount"].apply(lambda x: calculate_mortgage(x, LOAN['apr_rate'], LOAN['loan_length_years']))
-    df["monthly_mip"] = (df["loan_amount"] * LOAN['mip_annual_rate']) / 12
-    df["monthly_taxes"] = (df["purchase_price"] * ASSUMPTIONS['property_tax_rate']) / 12
-    df["monthly_insurance"] = (df["purchase_price"] * ASSUMPTIONS['home_insurance_rate']) / 12
-    df["closing_costs"] = df["purchase_price"] * ASSUMPTIONS['closing_costs_rate']
-    df["cash_needed"] = df["closing_costs"] + df["down_payment"] - LOAN['upfront_discounts'] - (IA_FIRSTHOME_GRANT_AMT if (ASSUMPTIONS['ia_fhb_prog_upfront_option'] == "GRANT" and ASSUMPTIONS['using_ia_fhb_prog']) else 0)
-    df["quick_monthly_rent_estimate"] = (df["purchase_price"] + df["closing_costs"]) * 0.0075
-    df['ammoritization_estimate'] = (df['loan_amount'] * 0.017) / 12
-    df["total_rent"] = df['quick_monthly_rent_estimate']
-    df["annual_rent"] = df["total_rent"] * 12
-    df["monthly_vacancy_costs"] = df["total_rent"] * ASSUMPTIONS['vacancy_rate']
-    df["monthly_repair_costs"] = df["total_rent"] * ASSUMPTIONS['repair_savings_rate']
-    df["operating_expenses"] = df["monthly_vacancy_costs"] + df["monthly_repair_costs"] + df["monthly_taxes"] + df["monthly_insurance"]
-    df["total_monthly_cost"] = df["monthly_mortgage"] + df["monthly_mip"] + df["operating_expenses"]
-    df["monthly_cash_flow"] = df["total_rent"] - df["total_monthly_cost"] + df['ammoritization_estimate']
-    df["annual_cash_flow"] = df["monthly_cash_flow"] * 12
+
+    # Collect all new columns in a dictionary to add at once
+    new_columns = {}
+    new_columns["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
+    new_columns["home_age"] = 2025 - df["built_in"].fillna(2025)
+    new_columns["down_payment"] = df["purchase_price"] * LOAN['down_payment_rate']
+    new_columns["5_pct_loan"] = df["purchase_price"] * 0.05
+    new_columns["loan_amount"] = df["purchase_price"] - new_columns["down_payment"] + (df["purchase_price"] * LOAN['mip_upfront_rate'])
+    new_columns["monthly_mortgage"] = new_columns["loan_amount"].apply(lambda x: calculate_mortgage(x, LOAN['apr_rate'], LOAN['loan_length_years']))
+    new_columns["monthly_mip"] = (new_columns["loan_amount"] * LOAN['mip_annual_rate']) / 12
+    new_columns["monthly_taxes"] = (df["purchase_price"] * ASSUMPTIONS['property_tax_rate']) / 12
+    new_columns["monthly_insurance"] = (df["purchase_price"] * ASSUMPTIONS['home_insurance_rate']) / 12
+    new_columns["closing_costs"] = df["purchase_price"] * ASSUMPTIONS['closing_costs_rate']
+    new_columns["cash_needed"] = new_columns["closing_costs"] + new_columns["down_payment"] - LOAN['upfront_discounts'] - (IA_FIRSTHOME_GRANT_AMT if (ASSUMPTIONS['ia_fhb_prog_upfront_option'] == "GRANT" and ASSUMPTIONS['using_ia_fhb_prog']) else 0)
+    new_columns["quick_monthly_rent_estimate"] = (df["purchase_price"] + new_columns["closing_costs"]) * 0.0075
+    new_columns['ammoritization_estimate'] = (new_columns['loan_amount'] * 0.017) / 12
+    new_columns["total_rent"] = new_columns['quick_monthly_rent_estimate']
+    new_columns["annual_rent"] = new_columns["total_rent"] * 12
+    new_columns["monthly_vacancy_costs"] = new_columns["total_rent"] * ASSUMPTIONS['vacancy_rate']
+    new_columns["monthly_repair_costs"] = new_columns["total_rent"] * ASSUMPTIONS['repair_savings_rate']
+    new_columns["operating_expenses"] = new_columns["monthly_vacancy_costs"] + new_columns["monthly_repair_costs"] + new_columns["monthly_taxes"] + new_columns["monthly_insurance"]
+    new_columns["total_monthly_cost"] = new_columns["monthly_mortgage"] + new_columns["monthly_mip"] + new_columns["operating_expenses"]
+    new_columns["monthly_cash_flow"] = new_columns["total_rent"] - new_columns["total_monthly_cost"] + new_columns['ammoritization_estimate']
+    new_columns["annual_cash_flow"] = new_columns["monthly_cash_flow"] * 12
+
+    # Add all columns at once to avoid fragmentation
+    df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
     return df
 
 def apply_investment_calculations(df):
-    df["mr_monthly_vacancy_costs"] = df["market_total_rent_estimate"] * ASSUMPTIONS['vacancy_rate']
-    df["mr_monthly_repair_costs"] = df["market_total_rent_estimate"] * ASSUMPTIONS['repair_savings_rate']
-    df["mr_operating_expenses"] = df['mr_monthly_vacancy_costs'] + df['mr_monthly_repair_costs'] + df['monthly_taxes'] + df['monthly_insurance']
-    df["mr_total_monthly_cost"] = df['monthly_mortgage'] + df['monthly_mip'] + df['mr_operating_expenses']
-    df["mr_net_rent_y1"] = df['market_total_rent_estimate'] - df['min_rent']
-    df["mr_annual_rent_y1"] = df["mr_net_rent_y1"] * 12 
-    df["mr_annual_rent_y2"] = df["market_total_rent_estimate"] * 12
-    df["mr_monthly_NOI_y1"] = df["mr_net_rent_y1"] - df["mr_operating_expenses"]
-    df["mr_monthly_NOI_y2"] = df["market_total_rent_estimate"] - df["mr_operating_expenses"]
-    df["mr_annual_NOI_y1"] = df["mr_monthly_NOI_y1"] * 12
-    df["mr_annual_NOI_y2"] = df["mr_monthly_NOI_y2"] * 12
-    df["mr_monthly_cash_flow_y1"] = df["mr_net_rent_y1"] - df["mr_total_monthly_cost"] + df["ammoritization_estimate"]
-    df["mr_monthly_cash_flow_y2"] = df["market_total_rent_estimate"] - df["mr_total_monthly_cost"] + df["ammoritization_estimate"]
-    df["mr_annual_cash_flow_y1"] = df["mr_monthly_cash_flow_y1"] * 12
-    df["mr_annual_cash_flow_y2"] = df["mr_monthly_cash_flow_y2"] * 12
+    # Calculate state tax rate once
     state_rate = get_state_tax_rate(ASSUMPTIONS['state_tax_code'])
     combined_tax_rate = FEDERAL_TAX_RATE + state_rate
-    df["cap_rate_y1"] = df["mr_annual_NOI_y1"] / df["purchase_price"]
-    df["cap_rate_y2"] = df["mr_annual_NOI_y2"] / df["purchase_price"]
-    df["CoC_y1"] = df["mr_annual_cash_flow_y1"] / df["cash_needed"]
-    df["CoC_y2"] = df["mr_annual_cash_flow_y2"] / df["cash_needed"]
-    df["GRM_y1"] = df["purchase_price"] / df["mr_annual_rent_y1"] # Gross Rent Multiplier (lower = better)
-    df["GRM_y2"] = df["purchase_price"] / df["mr_annual_rent_y2"]
-    df["MGR_PP"] = df["market_total_rent_estimate"] / df["purchase_price"] # Monthly Gross Rent : Purchase Price, goal is for it to be greater than 0.01
-    df["OpEx_Rent"] = df["mr_operating_expenses"] / df["market_total_rent_estimate"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
-    df["DSCR"] = df["market_total_rent_estimate"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
-    df["ltv_ratio"] = df["loan_amount"] / df["purchase_price"] # Loan-to-Value ratio
-    df["price_per_door"] = df.apply(
+
+    # Stage 1: Add basic columns needed by df.apply() functions
+    new_columns_stage1 = {}
+    new_columns_stage1["mr_monthly_vacancy_costs"] = df["market_total_rent_estimate"] * ASSUMPTIONS['vacancy_rate']
+    new_columns_stage1["mr_monthly_repair_costs"] = df["market_total_rent_estimate"] * ASSUMPTIONS['repair_savings_rate']
+    new_columns_stage1["mr_operating_expenses"] = new_columns_stage1['mr_monthly_vacancy_costs'] + new_columns_stage1['mr_monthly_repair_costs'] + df['monthly_taxes'] + df['monthly_insurance']
+    new_columns_stage1["mr_total_monthly_cost"] = df['monthly_mortgage'] + df['monthly_mip'] + new_columns_stage1['mr_operating_expenses']
+    new_columns_stage1["mr_net_rent_y1"] = df['market_total_rent_estimate'] - df['min_rent']
+    new_columns_stage1["mr_annual_rent_y1"] = new_columns_stage1["mr_net_rent_y1"] * 12
+    new_columns_stage1["mr_annual_rent_y2"] = df["market_total_rent_estimate"] * 12
+    new_columns_stage1["mr_monthly_NOI_y1"] = new_columns_stage1["mr_net_rent_y1"] - new_columns_stage1["mr_operating_expenses"]
+    new_columns_stage1["mr_monthly_NOI_y2"] = df["market_total_rent_estimate"] - new_columns_stage1["mr_operating_expenses"]
+    new_columns_stage1["mr_annual_NOI_y1"] = new_columns_stage1["mr_monthly_NOI_y1"] * 12
+    new_columns_stage1["mr_annual_NOI_y2"] = new_columns_stage1["mr_monthly_NOI_y2"] * 12
+    new_columns_stage1["mr_monthly_cash_flow_y1"] = new_columns_stage1["mr_net_rent_y1"] - new_columns_stage1["mr_total_monthly_cost"] + df["ammoritization_estimate"]
+    new_columns_stage1["mr_monthly_cash_flow_y2"] = df["market_total_rent_estimate"] - new_columns_stage1["mr_total_monthly_cost"] + df["ammoritization_estimate"]
+    new_columns_stage1["mr_annual_cash_flow_y1"] = new_columns_stage1["mr_monthly_cash_flow_y1"] * 12
+    new_columns_stage1["mr_annual_cash_flow_y2"] = new_columns_stage1["mr_monthly_cash_flow_y2"] * 12
+
+    # Add stage 1 columns to dataframe so df.apply() functions can access them
+    df = pd.concat([df, pd.DataFrame(new_columns_stage1, index=df.index)], axis=1)
+
+    # Stage 2: Add remaining columns including those using df.apply()
+    new_columns_stage2 = {}
+    new_columns_stage2["cap_rate_y1"] = df["mr_annual_NOI_y1"] / df["purchase_price"]
+    new_columns_stage2["cap_rate_y2"] = df["mr_annual_NOI_y2"] / df["purchase_price"]
+    new_columns_stage2["CoC_y1"] = df["mr_annual_cash_flow_y1"] / df["cash_needed"]
+    new_columns_stage2["CoC_y2"] = df["mr_annual_cash_flow_y2"] / df["cash_needed"]
+    new_columns_stage2["GRM_y1"] = df["purchase_price"] / df["mr_annual_rent_y1"] # Gross Rent Multiplier (lower = better)
+    new_columns_stage2["GRM_y2"] = df["purchase_price"] / df["mr_annual_rent_y2"]
+    new_columns_stage2["MGR_PP"] = df["market_total_rent_estimate"] / df["purchase_price"] # Monthly Gross Rent : Purchase Price, goal is for it to be greater than 0.01
+    new_columns_stage2["OpEx_Rent"] = df["mr_operating_expenses"] / df["market_total_rent_estimate"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
+    new_columns_stage2["DSCR"] = df["market_total_rent_estimate"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
+    new_columns_stage2["ltv_ratio"] = df["loan_amount"] / df["purchase_price"] # Loan-to-Value ratio
+    new_columns_stage2["price_per_door"] = df.apply(
         lambda row: row["purchase_price"] / row["beds"] if row["units"] == 0 else row["purchase_price"] / row["units"],
         axis=1
     ) # Price per unit/door (or per bedroom for single family)
-    df["rent_per_sqft"] = df["market_total_rent_estimate"] / df["square_ft"] # Monthly rent per square foot (Y2 for SFH)
-    df["break_even_occupancy"] = df["mr_total_monthly_cost"] / df["market_total_rent_estimate"] # Break-even occupancy rate
-    df["break_even_vacancy"] = 1.0 - df["break_even_occupancy"]
-    df["oer"] = df["mr_operating_expenses"] / df["market_total_rent_estimate"] # Operating Expense Ratio (standard industry metric)
-    df["egi"] = df["market_total_rent_estimate"] - df["mr_monthly_vacancy_costs"] # Effective Gross Income
-    df["debt_yield"] = df["mr_annual_NOI_y2"] / df["loan_amount"] # Debt Yield (lender metric)
-    df["5y_forecast"] = df.apply(get_expected_gains, axis=1, args=(5,ASSUMPTIONS,LOAN,))
-    df["10y_forecast"] = df.apply(get_expected_gains, axis=1, args=(10,ASSUMPTIONS,LOAN,))
-    df["20y_forecast"] = df.apply(get_expected_gains, axis=1, args=(20,ASSUMPTIONS,LOAN,))
-    df["mobility_score"] = (df["walk_score"] * 0.6) + (df["transit_score"] * 0.30) + (df["bike_score"] * 0.10)
-    df["piti"] = df['monthly_mortgage'] + df['monthly_mip'] + df['monthly_taxes'] + df['monthly_insurance']
-    df['costs_to_income'] = df["piti"] / ASSUMPTIONS['after_tax_monthly_income']
-    df["monthly_depreciation"] = (df["purchase_price"] * (1 - LAND_VALUE_PCT)) / DEPRECIATION_YEARS / 12
-    df["tax_savings_monthly"] = df["monthly_depreciation"] * combined_tax_rate
-    df["after_tax_cash_flow_y1"] = df["mr_monthly_cash_flow_y1"] + df["tax_savings_monthly"]
-    df["after_tax_cash_flow_y2"] = df["mr_monthly_cash_flow_y2"] + df["tax_savings_monthly"]
-    df["future_value_5yr"] = df.apply(
+    new_columns_stage2["rent_per_sqft"] = df["market_total_rent_estimate"] / df["square_ft"] # Monthly rent per square foot (Y2 for SFH)
+    new_columns_stage2["break_even_occupancy"] = df["mr_total_monthly_cost"] / df["market_total_rent_estimate"] # Break-even occupancy rate
+    new_columns_stage2["break_even_vacancy"] = 1.0 - new_columns_stage2["break_even_occupancy"]
+    new_columns_stage2["oer"] = df["mr_operating_expenses"] / df["market_total_rent_estimate"] # Operating Expense Ratio (standard industry metric)
+    new_columns_stage2["egi"] = df["market_total_rent_estimate"] - df["mr_monthly_vacancy_costs"] # Effective Gross Income
+    new_columns_stage2["debt_yield"] = df["mr_annual_NOI_y2"] / df["loan_amount"] # Debt Yield (lender metric)
+    new_columns_stage2["5y_forecast"] = df.apply(get_expected_gains, axis=1, args=(5,ASSUMPTIONS,LOAN,))
+    new_columns_stage2["10y_forecast"] = df.apply(get_expected_gains, axis=1, args=(10,ASSUMPTIONS,LOAN,))
+    new_columns_stage2["20y_forecast"] = df.apply(get_expected_gains, axis=1, args=(20,ASSUMPTIONS,LOAN,))
+    new_columns_stage2["mobility_score"] = (df["walk_score"] * 0.6) + (df["transit_score"] * 0.30) + (df["bike_score"] * 0.10)
+    new_columns_stage2["piti"] = df['monthly_mortgage'] + df['monthly_mip'] + df['monthly_taxes'] + df['monthly_insurance']
+    new_columns_stage2['costs_to_income'] = new_columns_stage2["piti"] / ASSUMPTIONS['after_tax_monthly_income']
+    new_columns_stage2["monthly_depreciation"] = (df["purchase_price"] * (1 - LAND_VALUE_PCT)) / DEPRECIATION_YEARS / 12
+    new_columns_stage2["tax_savings_monthly"] = new_columns_stage2["monthly_depreciation"] * combined_tax_rate
+    new_columns_stage2["after_tax_cash_flow_y1"] = df["mr_monthly_cash_flow_y1"] + new_columns_stage2["tax_savings_monthly"]
+    new_columns_stage2["after_tax_cash_flow_y2"] = df["mr_monthly_cash_flow_y2"] + new_columns_stage2["tax_savings_monthly"]
+    new_columns_stage2["future_value_5yr"] = df.apply(
         lambda row: row["purchase_price"] * ((1 + (ASSUMPTIONS['appreciation_rate'] if row["units"] == 0 else ASSUMPTIONS['mf_appreciation_rate'])) ** 5),
         axis=1
     )
-    df["future_value_10yr"] = df.apply(
+    new_columns_stage2["future_value_10yr"] = df.apply(
         lambda row: row["purchase_price"] * ((1 + (ASSUMPTIONS['appreciation_rate'] if row["units"] == 0 else ASSUMPTIONS['mf_appreciation_rate'])) ** 10),
         axis=1
     )
-    df["future_value_20yr"] = df.apply(
+    new_columns_stage2["future_value_20yr"] = df.apply(
         lambda row: row["purchase_price"] * ((1 + (ASSUMPTIONS['appreciation_rate'] if row["units"] == 0 else ASSUMPTIONS['mf_appreciation_rate'])) ** 20),
         axis=1
     )
-    df["net_proceeds_5yr"] = df.apply(calculate_net_proceeds, axis=1, args=(5, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, ASSUMPTIONS, LOAN))
-    df["net_proceeds_10yr"] = df.apply(calculate_net_proceeds, axis=1, args=(10, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, ASSUMPTIONS, LOAN))
-    df["net_proceeds_20yr"] = df.apply(calculate_net_proceeds, axis=1, args=(20, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, ASSUMPTIONS, LOAN))
-    df["equity_multiple_5yr"] = (df["5y_forecast"] + df["cash_needed"]) / df["cash_needed"]
-    df["equity_multiple_10yr"] = (df["10y_forecast"] + df["cash_needed"]) / df["cash_needed"]
-    df["equity_multiple_20yr"] = (df["20y_forecast"] + df["cash_needed"]) / df["cash_needed"]
-    df["avg_annual_return_5yr"] = ((df["5y_forecast"] / df["cash_needed"]) / 5) * 100
-    df["avg_annual_return_10yr"] = ((df["10y_forecast"] / df["cash_needed"]) / 10) * 100
-    df["avg_annual_return_20yr"] = ((df["20y_forecast"] / df["cash_needed"]) / 20) * 100
-    df["roe_y2"] = df.apply(calculate_roe, axis=1, args=[LOAN,])
-    df["leverage_benefit"] = df["CoC_y2"] - (df["mr_annual_NOI_y2"] / df["purchase_price"])
-    df["payback_period_years"] = df.apply(calculate_payback_period, axis=1)
-    df["irr_5yr"] = df.apply(calculate_irr, axis=1, args=(5,ASSUMPTIONS,LOAN))
-    df["irr_10yr"] = df.apply(calculate_irr, axis=1, args=(10,ASSUMPTIONS,LOAN))
-    df["irr_20yr"] = df.apply(calculate_irr, axis=1, args=(20,ASSUMPTIONS,LOAN))
-    df["npv_5yr"] = df.apply(calculate_npv, axis=1, args=(5,ASSUMPTIONS,LOAN))
-    df["npv_10yr"] = df.apply(calculate_npv, axis=1, args=(10,ASSUMPTIONS,LOAN))
-    df["npv_20yr"] = df.apply(calculate_npv, axis=1, args=(20,ASSUMPTIONS,LOAN))
-    df["fair_value_5yr"] = df["purchase_price"] + df["npv_5yr"]
-    df["fair_value_10yr"] = df["purchase_price"] + df["npv_10yr"]
-    df["fair_value_20yr"] = df["purchase_price"] + df["npv_20yr"]
-    df["value_gap_pct_5yr"] = (df["npv_5yr"] / df["cash_needed"]) * 100
-    df["value_gap_pct_10yr"] = (df["npv_10yr"] / df["cash_needed"]) * 100
-    df["value_gap_pct_20yr"] = (df["npv_20yr"] / df["cash_needed"]) * 100
-    df["beats_market"] = df["npv_10yr"] > 0
-    df["cash_flow_y1_downside_10pct"] = (df["mr_net_rent_y1"] * 0.9) - df["mr_total_monthly_cost"]
-    df["cash_flow_y2_downside_10pct"] = (df["market_total_rent_estimate"] * 0.9) - df["mr_total_monthly_cost"]
-    df["fha_self_sufficiency_ratio"] = (df["market_total_rent_estimate"] * 0.75) / df["piti"]  # Uses Y2 rent (whole-property for SFH)
+    new_columns_stage2["net_proceeds_5yr"] = df.apply(calculate_net_proceeds, axis=1, args=(5, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, ASSUMPTIONS, LOAN))
+    new_columns_stage2["net_proceeds_10yr"] = df.apply(calculate_net_proceeds, axis=1, args=(10, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, ASSUMPTIONS, LOAN))
+    new_columns_stage2["net_proceeds_20yr"] = df.apply(calculate_net_proceeds, axis=1, args=(20, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, ASSUMPTIONS, LOAN))
+    new_columns_stage2["equity_multiple_5yr"] = (new_columns_stage2["5y_forecast"] + df["cash_needed"]) / df["cash_needed"]
+    new_columns_stage2["equity_multiple_10yr"] = (new_columns_stage2["10y_forecast"] + df["cash_needed"]) / df["cash_needed"]
+    new_columns_stage2["equity_multiple_20yr"] = (new_columns_stage2["20y_forecast"] + df["cash_needed"]) / df["cash_needed"]
+    new_columns_stage2["avg_annual_return_5yr"] = ((new_columns_stage2["5y_forecast"] / df["cash_needed"]) / 5) * 100
+    new_columns_stage2["avg_annual_return_10yr"] = ((new_columns_stage2["10y_forecast"] / df["cash_needed"]) / 10) * 100
+    new_columns_stage2["avg_annual_return_20yr"] = ((new_columns_stage2["20y_forecast"] / df["cash_needed"]) / 20) * 100
+    new_columns_stage2["roe_y2"] = df.apply(calculate_roe, axis=1, args=[LOAN,])
+    new_columns_stage2["leverage_benefit"] = new_columns_stage2["CoC_y2"] - (df["mr_annual_NOI_y2"] / df["purchase_price"])
+    new_columns_stage2["payback_period_years"] = df.apply(calculate_payback_period, axis=1)
+    new_columns_stage2["irr_5yr"] = df.apply(calculate_irr, axis=1, args=(5,ASSUMPTIONS,LOAN))
+    new_columns_stage2["irr_10yr"] = df.apply(calculate_irr, axis=1, args=(10,ASSUMPTIONS,LOAN))
+    new_columns_stage2["irr_20yr"] = df.apply(calculate_irr, axis=1, args=(20,ASSUMPTIONS,LOAN))
+    new_columns_stage2["npv_5yr"] = df.apply(calculate_npv, axis=1, args=(5,ASSUMPTIONS,LOAN))
+    new_columns_stage2["npv_10yr"] = df.apply(calculate_npv, axis=1, args=(10,ASSUMPTIONS,LOAN))
+    new_columns_stage2["npv_20yr"] = df.apply(calculate_npv, axis=1, args=(20,ASSUMPTIONS,LOAN))
+    new_columns_stage2["fair_value_5yr"] = df["purchase_price"] + new_columns_stage2["npv_5yr"]
+    new_columns_stage2["fair_value_10yr"] = df["purchase_price"] + new_columns_stage2["npv_10yr"]
+    new_columns_stage2["fair_value_20yr"] = df["purchase_price"] + new_columns_stage2["npv_20yr"]
+    new_columns_stage2["value_gap_pct_5yr"] = (new_columns_stage2["npv_5yr"] / df["cash_needed"]) * 100
+    new_columns_stage2["value_gap_pct_10yr"] = (new_columns_stage2["npv_10yr"] / df["cash_needed"]) * 100
+    new_columns_stage2["value_gap_pct_20yr"] = (new_columns_stage2["npv_20yr"] / df["cash_needed"]) * 100
+    new_columns_stage2["beats_market"] = new_columns_stage2["npv_10yr"] > 0
+    new_columns_stage2["cash_flow_y1_downside_10pct"] = (df["mr_net_rent_y1"] * 0.9) - df["mr_total_monthly_cost"]
+    new_columns_stage2["cash_flow_y2_downside_10pct"] = (df["market_total_rent_estimate"] * 0.9) - df["mr_total_monthly_cost"]
+    new_columns_stage2["fha_self_sufficiency_ratio"] = (df["market_total_rent_estimate"] * 0.75) / new_columns_stage2["piti"]  # Uses Y2 rent (whole-property for SFH)
+
+    # Add stage 2 columns to avoid fragmentation
+    df = pd.concat([df, pd.DataFrame(new_columns_stage2, index=df.index)], axis=1)
     return df
 
 def reload_dataframe():
