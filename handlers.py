@@ -591,7 +591,7 @@ def handle_generate_rent_estimates(property_id: str, supabase, console, report_i
 
             display_rent_estimates_comparison(
                 property_id, estimates, existing_estimates, unit_configs,
-                result['cost'], selected
+                result['cost'], selected, console
             )
 
             update_database = questionary.confirm(
