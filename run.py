@@ -120,6 +120,22 @@ def load_loan(loan_id):
     }
     console.print("[green]Loan data reloaded successfully![/green]")
 
+def safe_concat_columns(df, new_columns_dict):
+    """
+    Add new columns to dataframe, replacing any existing columns with same names.
+    Prevents duplicate column creation when pd.concat is used.
+    """
+    # Identify columns that already exist and need to be dropped
+    columns_to_add = list(new_columns_dict.keys())
+    existing_columns = [col for col in columns_to_add if col in df.columns]
+
+    # Drop existing columns to prevent duplicates
+    if existing_columns:
+        df = df.drop(columns=existing_columns)
+
+    # Add all new columns at once (maintains fragmentation fix)
+    return pd.concat([df, pd.DataFrame(new_columns_dict, index=df.index)], axis=1)
+
 def apply_calculations_on_dataframe(df):
     # Convert and clean existing columns
     cols = ["walk_score", "transit_score", "bike_score"]
@@ -151,7 +167,7 @@ def apply_calculations_on_dataframe(df):
     new_columns["annual_cash_flow"] = new_columns["monthly_cash_flow"] * 12
 
     # Add all columns at once to avoid fragmentation
-    df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
+    df = safe_concat_columns(df, new_columns)
     return df
 
 def apply_investment_calculations(df):
@@ -178,7 +194,7 @@ def apply_investment_calculations(df):
     new_columns_stage1["mr_annual_cash_flow_y2"] = new_columns_stage1["mr_monthly_cash_flow_y2"] * 12
 
     # Add stage 1 columns to dataframe so df.apply() functions can access them
-    df = pd.concat([df, pd.DataFrame(new_columns_stage1, index=df.index)], axis=1)
+    df = safe_concat_columns(df, new_columns_stage1)
 
     # Stage 2: Add remaining columns including those using df.apply()
     new_columns_stage2 = {}
@@ -254,7 +270,7 @@ def apply_investment_calculations(df):
     new_columns_stage2["fha_self_sufficiency_ratio"] = (df["market_total_rent_estimate"] * 0.75) / new_columns_stage2["piti"]  # Uses Y2 rent (whole-property for SFH)
 
     # Add stage 2 columns to avoid fragmentation
-    df = pd.concat([df, pd.DataFrame(new_columns_stage2, index=df.index)], axis=1)
+    df = safe_concat_columns(df, new_columns_stage2)
     return df
 
 def reload_dataframe():
