@@ -589,29 +589,25 @@ def handle_generate_rent_estimates(property_id: str, supabase, console, report_i
             existing_estimates = result.get("existing_estimates", {})
             unit_configs = result.get("unit_configs", [])
 
-            update_database = display_rent_estimates_comparison(
+            display_rent_estimates_comparison(
                 property_id, estimates, existing_estimates, unit_configs,
                 result['cost'], selected
             )
 
+            update_database = questionary.confirm(
+                "Would you like to update the database with these new rent estimates?",
+                default=False,
+            ).ask()
+
             if update_database:
-                console.print("\n[bold yellow]⚠️  This will overwrite the current estimates in the database.[/bold yellow]")
-                final_confirm = questionary.confirm(
-                    "Are you sure you want to proceed with the database update?",
-                    default=False
-                ).ask()
+                update_success = researcher._update_rent_estimates_in_db(
+                    property_id, unit_configs, estimates
+                )
 
-                if final_confirm:
-                    update_success = researcher._update_rent_estimates_in_db(
-                        property_id, unit_configs, estimates
-                    )
-
-                    if update_success:
-                        console.print("\n[bold green]✅ Database updated successfully![/bold green]")
-                    else:
-                        console.print("\n[bold red]❌ Database update failed. See details above.[/bold red]")
+                if update_success:
+                    console.print("\n[bold green]✅ Database updated successfully![/bold green]")
                 else:
-                    console.print("\n[yellow]Database update cancelled.[/yellow]")
+                    console.print("\n[bold red]❌ Database update failed. See details above.[/bold red]")
             else:
                 console.print("\n[blue]Database update skipped. Estimates are displayed above for review only.[/blue]")
         else:
@@ -620,12 +616,10 @@ def handle_generate_rent_estimates(property_id: str, supabase, console, report_i
     except Exception as e:
         console.print(f"[red]Error generating estimates: {str(e)}[/red]")
 
-def handle_rent_research_after_add(property_id: str, supabase, console, neighborhoods: NeighborhoodsClient):
+def handle_rent_research_after_add(property_id: str, supabase, console, ask_user=True):
     """Handle rent research workflow after adding a new property"""
-    # Prompt for neighborhood assignment (optional)
     researcher = RentResearcher(supabase, console)
 
-    # Fetch property data to check if it's single family
     try:
         property_response = supabase.table("properties").select("units").eq("address1", property_id).single().execute()
         is_single_family = property_response.data and property_response.data.get("units", 1) == 0
@@ -648,36 +642,45 @@ def handle_rent_research_after_add(property_id: str, supabase, console, neighbor
                 result['cost'], "Report we just made", console
             )
 
-            update_success = researcher._update_rent_estimates_in_db(
-                property_id, unit_configs, estimates
-            )
-
-            if update_success:
-                console.print("\n[bold green]✅ Database updated successfully![/bold green]")
+            if ask_user:
+                update_database = questionary.confirm(
+                    "Would you like to update the database with these new rent estimates?",
+                    default=False,
+                ).ask()
             else:
-                console.print("\n[bold red]❌ Database update failed. See details above.[/bold red]")
+                update_database = True
+
+            if update_database:
+                update_success = researcher._update_rent_estimates_in_db(
+                    property_id, unit_configs, estimates
+                )
+
+                if update_success:
+                    console.print("\n[bold green]✅ Database updated successfully![/bold green]")
+                else:
+                    console.print("\n[bold red]❌ Database update failed. See details above.[/bold red]")
         else:
             console.print(f"[red]Failed to generate estimates: {result['error']}[/red]")
 
     except Exception as e:
         console.print(f"[red]Error generating estimates: {str(e)}[/red]")
 
-    # For single family homes, offer property-wide research option
     if is_single_family:
         console.print("\n[bold cyan]🏠 Single Family Home Detected[/bold cyan]")
         console.print("You can also generate property-wide rent research to compare traditional rental vs roommate strategy.\n")
 
-        do_property_wide = questionary.confirm(
-            "Generate property-wide rent research (GPT-5)?",
-            default=False
-        ).ask()
+        if ask_user:
+            do_property_wide = questionary.confirm(
+                "Generate property-wide rent research (GPT-5)?",
+                default=False
+            ).ask()
+        else:
+            do_property_wide = True
 
         if do_property_wide:
-            # Generate property-wide research
             property_wide_report_id = researcher.generate_property_wide_research(property_id)
 
             if property_wide_report_id:
-                # Extract estimates from property-wide research
                 property_wide_result = researcher.extract_property_wide_estimates(property_wide_report_id)
 
                 if property_wide_result:

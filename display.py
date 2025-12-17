@@ -717,7 +717,7 @@ def display_rent_estimates_comparison(
     result_cost: float,
     selected_report_info: str,
     console,
-) -> bool:
+):
     """
     Display detailed comparison between current and new rent estimates.
 
@@ -849,12 +849,6 @@ def display_rent_estimates_comparison(
     )
 
     console.print("\n")
-    update_database = questionary.confirm(
-        "Would you like to update the database with these new rent estimates?",
-        default=False,
-    ).ask()
-
-    return update_database
 
 
 def display_property_value_comparison(console, properties_data):

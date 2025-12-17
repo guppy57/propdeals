@@ -739,7 +739,7 @@ def analyze_property(property_id):
         reload_dataframe()
         console.print("\n[bold green]✅ Property-wide rent estimates successfully extracted and saved![/bold green]")
     elif research_choice == "Scrape neighborhood from FindNeighborhoods.dsm.city":
-        handle_scrape_neighborhood_from_findneighborhoods(property_id, supabase, console, scraper)
+        handle_scrape_neighborhood_from_findneighborhoods(property_id, supabase, console, scraper, ask_user=True)
         reload_dataframe()
     elif research_choice == "Run neighborhood analysis":
         handle_neighborhood_analysis(property_id, neighborhoods, console)
@@ -934,7 +934,7 @@ if __name__ == "__main__":
     elif option == "Add new property":
       property_details = run_add_property(supabase_client=supabase)
       handle_scrape_neighborhood_from_findneighborhoods(property_details['address1'], supabase, console, scraper, ask_user=True)
-      handle_rent_research_after_add(property_details['address1'], supabase, console, neighborhoods)
+      handle_rent_research_after_add(property_details['address1'], supabase, console, ask_user=True)
       reload_dataframe()
       display_new_property_qualification(console, property_details['address1'], get_all_phase1_qualifying_properties)
     elif option == "Scripts":

@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 
-from handlers import handle_scrape_neighborhood_from_findneighborhoods
+from handlers import handle_scrape_neighborhood_from_findneighborhoods, handle_rent_research_after_add
 from neighborhood_scraper import NeighborhoodScraper
 from add_property import (
     add_property_to_supabase,
@@ -108,6 +108,8 @@ def csv_row_to_property_details(row: pd.Series) -> Dict[str, Any]:
     # Extract street address from full address
     address1 = full_address.split(",")[0].strip()
 
+    has_reduced_price = True if row['Has Had Price Reductions'] == "Yes" else False
+
     property_details = {
         "full_address": full_address,
         "address1": address1,
@@ -116,9 +118,9 @@ def csv_row_to_property_details(row: pd.Series) -> Dict[str, Any]:
         "baths": float(row["Bathrooms"]),
         "square_ft": int(row["Square Feet"]),
         "zillow_link": "",  # Empty string per user request
-        "built_in": None,  # None per user request
+        "built_in": int(row["Built In"]),  # None per user request
         "listed_date": None,  # None per user request
-        "has_reduced_price": False,
+        "has_reduced_price": has_reduced_price,
         "has_tenants": False,
         "units": 0  # Single family per user request
     }
@@ -226,6 +228,10 @@ def import_properties(csv_filepath: str) -> Dict[str, Any]:
                     add_rent_to_supabase_singlefamily(property_details["address1"], unit_configs_w_rent, comparables, property_rent, supabase)
                     console.print("  [green]✓[/green] Rent estimates saved")
 
+                    console.print("  [cyan]→[/cyan] Conducting rent research for property...")
+                    handle_rent_research_after_add(property_details['address1'], supabase, console, ask_user=False)
+                    console.print("  [green]✓[/green] Rent research completed successfully")
+
                     console.print("[bold green]✓ Successfully imported![/bold green]\n")
                     stats["successful"] += 1
                 else:
@@ -330,11 +336,9 @@ def display_import_summary(stats: Dict[str, Any]):
 
 
 if __name__ == "__main__":
-    # Configuration
-    csv_file = "docs/dsm-2bd.csv"
+    csv_file = "docs/new-properties.csv"
 
     try:
-        # Display banner
         console.print(Panel.fit(
             "[bold cyan]Property CSV Importer[/bold cyan]\n"
             "Bulk import properties with enrichment & rent estimates",
@@ -342,10 +346,7 @@ if __name__ == "__main__":
         ))
         console.print()
 
-        # Run import
         stats = import_properties(csv_file)
-
-        # Display summary
         display_import_summary(stats)
 
     except KeyboardInterrupt:
