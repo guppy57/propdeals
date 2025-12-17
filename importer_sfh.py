@@ -13,7 +13,8 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 
-# Import existing modules
+from handlers import handle_scrape_neighborhood_from_findneighborhoods
+from neighborhood_scraper import NeighborhoodScraper
 from add_property import (
     add_property_to_supabase,
     get_rental_estimations_singlefamily,
@@ -208,17 +209,19 @@ def import_properties(csv_filepath: str) -> Dict[str, Any]:
                 property_exists = check_if_property_exists(supabase, full_address)
 
                 if not property_exists:
-                    # Step 1: Add property to Supabase (with enrichment)
                     console.print("  [cyan]→[/cyan] Adding property with enrichment data...")
                     add_property_to_supabase(property_details, supabase)
                     console.print("  [green]✓[/green] Property added successfully")
 
-                    # Step 2: Get rental estimations
+                    console.print("  [cyan]→[/cyan] Find neighborhood for property...")
+                    scraper = NeighborhoodScraper(supabase, console)
+                    handle_scrape_neighborhood_from_findneighborhoods(property_details['address1'], supabase, console, scraper, ask_user=False)
+                    console.print("  [green]✓[/green] Neighborhood added successfully")
+
                     console.print("  [cyan]→[/cyan] Generating rent estimates...")
                     unit_configs_w_rent, comparables, property_rent = get_rental_estimations_singlefamily(property_details)
                     console.print("  [green]✓[/green] Rent estimates generated")
 
-                    # Step 3: Add rent estimates to Supabase
                     console.print("  [cyan]→[/cyan] Saving rent estimates to database...")
                     add_rent_to_supabase_singlefamily(property_details["address1"], unit_configs_w_rent, comparables, property_rent, supabase)
                     console.print("  [green]✓[/green] Rent estimates saved")
