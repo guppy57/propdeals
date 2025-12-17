@@ -335,8 +335,7 @@ def get_phase1_research_list():
     - The qualification type must be CURRENT or the property is For Sale Buy Owner
     - Cashflow Year 2 must be above -$50
     """
-    current_df, contingent_df, creative_df = get_all_phase1_qualifying_properties()
-    combined = pd.concat([current_df, contingent_df, creative_df], ignore_index=True).drop_duplicates(subset=["address1"], keep="first")
+    combined = get_combined_phase1_qualifiers()
     criteria = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & status == 'active'"
     filtered = combined.query(criteria).copy()
     return filtered 
