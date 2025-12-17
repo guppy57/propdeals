@@ -16,7 +16,7 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 from supabase import Client
 from tavily import TavilyClient
-
+from helpers import normalize_neighborhood_name
 
 @dataclass
 class NeighborhoodResearchConfig:
@@ -56,12 +56,81 @@ class NeighborhoodsClient():
             raise ValueError("TAVILY_API_KEY environment variable not set")
         self.tavily_client = TavilyClient(api_key=tavily_api_key)
 
-    # use elementary, middle school, high school ratings to create an average for the property
-
     def is_neighborhood_assessment_complete(self, address1: str) -> bool:
         return False
+    
+    def get_or_create_neighborhood(self, neighborhood_name, supabase):
+        """
+        Get existing neighborhood ID or create a new neighborhood.
+        Uses normalized name for both lookup and storage to ensure consistency.
 
-    def assign_neighborhood_to_property(
+        Args:
+            neighborhood_name: Original neighborhood name from geocoding
+            supabase: Supabase client instance
+
+        Returns:
+            Tuple of (neighborhood_id, was_created) where was_created is True if newly created
+            Returns (None, False) if error
+        """
+        # Normalize for lookup and storage
+        normalized_name = normalize_neighborhood_name(neighborhood_name)
+        if not normalized_name:
+            return None, False
+
+        try:
+            # Check if neighborhood exists in database (exact match on normalized name)
+            response = supabase.table('neighborhoods')\
+                .select('id, name')\
+                .eq('name', normalized_name)\
+                .limit(1)\
+                .execute()
+
+            if response.data and len(response.data) > 0:
+                # Neighborhood exists, return ID
+                neighborhood_id = response.data[0]['id']
+                return neighborhood_id, False
+
+            # Neighborhood doesn't exist, create it
+            insert_response = supabase.table('neighborhoods').insert(
+                {'name': normalized_name}
+            ).execute()
+
+            if insert_response.data and len(insert_response.data) > 0:
+                neighborhood_id = insert_response.data[0]['id']
+                return neighborhood_id, True
+
+            return None, False
+
+        except Exception as e:
+            self.console.print(f"[red]Error creating/fetching neighborhood '{normalized_name}': {e}[/red]")
+            return None, False
+
+    def assign_neighborhood_to_property(self, property_id, neighborhood_id):
+        existing_assignment = (
+            self.supabase.table("property_neighborhood")
+            .select("*")
+            .eq("address1", property_id)
+            # .eq("neighborhood_id", neighborhood_id)
+            .execute()
+        )
+
+        if not existing_assignment.data or len(existing_assignment.data) == 0:
+            # this property does NOT have any neighborhood assigned to it
+            self.supabase.table("property_neighborhood").insert(
+                {"address1": property_id, "neighborhood_id": neighborhood_id}
+            ).execute()
+            return "NEWLY_ASSIGNED"
+        else:
+            # this property has SOME neighborhood assigned to it
+            existing_neighborhood_id = existing_assignment.data[0].get("neighborhood_id")
+            if existing_neighborhood_id == neighborhood_id:
+                return "ALREADY_ASSIGNED"
+            else:
+                # change the neighborhood_id on the EXISTING record
+                self.supabase.table("property_neighborhood").update({'neighborhood_id': neighborhood_id}).eq('address1', property_id).execute()
+                return "NEWLY_ASSIGNED"
+
+    def assign_neighborhood_to_property_using_geocoding(
         self, address1: str, full_address: str
     ) -> Optional[str]:
         """
@@ -132,19 +201,6 @@ class NeighborhoodsClient():
                         "[yellow]Neighborhood assignment cancelled[/yellow]"
                     )
                     return None
-
-            # Normalize neighborhood name
-            def normalize_neighborhood_name(name):
-                if not name:
-                    return None
-                cleaned = name.strip()
-                if not cleaned:
-                    return None
-                normalized = unicodedata.normalize("NFKD", cleaned)
-                normalized = "".join(
-                    c for c in normalized if not unicodedata.combining(c)
-                )
-                return normalized.lower()
 
             normalized_name = normalize_neighborhood_name(neighborhood)
             if not normalized_name:
@@ -232,19 +288,6 @@ class NeighborhoodsClient():
             if not neighborhood:
                 self.console.print("[red]No neighborhood name provided[/red]")
                 return None
-
-            # Normalize the manually entered name
-            def normalize_neighborhood_name(name):
-                if not name:
-                    return None
-                cleaned = name.strip()
-                if not cleaned:
-                    return None
-                normalized = unicodedata.normalize("NFKD", cleaned)
-                normalized = "".join(
-                    c for c in normalized if not unicodedata.combining(c)
-                )
-                return normalized.lower()
 
             normalized_name = normalize_neighborhood_name(neighborhood)
             if not normalized_name:
@@ -474,6 +517,33 @@ class NeighborhoodsClient():
             return pd.DataFrame(
                 columns=["address1", "neighborhood", "neighborhood_letter_grade"]
             )
+    
+    def get_neighborhood_for_property(self, address1, supabase):
+        try:
+            response = (
+                supabase.table("property_neighborhood")
+                .select("neighborhoods(name)")
+                .eq("address1", address1)
+                .limit(1)
+                .execute()
+            )
+
+            if not response.data or len(response.data) == 0:
+                return None
+
+            # Access list first, then nested dict
+            neighborhood_dict = response.data[0].get("neighborhoods")
+            if (
+                not neighborhood_dict
+                or not isinstance(neighborhood_dict, dict)
+                or "name" not in neighborhood_dict
+            ):
+                return None
+
+            return neighborhood_dict["name"]
+        except Exception as e:
+            print(f"Error fetching neighborhood for property {address1}: {e}")
+            return None
 
     def _calculate_cost(
         self, num_searches: int, input_tokens: int, output_tokens: int
@@ -794,7 +864,7 @@ class NeighborhoodsClient():
                 if should_assign:
                     # Attempt to assign neighborhood using geocoding
                     full_address = property_data.get("address1", "")
-                    neighborhood_name = self.assign_neighborhood_to_property(
+                    neighborhood_name = self.assign_neighborhood_to_property_using_geocoding(
                         address1, full_address
                     )
 

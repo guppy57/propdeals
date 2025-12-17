@@ -3,6 +3,7 @@ import math
 import pandas as pd
 import numpy as np
 import numpy_financial as npf
+import unicodedata
 
 def format_currency(value):
     """Format currency values with $ sign, commas, and 2 decimal places"""
@@ -484,3 +485,26 @@ def calculate_quintile_colors_for_metrics(dataframe):
             color_map[(address, metric_name)] = color
 
     return color_map
+
+def normalize_neighborhood_name(name):
+    """
+    Normalize neighborhood name by:
+    - Trimming whitespace
+    - Normalizing unicode characters (é -> e)
+    - Converting to lowercase
+
+    This ensures consistent storage and prevents duplicates like "Café" vs "Cafe".
+    """
+    if not name:
+        return None
+    cleaned = name.strip()
+    if not cleaned:
+        return None
+
+    # Normalize unicode (NFKD decomposes accented characters)
+    # Example: "Café" becomes "Cafe", "Montréal" becomes "Montreal"
+    normalized = unicodedata.normalize("NFKD", cleaned)
+    # Remove diacritical marks
+    normalized = "".join(c for c in normalized if not unicodedata.combining(c))
+
+    return normalized.lower()

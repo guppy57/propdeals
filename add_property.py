@@ -2,7 +2,6 @@ import os
 import time
 from datetime import date, timedelta
 import math
-import unicodedata
 
 import questionary
 import requests
@@ -19,75 +18,6 @@ RENTCAST_HEADERS = {
 }
 
 console = Console()
-
-def normalize_neighborhood_name(name):
-    """
-    Normalize neighborhood name by:
-    - Trimming whitespace
-    - Normalizing unicode characters (é -> e)
-    - Converting to lowercase
-
-    This ensures consistent storage and prevents duplicates like "Café" vs "Cafe".
-    """
-    if not name:
-        return None
-    cleaned = name.strip()
-    if not cleaned:
-        return None
-
-    # Normalize unicode (NFKD decomposes accented characters)
-    # Example: "Café" becomes "Cafe", "Montréal" becomes "Montreal"
-    normalized = unicodedata.normalize('NFKD', cleaned)
-    # Remove diacritical marks
-    normalized = ''.join(c for c in normalized if not unicodedata.combining(c))
-
-    return normalized.lower()
-
-def get_or_create_neighborhood(neighborhood_name, supabase):
-    """
-    Get existing neighborhood ID or create a new neighborhood.
-    Uses normalized name for both lookup and storage to ensure consistency.
-
-    Args:
-        neighborhood_name: Original neighborhood name from geocoding
-        supabase: Supabase client instance
-
-    Returns:
-        Tuple of (neighborhood_id, was_created) where was_created is True if newly created
-        Returns (None, False) if error
-    """
-    # Normalize for lookup and storage
-    normalized_name = normalize_neighborhood_name(neighborhood_name)
-    if not normalized_name:
-        return (None, False)
-
-    try:
-        # Check if neighborhood exists in database (exact match on normalized name)
-        response = supabase.table('neighborhoods')\
-            .select('id, name')\
-            .eq('name', normalized_name)\
-            .limit(1)\
-            .execute()
-
-        if response.data and len(response.data) > 0:
-            # Neighborhood exists, return ID
-            neighborhood_id = response.data[0]['id']
-            return (neighborhood_id, False)
-
-        # Neighborhood doesn't exist, create it
-        insert_response = supabase.table('neighborhoods').insert(
-            {'name': normalized_name}
-        ).execute()
-
-        if insert_response.data and len(insert_response.data) > 0:
-            neighborhood_id = insert_response.data[0]['id']
-            return (neighborhood_id, True)
-
-        return (None, False)
-
-    except Exception as e:
-        console.print(f"[red]Error creating/fetching neighborhood '{normalized_name}': {e}[/red]")
-        return (None, False)
 
 def get_rental_estimations_multifamily(property_details, unit_configs):
     total_beds = property_details["beds"]

@@ -4,9 +4,9 @@ from rent_research import RentResearcher
 from loans import LoansProvider
 from property_assessment import RiskAssessmentClient
 from property_summary import PropertySummaryClient
+from neighborhoods import NeighborhoodsClient
 from rich.markdown import Markdown
 from display import display_rent_estimates_comparison
-from add_property import get_or_create_neighborhood
 
 def handle_property_wide_research_generation(property_id: str, supabase, console):
     """Generate property-wide rent research for single family homes (whole-house rental analysis)"""
@@ -620,57 +620,9 @@ def handle_generate_rent_estimates(property_id: str, supabase, console, report_i
     except Exception as e:
         console.print(f"[red]Error generating estimates: {str(e)}[/red]")
 
-def handle_rent_research_after_add(property_id: str, supabase, console, neighborhoods):
+def handle_rent_research_after_add(property_id: str, supabase, console, neighborhoods: NeighborhoodsClient):
     """Handle rent research workflow after adding a new property"""
     # Prompt for neighborhood assignment (optional)
-    console.print("\n[bold cyan]🏘️  Neighborhood Assignment[/bold cyan]")
-    neighborhood_input = questionary.text(
-        "Enter neighborhood name (or press Enter to skip):",
-        default=""
-    ).ask()
-
-    if neighborhood_input and neighborhood_input.strip():
-        # User provided a neighborhood - assign and analyze it
-        neighborhood_name = neighborhood_input.strip()
-
-        # Get or create the neighborhood in the database
-        neighborhood_id, was_created = get_or_create_neighborhood(neighborhood_name, supabase)
-
-        if neighborhood_id:
-            # Assign neighborhood to property via junction table
-            try:
-                # Check if already assigned
-                existing_assignment = (
-                    supabase.table("property_neighborhood")
-                    .select("*")
-                    .eq("address1", property_id)
-                    .eq("neighborhood_id", neighborhood_id)
-                    .execute()
-                )
-
-                if not existing_assignment.data or len(existing_assignment.data) == 0:
-                    # Insert new assignment
-                    supabase.table("property_neighborhood").insert({
-                        "address1": property_id,
-                        "neighborhood_id": neighborhood_id
-                    }).execute()
-
-                    if was_created:
-                        console.print(f"[green]✓ Created and assigned neighborhood: {neighborhood_name}[/green]")
-                    else:
-                        console.print(f"[green]✓ Assigned existing neighborhood: {neighborhood_name}[/green]")
-                else:
-                    console.print(f"[yellow]Neighborhood '{neighborhood_name}' already assigned to this property[/yellow]")
-
-                # Automatically run neighborhood analysis
-                console.print("\n[cyan]Running neighborhood analysis...[/cyan]")
-                handle_neighborhood_analysis(property_id, console, neighborhoods)
-
-            except Exception as e:
-                console.print(f"[red]Error assigning neighborhood: {str(e)}[/red]")
-        else:
-            console.print(f"[red]Failed to create/find neighborhood '{neighborhood_name}'[/red]")
-
     researcher = RentResearcher(supabase, console)
 
     # Fetch property data to check if it's single family
@@ -734,3 +686,58 @@ def handle_rent_research_after_add(property_id: str, supabase, console, neighbor
                     console.print("\n[bold red]❌ Failed to extract property-wide estimates.[/bold red]")
             else:
                 console.print("\n[bold red]❌ Property-wide research generation failed.[/bold red]")
+
+
+def handle_scrape_neighborhood_from_findneighborhoods(property_id: str, supabase, console, scraper, ask_user):
+    """
+    Scrape neighborhood data from FindNeighborhoods.dsm.city for a property.
+
+    Args:
+        property_id: Property address (address1)
+        supabase: Supabase client
+        console: Rich console for output
+        scraper: NeighborhoodScraper instance
+        ask_user: Whether or not the handler should ask the user before saving to db
+    """
+    try:
+        property_response = supabase.table("properties").select("full_address").eq("address1", property_id).single().execute()
+
+        if not property_response.data:
+            console.print("[red]❌ Property not found[/red]")
+            return
+
+        full_address = property_response.data['full_address']
+        console.print(f"\n[bold cyan]Scraping neighborhood for:[/bold cyan] {full_address}")
+
+        neighborhood = scraper.get_neighborhood_by_address(full_address)
+        console.print(f"\n[bold green]🏘️  Scraped Neighborhood:[/bold green] [bold]{neighborhood}[/bold]")
+
+        neighborhood_client = NeighborhoodsClient(supabase_client=supabase, console=console)
+        current_neighborhood = neighborhood_client.get_neighborhood_for_property(address1=property_id, supabase=supabase)
+
+        if current_neighborhood:
+            console.print(f"[dim]Current neighborhood in database:[/dim] {current_neighborhood}")
+
+        if ask_user:
+            save_to_db = questionary.confirm(
+                f"Would you like to save '{neighborhood}' as the neighborhood for this property?"
+            ).ask()
+        else:
+            save_to_db = True
+
+        if save_to_db:
+            neighborhood_id, was_created = neighborhood_client.get_or_create_neighborhood(neighborhood_name=neighborhood, supabase=supabase)
+            res = neighborhood_client.assign_neighborhood_to_property(property_id=property_id, neighborhood_id=neighborhood_id)
+
+            if was_created:
+                console.print(f"[green]✅ Neighborhood '{neighborhood}' was newly added to database[/green]")
+
+            if res == "NEWLY_ASSIGNED":
+                console.print(f"[green]✅ Neighborhood updated to '{neighborhood}' in database[/green]")
+            elif res == "ALREADY_ASSIGNED":
+                console.print(f"[green]✅ Neighborhood was already assigned to '{neighborhood}' in database[/green]")
+        else:
+            console.print("[yellow]Skipped saving to database[/yellow]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Error during neighborhood scraping: {str(e)}[/red]")

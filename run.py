@@ -22,7 +22,8 @@ from handlers import (
     handle_risk_assessment,
     handle_property_summary,
     handle_generate_rent_estimates,
-    handle_rent_research_after_add
+    handle_rent_research_after_add,
+    handle_scrape_neighborhood_from_findneighborhoods
 )
 from display import (
     display_all_phase1_qualifying_properties,
@@ -55,6 +56,7 @@ from inspections import InspectionsClient
 from loans import LoansProvider
 from neighborhood_assessment import edit_neighborhood_assessment
 from neighborhoods import NeighborhoodsClient
+from neighborhood_scraper import NeighborhoodScraper
 from property_assessment import edit_property_assessment
 from scripts import ScriptsProvider
 
@@ -64,6 +66,7 @@ console = Console()
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 inspections = InspectionsClient(supabase_client=supabase)
 neighborhoods = NeighborhoodsClient(supabase_client=supabase, console=console)
+scraper = NeighborhoodScraper(supabase_client=supabase, console=console)
 
 LAST_USED_LOAN = 2
 LAND_VALUE_PCT = 0.20  # 20% of purchase price is land (non-depreciable)
@@ -684,6 +687,7 @@ def analyze_property(property_id):
         research_menu_choices.append("Generate property-wide rent research")
 
     research_menu_choices.extend([
+        "Scrape neighborhood from FindNeighborhoods.dsm.city",
         "Run neighborhood analysis",
         "Extract neighborhood letter grade",
         "Export property analysis to PDF",
@@ -714,6 +718,9 @@ def analyze_property(property_id):
         handle_property_wide_research_generation(property_id, supabase, console)
         reload_dataframe()
         console.print("\n[bold green]✅ Property-wide rent estimates successfully extracted and saved![/bold green]")
+    elif research_choice == "Scrape neighborhood from FindNeighborhoods.dsm.city":
+        handle_scrape_neighborhood_from_findneighborhoods(property_id, supabase, console, scraper)
+        reload_dataframe()
     elif research_choice == "Run neighborhood analysis":
         handle_neighborhood_analysis(property_id, neighborhoods, console)
         reload_dataframe()
@@ -906,6 +913,7 @@ if __name__ == "__main__":
         analyze_property(property_id)
     elif option == "Add new property":
       property_details = run_add_property(supabase_client=supabase)
+      handle_scrape_neighborhood_from_findneighborhoods(property_details['address1'], supabase, console, scraper, ask_user=True)
       handle_rent_research_after_add(property_details['address1'], supabase, console, neighborhoods)
       reload_dataframe()
       display_new_property_qualification(console, property_details['address1'], get_all_phase1_qualifying_properties)
