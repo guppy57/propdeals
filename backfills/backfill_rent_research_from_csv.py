@@ -285,7 +285,8 @@ def process_property(address1: str, stats: BackfillStats, property_index: int, t
         existing_estimates,
         unit_configs,
         per_room_result['cost'],
-        f"Generated from new report (ID: {per_room_report_id[:8]})"
+        f"Generated from new report (ID: {per_room_report_id[:8]})",
+        console
     )
 
     if update_per_room:
