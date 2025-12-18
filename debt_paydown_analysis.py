@@ -3,18 +3,20 @@ Student Loan Payoff vs. Investment Analysis
 ============================================
 Compares two strategies over a 40-year horizon:
 1. Aggressive: $1500/month all to debt (avalanche), then all to market
-2. Balanced: $400/month to debt (avalanche), $1100/month to market
+2. Balanced: $X/month to debt (avalanche), $1500 - X/month to market
 
-Uses daily interest accrual and 7% annual stock market return.
-Includes tax modeling, inflation adjustment, and sensitivity analysis.
+Uses daily compound interest accrual and 7% annual stock market return.
+Includes tax modeling, inflation adjustment, sensitivity analysis, and Monte Carlo simulation.
 """
 
+import math
+import random
 from dataclasses import dataclass
-from typing import List, Dict
-from rich.console import Console
-from rich.table import Table
+from typing import Dict, List
+
+from rich.console import Console, Group
 from rich.panel import Panel
-from rich.console import Group
+from rich.table import Table
 
 # Create console instance for Rich output
 console = Console()
@@ -64,24 +66,17 @@ def simulate_month(
     loans: List[Loan],
     monthly_allocation: float,
     investment_balance: float,
-    retirement_balance: float,
     monthly_investment: float,
     annual_market_return: float = 0.07,
-    capital_gains_tax_rate: float = 0.15,
     expense_ratio: float = 0.001,
-    retirement_contribution: float = 0.0,
-    employer_match_rate: float = 0.0,
-    use_roth: bool = False,
 ) -> tuple:
     """
     Simulate one month of debt payments and investment growth.
 
     Uses avalanche method: pay minimums first, then extra to highest rate.
-    Applies capital gains tax on investment returns and expense ratio fees.
-    Supports 401(k) with employer match and Roth IRA.
+    Applies expense ratio fees to investment returns.
 
-    Returns: (extra_to_invest, new_investment_balance, new_retirement_balance,
-              interest_paid, investment_gains, retirement_gains)
+    Returns: (extra_to_invest, new_investment_balance, interest_paid, investment_gains)
     """
     # Step 1: Accrue daily interest on all loans (assume 30 days/month)
     total_interest_accrued = 0
@@ -111,27 +106,12 @@ def simulate_month(
     extra_to_invest = max(0, remaining)
     total_to_invest = monthly_investment + extra_to_invest
 
-    # Step 5: Handle retirement contributions (401k/IRA)
-    # Retirement contribution is separate from regular investment
-    total_retirement_contribution = retirement_contribution
-
-    # Add employer match
-    employer_match = retirement_contribution * employer_match_rate
-
-    # Total going into retirement account
-    total_retirement_deposit = total_retirement_contribution + employer_match
-
-    # Step 6: Grow retirement balance (tax-free growth for Roth, tax-deferred for 401k)
+    # Step 5: Grow taxable investment balance (no tax on unrealized gains)
     monthly_expense_ratio = expense_ratio / 12
     gross_monthly_rate = (1 + annual_market_return) ** (1 / 12) - 1
     net_monthly_rate = (1 + gross_monthly_rate) * (1 - monthly_expense_ratio) - 1
 
-    # Retirement account grows without capital gains tax (either tax-deferred or Roth)
-    retirement_gains = retirement_balance * net_monthly_rate
-    retirement_balance = retirement_balance + retirement_gains + total_retirement_deposit
-
-    # Step 7: Grow taxable investment balance (no tax on unrealized gains)
-    # Calculate investment gains before tax
+    # Calculate investment gains
     investment_gains = investment_balance * net_monthly_rate
 
     # Update taxable investment balance (no capital gains tax until liquidation)
@@ -140,10 +120,8 @@ def simulate_month(
     return (
         extra_to_invest,
         investment_balance,
-        retirement_balance,
         total_interest_accrued,
         investment_gains,
-        retirement_gains,
     )
 
 
@@ -156,10 +134,6 @@ def run_simulation(
     expense_ratio: float = 0.001,
     inflation_rate: float = 0.025,
     marginal_tax_rate: float = 0.22,
-    retirement_contribution: float = 0.0,
-    employer_match_rate: float = 0.0,
-    use_roth: bool = False,
-    retirement_withdrawal_tax_rate: float = 0.12,
 ) -> Dict:
     """
     Run full simulation for a given strategy.
@@ -172,46 +146,32 @@ def run_simulation(
         capital_gains_tax_rate: Tax rate on investment gains
         expense_ratio: Annual expense ratio for investments (e.g., 0.001 = 0.1%)
         inflation_rate: Annual inflation rate (e.g., 0.025 = 2.5%)
-        marginal_tax_rate: Tax rate for student loan interest deduction benefit (during working years)
-        retirement_contribution: Monthly contribution to 401(k)/IRA
-        employer_match_rate: Employer match as % of contribution (e.g., 0.5 = 50%)
-        use_roth: True for Roth IRA (after-tax), False for traditional 401(k) (pre-tax)
-        retirement_withdrawal_tax_rate: Tax rate on traditional 401(k) withdrawals in retirement (typically lower than working years)
+        marginal_tax_rate: Tax rate for student loan interest deduction benefit
 
     Returns:
         Dictionary with monthly tracking data
     """
     loans = get_initial_loans()
     investment_balance = 0.0
-    retirement_balance = 0.0
 
     # Tracking
     history = {
         "month": [],
         "total_debt": [],
         "investment_balance": [],
-        "retirement_balance": [],
-        "net_worth": [],  # taxable investments + retirement - debt
+        "net_worth": [],  # taxable investments - debt
         "debt_by_loan": {loan.name: [] for loan in loans},
         "cumulative_interest_paid": [],
         "cumulative_invested": [],
-        "cumulative_retirement_contributed": [],
-        "cumulative_employer_match": [],
         "monthly_to_investments": [],
         "cumulative_investment_gains": [],
-        "cumulative_retirement_gains": [],
         "cumulative_loan_interest_deduction_value": [],
-        "cumulative_pretax_savings": [],
     }
 
     cumulative_interest = 0
     cumulative_invested = 0
-    cumulative_retirement_contributed = 0
-    cumulative_employer_match = 0
     cumulative_investment_gains = 0
-    cumulative_retirement_gains = 0
     cumulative_loan_interest_deduction = 0
-    cumulative_pretax_savings = 0
     all_debt_paid_month = None
 
     # Track student loan interest deduction per year
@@ -230,23 +190,9 @@ def run_simulation(
             if all_debt_paid_month is None:
                 all_debt_paid_month = month - 1
             # All debt paid: full allocation goes to investments
-            # Apply fees and taxes even after debt is paid off
             monthly_expense_ratio = expense_ratio / 12
             gross_monthly_rate = (1 + annual_market_return) ** (1 / 12) - 1
             net_monthly_rate = (1 + gross_monthly_rate) * (1 - monthly_expense_ratio) - 1
-
-            # Grow retirement account
-            ret_gains = retirement_balance * net_monthly_rate
-            employer_match = retirement_contribution * employer_match_rate
-            retirement_balance = retirement_balance + ret_gains + retirement_contribution + employer_match
-
-            cumulative_retirement_contributed += retirement_contribution
-            cumulative_employer_match += employer_match
-            cumulative_retirement_gains += ret_gains
-
-            # Track pre-tax savings (if traditional 401k)
-            if not use_roth:
-                cumulative_pretax_savings += retirement_contribution * marginal_tax_rate
 
             # Calculate gains on taxable account (no tax on unrealized gains)
             investment_gains = investment_balance * net_monthly_rate
@@ -263,33 +209,16 @@ def run_simulation(
             (
                 extra,
                 investment_balance,
-                retirement_balance,
                 interest,
                 gains,
-                ret_gains,
             ) = simulate_month(
                 loans,
                 monthly_debt_allocation,
                 investment_balance,
-                retirement_balance,
                 monthly_investment,
                 annual_market_return,
-                capital_gains_tax_rate,
                 expense_ratio,
-                retirement_contribution,
-                employer_match_rate,
-                use_roth,
             )
-
-            # Track retirement metrics
-            employer_match_this_month = retirement_contribution * employer_match_rate
-            cumulative_retirement_contributed += retirement_contribution
-            cumulative_employer_match += employer_match_this_month
-            cumulative_retirement_gains += ret_gains
-
-            # Track pre-tax savings (if traditional 401k)
-            if not use_roth:
-                cumulative_pretax_savings += retirement_contribution * marginal_tax_rate
 
             cumulative_interest += interest
             monthly_invested = monthly_investment + extra
@@ -321,25 +250,18 @@ def run_simulation(
 
         # Record state after this month
         total_debt = sum(loan.balance for loan in loans)
-        total_net_worth = investment_balance + retirement_balance - total_debt
+        total_net_worth = investment_balance - total_debt
         history["month"].append(month)
         history["total_debt"].append(total_debt)
         history["investment_balance"].append(investment_balance)
-        history["retirement_balance"].append(retirement_balance)
         history["net_worth"].append(total_net_worth)
         history["cumulative_interest_paid"].append(cumulative_interest)
         history["cumulative_invested"].append(cumulative_invested)
-        history["cumulative_retirement_contributed"].append(
-            cumulative_retirement_contributed
-        )
-        history["cumulative_employer_match"].append(cumulative_employer_match)
         history["monthly_to_investments"].append(monthly_invested)
         history["cumulative_investment_gains"].append(cumulative_investment_gains)
-        history["cumulative_retirement_gains"].append(cumulative_retirement_gains)
         history["cumulative_loan_interest_deduction_value"].append(
             cumulative_loan_interest_deduction
         )
-        history["cumulative_pretax_savings"].append(cumulative_pretax_savings)
 
         for loan in loans:
             history["debt_by_loan"][loan.name].append(loan.balance)
@@ -354,43 +276,23 @@ def run_simulation(
     capital_gains_tax = capital_gains * capital_gains_tax_rate
     investment_after_tax = investment_balance - capital_gains_tax
 
-    # Calculate total account values
-    total_account_value = investment_balance + retirement_balance
-
-    # For traditional 401k, account for withdrawal taxes
-    retirement_after_tax = retirement_balance
-    if not use_roth:
-        # Traditional 401k: pay taxes on withdrawal (typically at lower rate in retirement)
-        retirement_after_tax = retirement_balance * (1 - retirement_withdrawal_tax_rate)
-
-    total_account_value_after_tax = investment_after_tax + retirement_after_tax
-
     history["debt_payoff_month"] = all_debt_paid_month
     history["final_investment"] = investment_balance
     history["final_investment_real"] = investment_balance / inflation_factor
     history["final_investment_after_tax"] = investment_after_tax
     history["final_investment_after_tax_real"] = investment_after_tax / inflation_factor
-    history["final_retirement"] = retirement_balance
-    history["final_retirement_real"] = retirement_balance / inflation_factor
-    history["final_retirement_after_tax"] = retirement_after_tax
-    history["final_retirement_after_tax_real"] = retirement_after_tax / inflation_factor
-    history["final_net_worth"] = total_account_value
-    history["final_net_worth_real"] = total_account_value / inflation_factor
-    history["final_net_worth_after_tax"] = total_account_value_after_tax
-    history["final_net_worth_after_tax_real"] = (
-        total_account_value_after_tax / inflation_factor
-    )
+    history["final_net_worth"] = investment_balance
+    history["final_net_worth_real"] = investment_balance / inflation_factor
+    history["final_net_worth_after_tax"] = investment_after_tax
+    history["final_net_worth_after_tax_real"] = investment_after_tax / inflation_factor
     history["total_interest_paid"] = cumulative_interest
     history["total_investment_gains"] = cumulative_investment_gains
-    history["total_retirement_gains"] = cumulative_retirement_gains
     history["cost_basis"] = cost_basis
     history["capital_gains"] = capital_gains
     history["capital_gains_tax"] = capital_gains_tax
     history["total_loan_interest_deduction_value"] = cumulative_loan_interest_deduction
-    history["total_pretax_savings"] = cumulative_pretax_savings
-    history["total_employer_match"] = cumulative_employer_match
     history["inflation_factor"] = inflation_factor
-    history["use_roth"] = use_roth
+    history["monthly_debt_allocation"] = monthly_debt_allocation
 
     return history
 
@@ -412,7 +314,7 @@ def months_to_years_months(months: int) -> str:
         return f"{years} years, {remaining_months} months"
 
 
-def print_summary(aggressive: Dict, balanced: Dict, config: Dict = None):
+def print_summary(aggressive: Dict, balanced: Dict, config: Dict = None, budget: int = 1500):
     """Print comparison summary of both strategies using Rich tables."""
     console.print()
 
@@ -423,7 +325,7 @@ def print_summary(aggressive: Dict, balanced: Dict, config: Dict = None):
 
     conditions_text = f"[cyan]Total Debt:[/cyan] {format_currency(total_debt)}\n"
     conditions_text += f"[cyan]Total Minimum Payment:[/cyan] {format_currency(total_min)}/month\n"
-    conditions_text += f"[cyan]Monthly Budget:[/cyan] {format_currency(1500)}\n"
+    conditions_text += f"[cyan]Monthly Budget:[/cyan] {format_currency(budget)}\n"
 
     if config:
         years = config.get("total_months", 480) // 12
@@ -446,8 +348,8 @@ def print_summary(aggressive: Dict, balanced: Dict, config: Dict = None):
     # Add strategy descriptions
     table.add_row(
         "[bold]Strategy Description[/bold]",
-        "$1,500 → debt then brokerage",
-        "$377 → debt, $1,123 → brokerage",
+        f"${aggressive['monthly_debt_allocation']} → debt then brokerage",
+        f"${balanced['monthly_debt_allocation']} → debt, ${budget - balanced['monthly_debt_allocation']} → brokerage",
         ""
     )
     table.add_section()
@@ -500,27 +402,40 @@ def print_summary(aggressive: Dict, balanced: Dict, config: Dict = None):
 
     table.add_section()
 
+    pretax_diff_nominal = aggressive["final_net_worth"] - balanced["final_net_worth"]
+    pretax_nominal_winner_style = "green" if pretax_diff_nominal > 0 else "blue"
+    pretax_pct = abs(pretax_diff_nominal / balanced["final_net_worth"] * 100)
+
+    table.add_row(
+        "[bold]💰 Pre-Tax Final Net Worth (Nominal)[/bold]",
+        f"[bold]{format_currency(aggressive['final_net_worth'])}[/bold]",
+        f"[bold]{format_currency(balanced['final_net_worth'])}[/bold]",
+        f"[{pretax_nominal_winner_style}][bold]{format_currency(abs(pretax_diff_nominal))} ({pretax_pct:.2f}%)[/bold][/{pretax_nominal_winner_style}]"
+    )
+
     # Final results - Nominal dollars
     diff_nominal = aggressive["final_net_worth_after_tax"] - balanced["final_net_worth_after_tax"]
     nominal_winner_style = "green" if diff_nominal > 0 else "blue"
+    nominal_pct = abs(diff_nominal / balanced["final_net_worth_after_tax"] * 100)
 
     table.add_row(
-        "[bold]💰 Final Net Worth (Nominal)[/bold]",
+        "[bold]💰 After-Tax Final Net Worth (Nominal)[/bold]",
         f"[bold]{format_currency(aggressive['final_net_worth_after_tax'])}[/bold]",
         f"[bold]{format_currency(balanced['final_net_worth_after_tax'])}[/bold]",
-        f"[{nominal_winner_style}][bold]{format_currency(abs(diff_nominal))}[/bold][/{nominal_winner_style}]"
+        f"[{nominal_winner_style}][bold]{format_currency(abs(diff_nominal))} ({nominal_pct:.2f}%)[/bold][/{nominal_winner_style}]"
     )
 
     # Final results - Real dollars (inflation-adjusted)
     diff_after_tax = aggressive["final_net_worth_after_tax_real"] - balanced["final_net_worth_after_tax_real"]
     winner_style = "green" if diff_after_tax > 0 else "blue"
     winner_name = "Aggressive" if diff_after_tax > 0 else "Balanced"
+    real_pct = abs(diff_after_tax / balanced["final_net_worth_after_tax_real"] * 100)
 
     table.add_row(
         "[bold]🏆 Final Net Worth (Real)[/bold]",
         f"[bold]{format_currency(aggressive['final_net_worth_after_tax_real'])}[/bold]",
         f"[bold]{format_currency(balanced['final_net_worth_after_tax_real'])}[/bold]",
-        f"[{winner_style}][bold]{format_currency(abs(diff_after_tax))}[/bold][/{winner_style}]"
+        f"[{winner_style}][bold]{format_currency(abs(diff_after_tax))} ({real_pct:.2f}%)[/bold][/{winner_style}]"
     )
 
     console.print(table)
@@ -543,6 +458,161 @@ def print_summary(aggressive: Dict, balanced: Dict, config: Dict = None):
 
     console.print(Panel(winner_text, title="[bold]🎯 WINNER[/bold]", border_style=winner_style))
     console.print()
+
+
+def generate_monthly_returns(
+    annual_mean_return: float,
+    annual_volatility: float,
+    num_months: int,
+    seed: int = None,
+) -> List[float]:
+    """
+    Generate random monthly returns using normal distribution.
+
+    Args:
+        annual_mean_return: Expected annual return (e.g., 0.07 for 7%)
+        annual_volatility: Annual standard deviation (e.g., 0.18 for 18%)
+        num_months: Number of months to generate
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of monthly returns
+    """
+    if seed is not None:
+        random.seed(seed)
+
+    # Convert annual metrics to monthly
+    monthly_mean = (1 + annual_mean_return) ** (1 / 12) - 1
+    monthly_std = annual_volatility / math.sqrt(12)
+
+    # Generate random returns using Python's built-in normal distribution
+    returns = []
+    for _ in range(num_months):
+        monthly_return = random.gauss(monthly_mean, monthly_std)
+        returns.append(monthly_return)
+
+    return returns
+
+
+def run_simulation_with_variable_returns(
+    monthly_debt_allocation: float,
+    monthly_investment: float,
+    monthly_returns: List[float],
+    capital_gains_tax_rate: float = 0.15,
+    expense_ratio: float = 0.001,
+    inflation_rate: float = 0.025,
+    marginal_tax_rate: float = 0.22,
+) -> Dict:
+    """
+    Run simulation with variable monthly returns (for Monte Carlo).
+
+    Similar to run_simulation but takes an array of monthly returns instead of fixed annual return.
+    Uses capital gains tax at liquidation model (not monthly taxation).
+    """
+    loans = get_initial_loans()
+    investment_balance = 0.0
+
+    total_months = len(monthly_returns)
+    cumulative_interest = 0
+    cumulative_invested = 0
+    all_debt_paid_month = None
+
+    # Track student loan interest deduction per year
+    current_year = -1
+    year_interest_paid = 0
+    year_deduction_used = 0
+
+    for month in range(1, total_months + 1):
+        # Check if all debt is paid off
+        all_paid = all(loan.is_paid_off() for loan in loans)
+        monthly_return = monthly_returns[month - 1]
+
+        if all_paid:
+            if all_debt_paid_month is None:
+                all_debt_paid_month = month - 1
+
+            # Calculate monthly rate after fees
+            monthly_expense_ratio = expense_ratio / 12
+            net_monthly_rate = (1 + monthly_return) * (1 - monthly_expense_ratio) - 1
+
+            # Grow taxable account (no tax on unrealized gains)
+            total_contribution = monthly_debt_allocation + monthly_investment
+            investment_balance = (
+                investment_balance * (1 + net_monthly_rate) + total_contribution
+            )
+
+            cumulative_invested += total_contribution
+        else:
+            # Accrue interest on loans (compound daily)
+            total_interest_accrued = 0
+            for loan in loans:
+                if not loan.is_paid_off():
+                    total_interest_accrued += loan.accrue_daily_interest(days=30)
+
+            # Pay minimums
+            remaining = monthly_debt_allocation
+            for loan in loans:
+                if not loan.is_paid_off():
+                    payment = loan.make_payment(loan.min_payment)
+                    remaining -= payment
+
+            # Apply extra to highest rate loan (avalanche)
+            active_loans = [l for l in loans if not l.is_paid_off()]
+            active_loans.sort(key=lambda x: x.annual_rate, reverse=True)
+
+            for loan in active_loans:
+                if remaining <= 0:
+                    break
+                payment = loan.make_payment(remaining)
+                remaining -= payment
+
+            extra_to_invest = max(0, remaining)
+            total_to_invest = monthly_investment + extra_to_invest
+
+            # Calculate monthly rate after fees
+            monthly_expense_ratio = expense_ratio / 12
+            net_monthly_rate = (1 + monthly_return) * (1 - monthly_expense_ratio) - 1
+
+            # Grow taxable account (no tax on unrealized gains)
+            investment_balance = (
+                investment_balance * (1 + net_monthly_rate) + total_to_invest
+            )
+
+            cumulative_invested += total_to_invest
+            cumulative_interest += total_interest_accrued
+
+            # Student loan interest deduction
+            year = (month - 1) // 12
+            if year != current_year:
+                current_year = year
+                year_interest_paid = 0
+                year_deduction_used = 0
+
+            year_interest_paid += total_interest_accrued
+
+            annual_deduction_cap = 2500
+            remaining_deduction = annual_deduction_cap - year_deduction_used
+
+            if total_interest_accrued > 0 and remaining_deduction > 0:
+                deductible_interest = min(total_interest_accrued, remaining_deduction)
+                year_deduction_used += deductible_interest
+
+    # Calculate final values with capital gains tax at liquidation
+    total_years = total_months // 12
+    inflation_factor = (1 + inflation_rate) ** total_years
+
+    # Calculate capital gains tax at liquidation (only on taxable account)
+    cost_basis = cumulative_invested
+    capital_gains = investment_balance - cost_basis
+    capital_gains_tax = capital_gains * capital_gains_tax_rate
+    investment_after_tax = investment_balance - capital_gains_tax
+
+    return {
+        "debt_payoff_month": all_debt_paid_month,
+        "final_net_worth_after_tax_real": investment_after_tax / inflation_factor,
+        "total_interest_paid": cumulative_interest,
+    }
+
 
 def sensitivity_analysis(
     market_returns: List[float] = None,
@@ -573,10 +643,6 @@ def sensitivity_analysis(
             expense_ratio=config.get("expense_ratio", 0.001),
             inflation_rate=config.get("inflation_rate", 0.025),
             marginal_tax_rate=config.get("marginal_tax_rate", 0.22),
-            retirement_contribution=config.get("retirement_contribution", 0),
-            employer_match_rate=config.get("employer_match_rate", 0),
-            use_roth=config.get("use_roth", False),
-            retirement_withdrawal_tax_rate=config.get("retirement_withdrawal_tax_rate", 0.12),
         )
         balanced = run_simulation(
             377,
@@ -587,10 +653,6 @@ def sensitivity_analysis(
             expense_ratio=config.get("expense_ratio", 0.001),
             inflation_rate=config.get("inflation_rate", 0.025),
             marginal_tax_rate=config.get("marginal_tax_rate", 0.22),
-            retirement_contribution=config.get("retirement_contribution", 0),
-            employer_match_rate=config.get("employer_match_rate", 0),
-            use_roth=config.get("use_roth", False),
-            retirement_withdrawal_tax_rate=config.get("retirement_withdrawal_tax_rate", 0.12),
         )
 
         diff_after_tax = (
@@ -621,6 +683,130 @@ def sensitivity_analysis(
     console.print()
 
     return results
+
+
+def monte_carlo_analysis(
+    num_simulations: int = 1000,
+    config: Dict = None,
+    annual_volatility: float = 0.18,
+):
+    """
+    Run Monte Carlo simulation with market volatility.
+
+    Args:
+        num_simulations: Number of simulations to run
+        config: Configuration dict with parameters
+        annual_volatility: Annual standard deviation (18% is typical for stocks)
+    """
+    if config is None:
+        config = {}
+
+    aggressive_results = []
+    balanced_results = []
+    aggressive_wins = 0
+
+    for i in range(num_simulations):
+        # Generate random monthly returns for this simulation
+        monthly_returns = generate_monthly_returns(
+            config.get("annual_market_return", 0.07),
+            annual_volatility,
+            config.get("total_months", 480),
+            seed=i,  # Different seed for each simulation
+        )
+
+        # Run both strategies with same returns
+        agg = run_simulation_with_variable_returns(
+            1500,
+            0,
+            monthly_returns,
+            config.get("capital_gains_tax_rate", 0.15),
+            config.get("expense_ratio", 0.001),
+            config.get("inflation_rate", 0.025),
+            config.get("marginal_tax_rate", 0.22),
+        )
+
+        bal = run_simulation_with_variable_returns(
+            377,
+            1123,
+            monthly_returns,
+            config.get("capital_gains_tax_rate", 0.15),
+            config.get("expense_ratio", 0.001),
+            config.get("inflation_rate", 0.025),
+            config.get("marginal_tax_rate", 0.22),
+        )
+
+        aggressive_results.append(agg["final_net_worth_after_tax_real"])
+        balanced_results.append(bal["final_net_worth_after_tax_real"])
+
+        if agg["final_net_worth_after_tax_real"] > bal["final_net_worth_after_tax_real"]:
+            aggressive_wins += 1
+
+    # Calculate statistics
+    aggressive_results.sort()
+    balanced_results.sort()
+
+    def percentile(data, p):
+        """Get percentile from sorted data."""
+        k = (len(data) - 1) * p
+        f = int(k)
+        c = int(k) + 1 if k < len(data) - 1 else int(k)
+        if f == c:
+            return data[int(k)]
+        return data[f] * (c - k) + data[c] * (k - f)
+
+    # Create results table
+    table = Table(
+        title=f"🎲 Monte Carlo Results ({num_simulations:,} iterations) - After-Tax Real Dollars",
+        show_header=True,
+        header_style="bold magenta",
+    )
+    table.add_column("Percentile", style="cyan")
+    table.add_column("Aggressive", justify="right", style="green")
+    table.add_column("Balanced", justify="right", style="blue")
+    table.add_column("Difference", justify="right")
+
+    percentiles = [
+        ("10th Percentile", 0.10),
+        ("25th Percentile", 0.25),
+        ("Median (50th)", 0.50),
+        ("75th Percentile", 0.75),
+        ("90th Percentile", 0.90),
+    ]
+
+    for label, p in percentiles:
+        agg_val = percentile(aggressive_results, p)
+        bal_val = percentile(balanced_results, p)
+        diff = agg_val - bal_val
+        diff_style = "green" if diff > 0 else "blue" if diff < 0 else "white"
+
+        table.add_row(
+            label,
+            format_currency(agg_val),
+            format_currency(bal_val),
+            f"[{diff_style}]{format_currency(diff)}[/{diff_style}]",
+        )
+
+    console.print(table)
+
+    # Probability panel
+    prob_agg = aggressive_wins / num_simulations * 100
+    prob_bal = (num_simulations - aggressive_wins) / num_simulations * 100
+    winner_style = "green" if prob_agg > 50 else "blue"
+
+    prob_text = f"[cyan]Annual Volatility:[/cyan] {annual_volatility * 100:.0f}%\n"
+    prob_text += f"[cyan]Mean Return:[/cyan] {config.get('annual_market_return', 0.07) * 100:.1f}%\n\n"
+    prob_text += f"[green]Probability Aggressive Wins:[/green] {prob_agg:.1f}%\n"
+    prob_text += f"[blue]Probability Balanced Wins:[/blue] {prob_bal:.1f}%\n\n"
+    prob_text += f"[{winner_style}]Most Likely Winner: {'Aggressive' if prob_agg > 50 else 'Balanced'}[/{winner_style}]"
+
+    console.print(
+        Panel(
+            prob_text,
+            title="[bold]📊 Probability Analysis[/bold]",
+            border_style=winner_style,
+        )
+    )
+    console.print()
 
 
 def main():
@@ -661,51 +847,28 @@ def main():
     opening_text = Text()
     opening_text.append("🎓 Student Loan Payoff Analysis\n\n", style="bold")
     opening_text.append("Using your actual loan data\n", style="cyan")
-    opening_text.append("Now with tax modeling, inflation, fees, AND retirement accounts!\n\n", style="dim")
-
+    opening_text.append("Now with tax modeling, inflation, and fees!\n\n", style="dim")
     opening_content = Group(opening_text, loan_table)
     console.print(Panel(opening_content, title="[bold magenta]📋 Analysis Starting[/bold magenta]", border_style="magenta"))
 
     TIMELINE_YEARS = 40
 
-    # Configuration
     config = {
         "total_months": TIMELINE_YEARS * 12,
-        "annual_market_return": 0.07,
+        "annual_market_return": 0.085, # USE CONSERVATIVE PRE-INFLATION-ADJUSTED AVERAGE RETURN
         "capital_gains_tax_rate": 0.15,  # 15% long-term capital gains
         "expense_ratio": 0.001,  # 0.1% for low-cost index fund
         "inflation_rate": 0.025,  # 2.5% inflation
         "marginal_tax_rate": 0.22,  # 22% tax bracket for deduction benefit (working years)
-        "retirement_contribution": 0,  # No 401(k) in this model (already maxed separately)
-        "employer_match_rate": 0.0,  # No match (already maxing employer match separately)
-        "use_roth": False,  # Traditional 401(k) for pre-tax savings
-        "retirement_withdrawal_tax_rate": 0.12,  # 12% tax bracket in retirement (typically lower)
     }
 
-    aggressive = run_simulation(
-        monthly_debt_allocation=1500,
-        monthly_investment=0,
-        **config,
-    )
-
-    balanced = run_simulation(
-        monthly_debt_allocation=377,
-        monthly_investment=1123,
-        **config,
-    )
+    aggressive = run_simulation(monthly_debt_allocation=1500, monthly_investment=0, **config)
+    balanced = run_simulation(monthly_debt_allocation=377, monthly_investment=1123, **config)
 
     print_summary(aggressive, balanced, config)
 
-    sensitivity_analysis(config=config)
-
-    # Closing panel with key insights
-    insights_text = "[bold green]✅ Analysis Complete![/bold green]\n\n"
-    insights_text += "[cyan]Key Insights:[/cyan]\n\n"
-    insights_text += "1. [yellow]Market return sensitivity[/yellow] - check sensitivity analysis for different scenarios\n"
-    insights_text += "2. [yellow]Tax implications[/yellow]: 15% capital gains tax paid at liquidation\n"
-    insights_text += "3. [yellow]Student loan interest deduction[/yellow] provides small tax benefit\n"
-    insights_text += "4. [yellow]Time in market vs. debt-free psychology[/yellow] - choose what fits your goals"
-    console.print(Panel(insights_text, title="[bold]💡 Key Takeaways[/bold]", border_style="green"))
+    # sensitivity_analysis(config=config)
+    # monte_carlo_analysis(num_simulations=1000, config=config, annual_volatility=0.18)
 
     return aggressive, balanced
 
