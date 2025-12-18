@@ -8,7 +8,6 @@ Compares two strategies over a 40-year horizon:
 Uses daily interest accrual and 7% annual stock market return.
 """
 
-import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from typing import List, Dict
 
@@ -290,135 +289,6 @@ def print_summary(aggressive: Dict, balanced: Dict):
 
     print("\n" + "=" * 70)
 
-
-def create_visualizations(aggressive: Dict, balanced: Dict):
-    """Create comparison charts."""
-
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    fig.suptitle(
-        "Student Loan Payoff Strategy Comparison\n$1,500/month Budget | 40-Year Horizon | 7% Market Return",
-        fontsize=14,
-        fontweight="bold",
-    )
-
-    months = aggressive["month"]
-    years = [m / 12 for m in months]
-
-    # Plot 1: Net Worth Over Time
-    ax1 = axes[0, 0]
-    ax1.plot(
-        years,
-        [nw / 1e6 for nw in aggressive["net_worth"]],
-        label="Aggressive",
-        color="#2ecc71",
-        linewidth=2,
-    )
-    ax1.plot(
-        years,
-        [nw / 1e6 for nw in balanced["net_worth"]],
-        label="Balanced",
-        color="#3498db",
-        linewidth=2,
-    )
-    ax1.set_xlabel("Years")
-    ax1.set_ylabel("Net Worth (Millions $)")
-    ax1.set_title("Net Worth Over Time")
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    ax1.axhline(y=0, color="gray", linestyle="--", alpha=0.5)
-
-    # Plot 2: First 10 Years (Detail View)
-    ax2 = axes[0, 1]
-    first_10_years = 120  # months
-    ax2.plot(
-        years[:first_10_years],
-        aggressive["net_worth"][:first_10_years],
-        label="Aggressive",
-        color="#2ecc71",
-        linewidth=2,
-    )
-    ax2.plot(
-        years[:first_10_years],
-        balanced["net_worth"][:first_10_years],
-        label="Balanced",
-        color="#3498db",
-        linewidth=2,
-    )
-    ax2.set_xlabel("Years")
-    ax2.set_ylabel("Net Worth ($)")
-    ax2.set_title("Net Worth: First 10 Years (Detail)")
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-    ax2.axhline(y=0, color="gray", linestyle="--", alpha=0.5)
-
-    # Mark debt payoff points
-    if (
-        aggressive["debt_payoff_month"]
-        and aggressive["debt_payoff_month"] < first_10_years
-    ):
-        ax2.axvline(
-            x=aggressive["debt_payoff_month"] / 12,
-            color="#2ecc71",
-            linestyle=":",
-            alpha=0.7,
-            label="Aggressive Debt-Free",
-        )
-    if balanced["debt_payoff_month"] and balanced["debt_payoff_month"] < first_10_years:
-        ax2.axvline(
-            x=balanced["debt_payoff_month"] / 12,
-            color="#3498db",
-            linestyle=":",
-            alpha=0.7,
-            label="Balanced Debt-Free",
-        )
-
-    # Plot 3: Debt Balances Over Time
-    ax3 = axes[1, 0]
-    ax3.plot(
-        years,
-        aggressive["total_debt"],
-        label="Aggressive",
-        color="#2ecc71",
-        linewidth=2,
-    )
-    ax3.plot(
-        years, balanced["total_debt"], label="Balanced", color="#3498db", linewidth=2
-    )
-    ax3.set_xlabel("Years")
-    ax3.set_ylabel("Total Debt ($)")
-    ax3.set_title("Debt Balance Over Time")
-    ax3.legend()
-    ax3.grid(True, alpha=0.3)
-
-    # Plot 4: Investment Balance Over Time
-    ax4 = axes[1, 1]
-    ax4.plot(
-        years,
-        [inv / 1e6 for inv in aggressive["investment_balance"]],
-        label="Aggressive",
-        color="#2ecc71",
-        linewidth=2,
-    )
-    ax4.plot(
-        years,
-        [inv / 1e6 for inv in balanced["investment_balance"]],
-        label="Balanced",
-        color="#3498db",
-        linewidth=2,
-    )
-    ax4.set_xlabel("Years")
-    ax4.set_ylabel("Investment Balance (Millions $)")
-    ax4.set_title("Investment Growth Over Time")
-    ax4.legend()
-    ax4.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig("/home/claude/loan_comparison.png", dpi=150, bbox_inches="tight")
-    plt.close()
-
-    print("\n📈 Charts saved to loan_comparison.png")
-
-
 def sensitivity_analysis(
     market_returns: List[float] = [0.05, 0.06, 0.07, 0.08, 0.09, 0.10],
 ):
@@ -457,13 +327,11 @@ def sensitivity_analysis(
 
 
 def main():
-    """Main execution."""
     print("\n🎓 Running Student Loan Payoff Analysis...")
     print("   Using your actual loan data from the screenshot")
 
-    TIMELINE_YEARS = 30
+    TIMELINE_YEARS = 40
 
-    # Run both strategies
     aggressive = run_simulation(
         monthly_debt_allocation=1500,
         monthly_investment=0,
@@ -478,13 +346,8 @@ def main():
         annual_market_return=0.07,
     )
 
-    # Print summary
     print_summary(aggressive, balanced)
 
-    # Create visualizations
-    # create_visualizations(aggressive, balanced)
-
-    # Sensitivity analysis
     sensitivity_analysis()
 
     print("\n✅ Analysis complete!")
