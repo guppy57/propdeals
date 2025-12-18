@@ -757,7 +757,7 @@ def analyze_property(property_id):
         handle_scrape_neighborhood_from_findneighborhoods(property_id, supabase, console, scraper, ask_user=True)
         reload_dataframe()
     elif research_choice == "Run neighborhood analysis":
-        handle_neighborhood_analysis(property_id, neighborhoods, console)
+        handle_neighborhood_analysis(property_id, console, neighborhoods)
         reload_dataframe()
     elif research_choice == "Extract neighborhood letter grade":
         handle_extract_neighborhood_grade(property_id, supabase, console, neighborhoods)
