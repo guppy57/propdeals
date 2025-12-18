@@ -13,3 +13,4 @@ openai
 tavily-python
 numpy_financial
 fpdf2
+playwright
