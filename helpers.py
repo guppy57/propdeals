@@ -507,5 +507,6 @@ def normalize_neighborhood_name(name):
     # Remove diacritical marks
     normalized = "".join(c for c in normalized if not unicodedata.combining(c))
     normalized = normalized.replace("'", "")
+    normalized = normalized.replace("/", " / ")
 
     return normalized.lower()
