@@ -134,6 +134,8 @@ def run_simulation(
     expense_ratio: float = 0.001,
     inflation_rate: float = 0.025,
     marginal_tax_rate: float = 0.22,
+    yearly_bonus_towards_debt: float = 0,
+    yearly_bonus_towards_investments: float = 0,
 ) -> Dict:
     """
     Run full simulation for a given strategy.
@@ -147,6 +149,8 @@ def run_simulation(
         expense_ratio: Annual expense ratio for investments (e.g., 0.001 = 0.1%)
         inflation_rate: Annual inflation rate (e.g., 0.025 = 2.5%)
         marginal_tax_rate: Tax rate for student loan interest deduction benefit
+        yearly_bonus_towards_debt: One-time yearly payment towards debt (at end of year)
+        yearly_bonus_towards_investments: One-time yearly payment towards investments (at end of year)
 
     Returns:
         Dictionary with monthly tracking data
@@ -248,6 +252,58 @@ def run_simulation(
             cumulative_loan_interest_deduction += tax_benefit
             year_deduction_used += deductible_interest
 
+        # Apply yearly bonus at end of year
+        if month % 12 == 0 and (yearly_bonus_towards_debt > 0 or yearly_bonus_towards_investments > 0):
+            # Check if all debt is paid off
+            all_paid = all(l.is_paid_off() for l in loans)
+
+            if all_paid:
+                # All debt paid: entire bonus goes to investments
+                monthly_expense_ratio = expense_ratio / 12
+                gross_monthly_rate = (1 + annual_market_return) ** (1 / 12) - 1
+                net_monthly_rate = (1 + gross_monthly_rate) * (1 - monthly_expense_ratio) - 1
+
+                bonus_investment_gains = investment_balance * net_monthly_rate
+                total_bonus = yearly_bonus_towards_debt + yearly_bonus_towards_investments
+                investment_balance = investment_balance + bonus_investment_gains + total_bonus
+
+                cumulative_invested += total_bonus
+                cumulative_investment_gains += bonus_investment_gains
+            else:
+                # Still have debt: apply bonus to debt using avalanche method
+                remaining_bonus = yearly_bonus_towards_debt
+
+                # Pay minimums first with bonus (if any loans unpaid)
+                for loan in loans:
+                    if not loan.is_paid_off() and remaining_bonus > 0:
+                        payment = loan.make_payment(min(loan.min_payment, remaining_bonus))
+                        remaining_bonus -= payment
+
+                # Apply extra bonus to highest interest rate loan (avalanche)
+                active_loans = [l for l in loans if not l.is_paid_off()]
+                active_loans.sort(key=lambda x: x.annual_rate, reverse=True)
+
+                for loan in active_loans:
+                    if remaining_bonus <= 0:
+                        break
+                    payment = loan.make_payment(remaining_bonus)
+                    remaining_bonus -= payment
+
+                # Any leftover bonus goes to investments along with investment bonus
+                extra_to_invest = max(0, remaining_bonus)
+                total_bonus_to_invest = yearly_bonus_towards_investments + extra_to_invest
+
+                # Grow investment with bonus
+                monthly_expense_ratio = expense_ratio / 12
+                gross_monthly_rate = (1 + annual_market_return) ** (1 / 12) - 1
+                net_monthly_rate = (1 + gross_monthly_rate) * (1 - monthly_expense_ratio) - 1
+
+                bonus_investment_gains = investment_balance * net_monthly_rate
+                investment_balance = investment_balance + bonus_investment_gains + total_bonus_to_invest
+
+                cumulative_invested += total_bonus_to_invest
+                cumulative_investment_gains += bonus_investment_gains
+
         # Record state after this month
         total_debt = sum(loan.balance for loan in loans)
         total_net_worth = investment_balance - total_debt
@@ -293,6 +349,8 @@ def run_simulation(
     history["total_loan_interest_deduction_value"] = cumulative_loan_interest_deduction
     history["inflation_factor"] = inflation_factor
     history["monthly_debt_allocation"] = monthly_debt_allocation
+    history["yearly_bonus_towards_debt"] = yearly_bonus_towards_debt
+    history["yearly_bonus_towards_investments"] = yearly_bonus_towards_investments
 
     return history
 
@@ -314,7 +372,7 @@ def months_to_years_months(months: int) -> str:
         return f"{years} years, {remaining_months} months"
 
 
-def print_summary(aggressive: Dict, balanced: Dict, config: Dict = None, budget: int = 1500):
+def print_summary(aggressive: Dict, balanced: Dict, config: Dict = None, budget: int = 1500, bonus_amount: int = 10000):
     """Print comparison summary of both strategies using Rich tables."""
     console.print()
 
@@ -326,6 +384,7 @@ def print_summary(aggressive: Dict, balanced: Dict, config: Dict = None, budget:
     conditions_text = f"[cyan]Total Debt:[/cyan] {format_currency(total_debt)}\n"
     conditions_text += f"[cyan]Total Minimum Payment:[/cyan] {format_currency(total_min)}/month\n"
     conditions_text += f"[cyan]Monthly Budget:[/cyan] {format_currency(budget)}\n"
+    conditions_text += f"[cyan]Yearly Bonus:[/cyan] {format_currency(bonus_amount)}\n"
 
     if config:
         years = config.get("total_months", 480) // 12
@@ -346,10 +405,35 @@ def print_summary(aggressive: Dict, balanced: Dict, config: Dict = None, budget:
     table.add_column("Difference", justify="right")
 
     # Add strategy descriptions
+    agg_bonus_debt = aggressive.get('yearly_bonus_towards_debt', 0)
+    agg_bonus_inv = aggressive.get('yearly_bonus_towards_investments', 0)
+    bal_bonus_debt = balanced.get('yearly_bonus_towards_debt', 0)
+    bal_bonus_inv = balanced.get('yearly_bonus_towards_investments', 0)
+
+    # Build aggressive description
+    agg_desc = f"${aggressive['monthly_debt_allocation']}/mo → debt then brokerage"
+    if agg_bonus_debt > 0 or agg_bonus_inv > 0:
+        if agg_bonus_debt > 0 and agg_bonus_inv == 0:
+            agg_desc += f" + ${agg_bonus_debt:,.0f}/yr → debt"
+        elif agg_bonus_debt == 0 and agg_bonus_inv > 0:
+            agg_desc += f" + ${agg_bonus_inv:,.0f}/yr → investments"
+        else:
+            agg_desc += f" + ${agg_bonus_debt:,.0f}/yr → debt, ${agg_bonus_inv:,.0f}/yr → investments"
+
+    # Build balanced description
+    bal_desc = f"${balanced['monthly_debt_allocation']}/mo → debt, ${budget - balanced['monthly_debt_allocation']}/mo → brokerage"
+    if bal_bonus_debt > 0 or bal_bonus_inv > 0:
+        if bal_bonus_debt > 0 and bal_bonus_inv == 0:
+            bal_desc += f" + ${bal_bonus_debt:,.0f}/yr → debt"
+        elif bal_bonus_debt == 0 and bal_bonus_inv > 0:
+            bal_desc += f" + ${bal_bonus_inv:,.0f}/yr → investments"
+        else:
+            bal_desc += f" + ${bal_bonus_debt:,.0f}/yr → debt, ${bal_bonus_inv:,.0f}/yr → investments"
+
     table.add_row(
         "[bold]Strategy Description[/bold]",
-        f"${aggressive['monthly_debt_allocation']} → debt then brokerage",
-        f"${balanced['monthly_debt_allocation']} → debt, ${budget - balanced['monthly_debt_allocation']} → brokerage",
+        agg_desc,
+        bal_desc,
         ""
     )
     table.add_section()
@@ -502,6 +586,8 @@ def run_simulation_with_variable_returns(
     expense_ratio: float = 0.001,
     inflation_rate: float = 0.025,
     marginal_tax_rate: float = 0.22,
+    yearly_bonus_towards_debt: float = 0,
+    yearly_bonus_towards_investments: float = 0,
 ) -> Dict:
     """
     Run simulation with variable monthly returns (for Monte Carlo).
@@ -597,6 +683,53 @@ def run_simulation_with_variable_returns(
                 deductible_interest = min(total_interest_accrued, remaining_deduction)
                 year_deduction_used += deductible_interest
 
+        # Apply yearly bonus at end of year
+        if month % 12 == 0 and (yearly_bonus_towards_debt > 0 or yearly_bonus_towards_investments > 0):
+            # Check if all debt is paid off
+            all_paid = all(l.is_paid_off() for l in loans)
+            monthly_return = monthly_returns[month - 1]
+
+            if all_paid:
+                # All debt paid: entire bonus goes to investments
+                monthly_expense_ratio = expense_ratio / 12
+                net_monthly_rate = (1 + monthly_return) * (1 - monthly_expense_ratio) - 1
+
+                total_bonus = yearly_bonus_towards_debt + yearly_bonus_towards_investments
+                investment_balance = investment_balance * (1 + net_monthly_rate) + total_bonus
+
+                cumulative_invested += total_bonus
+            else:
+                # Still have debt: apply bonus to debt using avalanche method
+                remaining_bonus = yearly_bonus_towards_debt
+
+                # Pay minimums first with bonus (if any loans unpaid)
+                for loan in loans:
+                    if not loan.is_paid_off() and remaining_bonus > 0:
+                        payment = loan.make_payment(min(loan.min_payment, remaining_bonus))
+                        remaining_bonus -= payment
+
+                # Apply extra bonus to highest interest rate loan (avalanche)
+                active_loans = [l for l in loans if not l.is_paid_off()]
+                active_loans.sort(key=lambda x: x.annual_rate, reverse=True)
+
+                for loan in active_loans:
+                    if remaining_bonus <= 0:
+                        break
+                    payment = loan.make_payment(remaining_bonus)
+                    remaining_bonus -= payment
+
+                # Any leftover bonus goes to investments along with investment bonus
+                extra_to_invest = max(0, remaining_bonus)
+                total_bonus_to_invest = yearly_bonus_towards_investments + extra_to_invest
+
+                # Grow investment with bonus
+                monthly_expense_ratio = expense_ratio / 12
+                net_monthly_rate = (1 + monthly_return) * (1 - monthly_expense_ratio) - 1
+
+                investment_balance = investment_balance * (1 + net_monthly_rate) + total_bonus_to_invest
+
+                cumulative_invested += total_bonus_to_invest
+
     # Calculate final values with capital gains tax at liquidation
     total_years = total_months // 12
     inflation_factor = (1 + inflation_rate) ** total_years
@@ -617,6 +750,8 @@ def run_simulation_with_variable_returns(
 def sensitivity_analysis(
     market_returns: List[float] = None,
     config: Dict = None,
+    yearly_bonus_towards_debt: float = 0,
+    yearly_bonus_towards_investments: float = 0,
 ):
     """Run sensitivity analysis on different market return assumptions."""
     if market_returns is None:
@@ -643,6 +778,8 @@ def sensitivity_analysis(
             expense_ratio=config.get("expense_ratio", 0.001),
             inflation_rate=config.get("inflation_rate", 0.025),
             marginal_tax_rate=config.get("marginal_tax_rate", 0.22),
+            yearly_bonus_towards_debt=yearly_bonus_towards_debt,
+            yearly_bonus_towards_investments=yearly_bonus_towards_investments,
         )
         balanced = run_simulation(
             377,
@@ -653,6 +790,8 @@ def sensitivity_analysis(
             expense_ratio=config.get("expense_ratio", 0.001),
             inflation_rate=config.get("inflation_rate", 0.025),
             marginal_tax_rate=config.get("marginal_tax_rate", 0.22),
+            yearly_bonus_towards_debt=yearly_bonus_towards_debt,
+            yearly_bonus_towards_investments=yearly_bonus_towards_investments,
         )
 
         diff_after_tax = (
@@ -689,6 +828,8 @@ def monte_carlo_analysis(
     num_simulations: int = 1000,
     config: Dict = None,
     annual_volatility: float = 0.18,
+    yearly_bonus_towards_debt: float = 0,
+    yearly_bonus_towards_investments: float = 0,
 ):
     """
     Run Monte Carlo simulation with market volatility.
@@ -697,6 +838,8 @@ def monte_carlo_analysis(
         num_simulations: Number of simulations to run
         config: Configuration dict with parameters
         annual_volatility: Annual standard deviation (18% is typical for stocks)
+        yearly_bonus_towards_debt: One-time yearly payment towards debt (at end of year)
+        yearly_bonus_towards_investments: One-time yearly payment towards investments (at end of year)
     """
     if config is None:
         config = {}
@@ -723,6 +866,8 @@ def monte_carlo_analysis(
             config.get("expense_ratio", 0.001),
             config.get("inflation_rate", 0.025),
             config.get("marginal_tax_rate", 0.22),
+            yearly_bonus_towards_debt=yearly_bonus_towards_debt,
+            yearly_bonus_towards_investments=yearly_bonus_towards_investments,
         )
 
         bal = run_simulation_with_variable_returns(
@@ -733,6 +878,8 @@ def monte_carlo_analysis(
             config.get("expense_ratio", 0.001),
             config.get("inflation_rate", 0.025),
             config.get("marginal_tax_rate", 0.22),
+            yearly_bonus_towards_debt=yearly_bonus_towards_debt,
+            yearly_bonus_towards_investments=yearly_bonus_towards_investments,
         )
 
         aggressive_results.append(agg["final_net_worth_after_tax_real"])
@@ -855,17 +1002,17 @@ def main():
 
     config = {
         "total_months": TIMELINE_YEARS * 12,
-        "annual_market_return": 0.085, # USE CONSERVATIVE PRE-INFLATION-ADJUSTED AVERAGE RETURN
+        "annual_market_return": 0.080, # USE CONSERVATIVE PRE-INFLATION-ADJUSTED AVERAGE RETURN
         "capital_gains_tax_rate": 0.15,  # 15% long-term capital gains
-        "expense_ratio": 0.001,  # 0.1% for low-cost index fund
+        "expense_ratio": 0.0010,  # 0.1% for low-cost index fund
         "inflation_rate": 0.025,  # 2.5% inflation
         "marginal_tax_rate": 0.22,  # 22% tax bracket for deduction benefit (working years)
     }
 
-    aggressive = run_simulation(monthly_debt_allocation=1500, monthly_investment=0, **config)
-    balanced = run_simulation(monthly_debt_allocation=377, monthly_investment=1123, **config)
+    aggressive = run_simulation(monthly_debt_allocation=1500, monthly_investment=0, yearly_bonus_towards_debt=10000, yearly_bonus_towards_investments=0, **config)
+    balanced = run_simulation(monthly_debt_allocation=377, monthly_investment=1123, yearly_bonus_towards_debt=5000, yearly_bonus_towards_investments=5000, **config)
 
-    print_summary(aggressive, balanced, config)
+    print_summary(aggressive, balanced, config, budget=1500, bonus_amount=10000)
 
     # sensitivity_analysis(config=config)
     # monte_carlo_analysis(num_simulations=1000, config=config, annual_volatility=0.18)
