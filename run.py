@@ -17,7 +17,7 @@ from handlers import (
     handle_extract_neighborhood_grade,
     handle_rent_research_generation,
     handle_status_change,
-    handle_price_cut,
+    handle_price_change,
     handle_view_research_reports,
     handle_risk_assessment,
     handle_property_summary,
@@ -711,7 +711,7 @@ def analyze_property(property_id):
         "View risk assessment report",
         "View property summary",
         "Edit neighborhood assessment",
-        "Record price cut",
+        "Record price change",
         "Change status",
         "Generate new rent research",
         "View existing research reports",
@@ -762,8 +762,8 @@ def analyze_property(property_id):
     elif research_choice == "Extract neighborhood letter grade":
         handle_extract_neighborhood_grade(property_id, supabase, console, neighborhoods)
         reload_dataframe()
-    elif research_choice == "Record price cut":
-        handle_price_cut(property_id, row["purchase_price"], supabase)
+    elif research_choice == "Record price change":
+        handle_price_change(property_id, row["purchase_price"], supabase)
         reload_dataframe()
         display_new_property_qualification(console, property_id, get_all_phase1_qualifying_properties)
     elif research_choice == "Change status":

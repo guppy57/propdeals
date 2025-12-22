@@ -238,14 +238,23 @@ def handle_status_change(property_id, supabase):
     except Exception as e:
         print(f"Changing statusfor {property_id} failed: {str(e)}")
 
-def handle_price_cut(property_id, current_price, supabase):
-    amount = questionary.text("Price cut amount").ask()
-    new_price = int(int(current_price) - int(amount))
+def handle_price_change(property_id, current_price, supabase):
+    new_price = 0
+    option = questionary.select("What kind of price change?", choices=["- Decrease", "+ Increase"]).ask()
+    amount = questionary.text("Amount").ask()
+
+    if option == "- Decrease":
+        new_price = int(int(current_price) - int(amount))
+    elif option == "+ Increase":
+        new_price = int(int(current_price) + int(amount))
+
+    update = { "purchase_price": new_price }
+
+    if option == "- Decrease":
+        update["has_reduced_price"] = True
+
     try:
-      query = supabase.table("properties").update({
-          "purchase_price": new_price,
-          "has_reduced_price": True
-      }).eq("address1", property_id)
+      query = supabase.table("properties").update(update).eq("address1", property_id)
       response = query.execute()
       if hasattr(response, "data"):
           print(f"Updated property data with new reduced price: {response.data}")
