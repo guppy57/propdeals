@@ -863,7 +863,9 @@ class NeighborhoodsClient():
 
                 if should_assign:
                     # Attempt to assign neighborhood using geocoding
-                    full_address = property_data.get("address1", "")
+                    full_address = property_data.get("full_address", "")
+                    if not full_address:
+                        full_address = property_data.get("address1", "")
                     neighborhood_name = self.assign_neighborhood_to_property_using_geocoding(
                         address1, full_address
                     )
@@ -927,7 +929,9 @@ class NeighborhoodsClient():
             # Continue with new report generation
 
         # Extract city and state from property address
-        full_address = property_data.get("address1", "")
+        full_address = property_data.get("full_address", "")
+        if not full_address:
+            full_address = property_data.get("address1", "")
         address_parts = full_address.split(",")
 
         # Try to extract city (usually second part after first comma)

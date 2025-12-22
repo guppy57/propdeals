@@ -90,13 +90,20 @@ class RentResearcher:
     def _generate_search_queries(self, property_data: Dict[str, Any]) -> List[str]:
         """Generate targeted search queries for comprehensive rental analysis"""
 
-        address = property_data.get("address1", "Unknown Address")
+        # Use full_address for complete location info (includes city, state, zip)
+        full_address = property_data.get("full_address", "")
+        address1 = property_data.get("address1", "Unknown Address")  # Keep for fallback
         beds = property_data.get("beds", 0)
         baths = property_data.get("baths", 0)
         units = property_data.get("units", 1)
 
-        # Extract city/area from address for location-based searches
-        location = address.split(",")[0] if "," in address else address
+        # Use full address for accurate location-based searches
+        if full_address and "," in full_address:
+            location = full_address  # Complete address with city, state, zip
+        elif full_address:
+            location = full_address  # Use what we have even if no comma
+        else:
+            location = address1  # Fallback to street address for backward compatibility
 
         # Single family homes use room rental queries
         if self._is_single_family(property_data):
@@ -147,13 +154,20 @@ class RentResearcher:
     def _generate_property_wide_search_queries(self, property_data: Dict[str, Any]) -> List[str]:
         """Generate targeted search queries for whole-property rental analysis (not per-room)"""
 
-        address = property_data.get("address1", "Unknown Address")
+        # Use full_address for complete location info (includes city, state, zip)
+        full_address = property_data.get("full_address", "")
+        address1 = property_data.get("address1", "Unknown Address")  # Keep for fallback
         beds = property_data.get("beds", 0)
         baths = property_data.get("baths", 0)
         square_ft = property_data.get("square_ft", 0)
 
-        # Extract city/area from address for location-based searches
-        location = address.split(",")[0] if "," in address else address
+        # Use full address for accurate location-based searches
+        if full_address and "," in full_address:
+            location = full_address  # Complete address with city, state, zip
+        elif full_address:
+            location = full_address  # Use what we have even if no comma
+        else:
+            location = address1  # Fallback to street address for backward compatibility
 
         queries = [
             # Whole-house rental comparables
