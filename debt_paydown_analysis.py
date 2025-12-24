@@ -62,6 +62,36 @@ def get_initial_loans() -> List[Loan]:
     ]
 
 
+def sort_loans_by_strategy(loans: List[Loan], method: str) -> List[Loan]:
+    """
+    Sort active loans by payment strategy.
+
+    Args:
+        loans: List of all loans
+        method: Either 'avalanche' or 'snowball'
+
+    Returns:
+        List of active loans sorted by strategy
+
+    Raises:
+        ValueError: If method is not 'avalanche' or 'snowball'
+    """
+    active_loans = [l for l in loans if not l.is_paid_off()]
+
+    if method.lower() == "snowball":
+        # Snowball: Pay smallest balance first
+        active_loans.sort(key=lambda x: x.balance)
+    elif method.lower() == "avalanche":
+        # Avalanche: Pay highest interest rate first
+        active_loans.sort(key=lambda x: x.annual_rate, reverse=True)
+    else:
+        raise ValueError(
+            f"Invalid debt_paydown_method: '{method}'. Must be 'avalanche' or 'snowball'."
+        )
+
+    return active_loans
+
+
 def simulate_month(
     loans: List[Loan],
     monthly_allocation: float,
@@ -69,12 +99,16 @@ def simulate_month(
     monthly_investment: float,
     annual_market_return: float = 0.07,
     expense_ratio: float = 0.001,
+    debt_paydown_method: str = "avalanche",
 ) -> tuple:
     """
     Simulate one month of debt payments and investment growth.
 
-    Uses avalanche method: pay minimums first, then extra to highest rate.
+    Uses specified debt paydown method: pay minimums first, then extra according to strategy.
     Applies expense ratio fees to investment returns.
+
+    Args:
+        debt_paydown_method: Payment strategy - 'avalanche' (highest rate) or 'snowball' (smallest balance)
 
     Returns: (extra_to_invest, new_investment_balance, interest_paid, investment_gains)
     """
@@ -91,10 +125,8 @@ def simulate_month(
             payment = loan.make_payment(loan.min_payment)
             remaining -= payment
 
-    # Step 3: Apply extra to highest interest rate loan (avalanche)
-    # Sort active loans by interest rate descending
-    active_loans = [l for l in loans if not l.is_paid_off()]
-    active_loans.sort(key=lambda x: x.annual_rate, reverse=True)
+    # Step 3: Apply extra to next loan based on strategy
+    active_loans = sort_loans_by_strategy(loans, debt_paydown_method)
 
     for loan in active_loans:
         if remaining <= 0:
@@ -134,6 +166,7 @@ def run_simulation(
     expense_ratio: float = 0.001,
     inflation_rate: float = 0.025,
     marginal_tax_rate: float = 0.22,
+    debt_paydown_method: str = "avalanche",
 ) -> Dict:
     """
     Run full simulation for a given strategy.
@@ -147,6 +180,7 @@ def run_simulation(
         expense_ratio: Annual expense ratio for investments (e.g., 0.001 = 0.1%)
         inflation_rate: Annual inflation rate (e.g., 0.025 = 2.5%)
         marginal_tax_rate: Tax rate for student loan interest deduction benefit
+        debt_paydown_method: Payment strategy - 'avalanche' (highest rate) or 'snowball' (smallest balance)
 
     Returns:
         Dictionary with monthly tracking data
@@ -218,6 +252,7 @@ def run_simulation(
                 monthly_investment,
                 annual_market_return,
                 expense_ratio,
+                debt_paydown_method,
             )
 
             cumulative_interest += interest
@@ -314,7 +349,13 @@ def months_to_years_months(months: int) -> str:
         return f"{years} years, {remaining_months} months"
 
 
-def print_summary(aggressive: Dict, balanced: Dict, config: Dict = None, budget: int = 1500):
+def print_summary(
+    aggressive: Dict,
+    balanced: Dict,
+    config: Dict = None,
+    budget: int = 1500,
+    debt_paydown_method: str = "avalanche",
+):
     """Print comparison summary of both strategies using Rich tables."""
     console.print()
 
@@ -334,7 +375,8 @@ def print_summary(aggressive: Dict, balanced: Dict, config: Dict = None, budget:
         conditions_text += f"[cyan]Capital Gains Tax:[/cyan] {config.get('capital_gains_tax_rate', 0.15) * 100:.0f}%\n"
         conditions_text += f"[cyan]Expense Ratio:[/cyan] {config.get('expense_ratio', 0.001) * 100:.2f}%\n"
         conditions_text += f"[cyan]Inflation Rate:[/cyan] {config.get('inflation_rate', 0.025) * 100:.1f}%\n"
-        conditions_text += f"[cyan]Marginal Tax Rate:[/cyan] {config.get('marginal_tax_rate', 0.22) * 100:.0f}%"
+        conditions_text += f"[cyan]Marginal Tax Rate:[/cyan] {config.get('marginal_tax_rate', 0.22) * 100:.0f}%\n"
+        conditions_text += f"[cyan]Debt Paydown Method:[/cyan] {debt_paydown_method.capitalize()}"
 
     console.print(Panel(conditions_text, title="[bold magenta]📊 STARTING CONDITIONS[/bold magenta]", border_style="cyan"))
 
@@ -348,8 +390,8 @@ def print_summary(aggressive: Dict, balanced: Dict, config: Dict = None, budget:
     # Add strategy descriptions
     table.add_row(
         "[bold]Strategy Description[/bold]",
-        f"${aggressive['monthly_debt_allocation']} → debt then brokerage",
-        f"${balanced['monthly_debt_allocation']} → debt, ${budget - balanced['monthly_debt_allocation']} → brokerage",
+        f"${aggressive['monthly_debt_allocation']} → debt ({debt_paydown_method}) then brokerage",
+        f"${balanced['monthly_debt_allocation']} → debt ({debt_paydown_method}), ${budget - balanced['monthly_debt_allocation']} → brokerage",
         ""
     )
     table.add_section()
@@ -502,12 +544,16 @@ def run_simulation_with_variable_returns(
     expense_ratio: float = 0.001,
     inflation_rate: float = 0.025,
     marginal_tax_rate: float = 0.22,
+    debt_paydown_method: str = "avalanche",
 ) -> Dict:
     """
     Run simulation with variable monthly returns (for Monte Carlo).
 
     Similar to run_simulation but takes an array of monthly returns instead of fixed annual return.
     Uses capital gains tax at liquidation model (not monthly taxation).
+
+    Args:
+        debt_paydown_method: Payment strategy - 'avalanche' (highest rate) or 'snowball' (smallest balance)
     """
     loans = get_initial_loans()
     investment_balance = 0.0
@@ -556,9 +602,8 @@ def run_simulation_with_variable_returns(
                     payment = loan.make_payment(loan.min_payment)
                     remaining -= payment
 
-            # Apply extra to highest rate loan (avalanche)
-            active_loans = [l for l in loans if not l.is_paid_off()]
-            active_loans.sort(key=lambda x: x.annual_rate, reverse=True)
+            # Apply extra to next loan based on strategy
+            active_loans = sort_loans_by_strategy(loans, debt_paydown_method)
 
             for loan in active_loans:
                 if remaining <= 0:
@@ -643,6 +688,7 @@ def sensitivity_analysis(
             expense_ratio=config.get("expense_ratio", 0.001),
             inflation_rate=config.get("inflation_rate", 0.025),
             marginal_tax_rate=config.get("marginal_tax_rate", 0.22),
+            debt_paydown_method=config.get("debt_paydown_method", "avalanche"),
         )
         balanced = run_simulation(
             377,
@@ -653,6 +699,7 @@ def sensitivity_analysis(
             expense_ratio=config.get("expense_ratio", 0.001),
             inflation_rate=config.get("inflation_rate", 0.025),
             marginal_tax_rate=config.get("marginal_tax_rate", 0.22),
+            debt_paydown_method=config.get("debt_paydown_method", "avalanche"),
         )
 
         diff_after_tax = (
@@ -723,6 +770,7 @@ def monte_carlo_analysis(
             config.get("expense_ratio", 0.001),
             config.get("inflation_rate", 0.025),
             config.get("marginal_tax_rate", 0.22),
+            config.get("debt_paydown_method", "avalanche"),
         )
 
         bal = run_simulation_with_variable_returns(
@@ -733,6 +781,7 @@ def monte_carlo_analysis(
             config.get("expense_ratio", 0.001),
             config.get("inflation_rate", 0.025),
             config.get("marginal_tax_rate", 0.22),
+            config.get("debt_paydown_method", "avalanche"),
         )
 
         aggressive_results.append(agg["final_net_worth_after_tax_real"])
@@ -860,12 +909,20 @@ def main():
         "expense_ratio": 0.001,  # 0.1% for low-cost index fund
         "inflation_rate": 0.025,  # 2.5% inflation
         "marginal_tax_rate": 0.22,  # 22% tax bracket for deduction benefit (working years)
+        "debt_paydown_method": "snowball",  # Can be "avalanche" or "snowball"
     }
+
+    # Validate debt paydown method
+    method = config["debt_paydown_method"]
+    if method.lower() not in ["avalanche", "snowball"]:
+        raise ValueError(
+            f"Invalid debt_paydown_method: '{method}'. Must be 'avalanche' or 'snowball'."
+        )
 
     aggressive = run_simulation(monthly_debt_allocation=1500, monthly_investment=0, **config)
     balanced = run_simulation(monthly_debt_allocation=377, monthly_investment=1123, **config)
 
-    print_summary(aggressive, balanced, config)
+    print_summary(aggressive, balanced, config, debt_paydown_method=config["debt_paydown_method"])
 
     # sensitivity_analysis(config=config)
     # monte_carlo_analysis(num_simulations=1000, config=config, annual_volatility=0.18)
