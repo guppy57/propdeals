@@ -916,7 +916,7 @@ def monte_carlo_analysis(
             config.get("marginal_tax_rate", 0.22),
             yearly_bonus_towards_debt=yearly_bonus_towards_debt,
             yearly_bonus_towards_investments=yearly_bonus_towards_investments,
-            config.get("debt_paydown_method", "avalanche"),
+            debt_paydown_method=config.get("debt_paydown_method", "avalanche"),
         )
 
         bal = run_simulation_with_variable_returns(
@@ -929,7 +929,7 @@ def monte_carlo_analysis(
             config.get("marginal_tax_rate", 0.22),
             yearly_bonus_towards_debt=yearly_bonus_towards_debt,
             yearly_bonus_towards_investments=yearly_bonus_towards_investments,
-            config.get("debt_paydown_method", "avalanche"),
+            debt_paydown_method=config.get("debt_paydown_method", "avalanche"),
         )
 
         aggressive_results.append(agg["final_net_worth_after_tax_real"])
@@ -1057,7 +1057,7 @@ def main():
         "expense_ratio": 0.0010,  # 0.1% for low-cost index fund
         "inflation_rate": 0.025,  # 2.5% inflation
         "marginal_tax_rate": 0.22,  # 22% tax bracket for deduction benefit (working years)
-        "debt_paydown_method": "snowball",  # Can be "avalanche" or "snowball"
+        "debt_paydown_method": "avalanche",  # Can be "avalanche" or "snowball"
     }
 
     # Validate debt paydown method
