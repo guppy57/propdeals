@@ -10,6 +10,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from run import get_all_phase0_qualifying_properties, get_global_dataframe, get_reduced_pp_df, PHASE0_CRITERIA
+from display import display_property_details, display_unit_configs
+
 load_dotenv()
 
 RENTCAST_HEADERS = {
@@ -85,7 +88,7 @@ def get_rental_estimations_singlefamily(property_details):
             "Something went wrong when trying to pull rental estimate for single family",
             style="bold red",
         )
-        return None, None
+        return None, None, None
 
     property_rent = {}
 
@@ -103,13 +106,13 @@ def get_rental_estimations_singlefamily(property_details):
         comparables = data["comparables"]
     except KeyError as e:
         console.print(f"Missing expected field in API response: {e}", style="bold red")
-        return None, None
+        return None, None, None
 
     total_beds = property_details["beds"]
 
     if total_beds <= 0:
         console.print("Invalid bedroom count (must be > 0)", style="bold red")
-        return None, None
+        return None, None, None
 
     rent_comps = []
 
@@ -126,9 +129,6 @@ def get_rental_estimations_singlefamily(property_details):
         })
 
     return rent_comps, comparables, property_rent
-
-def get_political_districts(address):
-    pass
 
 def haversine_distance(lat1, lon1, lat2, lon2):
     """
@@ -239,80 +239,6 @@ def get_geocode_data(address):
         "neighborhood": neighborhood,
     }
 
-def get_solar_potential_data(address):
-    geocode = get_geocode_data(address)
-    print(f"Getting solar potential data for: {address}")
-    response = requests.get(
-        "https://solar.googleapis.com/v1/buildingInsights:findClosest",
-        params={
-            "location.latitude": geocode["lon"],
-            "location.longitude": geocode["lat"],
-            "requiredQuality": "HIGH",
-            "key": os.getenv("GOOGLE_KEY"),
-        },
-    )
-    data = response.json()
-
-    # Get first viable financial analysis (panelConfigIndex != -1)
-    financial = next(
-        (
-            fa
-            for fa in data.get("solarPotential", {}).get("financialAnalyses", [])
-            if fa.get("panelConfigIndex", -1) != -1
-        ),
-        None,
-    )
-
-    solar_potential = data.get("solarPotential", {})
-    building_stats = solar_potential.get("buildingStats", {})
-    whole_roof = solar_potential.get("wholeRoofStats", {})
-
-    result = {
-        # Capacity metrics
-        "max_array_panels_count": solar_potential.get("maxArrayPanelsCount"),
-        "max_array_area_m2": solar_potential.get("maxArrayAreaMeters2"),
-        "max_sunshine_hours_per_year": solar_potential.get("maxSunshineHoursPerYear"),
-        "building_area_m2": building_stats.get("areaMeters2"),
-        "whole_roof_area_m2": whole_roof.get("areaMeters2"),
-        "panel_capacity_watts": solar_potential.get("panelCapacityWatts"),
-        # Financial metrics (if viable config exists)
-        "cost_electricity_without_solar": None,
-        "payback_years": None,
-        "lifetime_savings": None,
-        "present_value_savings_year20": None,
-        "upfront_cost": None,
-        "solar_percentage": None,
-        "initial_ac_kwh_per_year": None,
-        "net_metering_allowed": None,
-    }
-
-    if financial and "financialDetails" in financial:
-        details = financial["financialDetails"]
-        cash = financial.get("cashPurchaseSavings", {})
-
-        result.update(
-            {
-                "cost_electricity_without_solar": int(
-                    details.get("costOfElectricityWithoutSolar", {}).get("units", 0)
-                ),
-                "payback_years": cash.get("paybackYears"),
-                "lifetime_savings": int(
-                    cash.get("savings", {}).get("savingsLifetime", {}).get("units", 0)
-                ),
-                "present_value_savings_year20": int(
-                    cash.get("savings", {})
-                    .get("presentValueOfSavingsYear20", {})
-                    .get("units", 0)
-                ),
-                "upfront_cost": int(cash.get("upfrontCost", {}).get("units", 0)),
-                "solar_percentage": details.get("solarPercentage"),
-                "initial_ac_kwh_per_year": details.get("initialAcKwhPerYear"),
-                "net_metering_allowed": details.get("netMeteringAllowed"),
-            }
-        )
-    return result
-
-
 def get_walkscore_data(lng, lat, address):
     print(f"Getting walkscore data for: {address}")
     response = requests.get(
@@ -340,7 +266,6 @@ def get_walkscore_data(lng, lat, address):
         bike = "NA"
 
     return data["walkscore"], transit, bike
-
 
 def get_poi_proximity_data(lat, lon, radius_miles=5):
     """
@@ -413,7 +338,6 @@ def get_poi_proximity_data(lat, lon, radius_miles=5):
             results[f'{poi_type}_distance_miles'] = None
 
     return results
-
 
 def get_poi_count_data(lat, lon, radius_miles=5):
     """
@@ -501,25 +425,6 @@ def get_poi_count_data(lat, lon, radius_miles=5):
 
     return results
 
-
-def get_value_estimate(property_details):
-    response = requests.get(
-        "https://api.rentcast.io/v1/avm/value",
-        headers=RENTCAST_HEADERS,
-        params={
-            "address": property_details["full_address"],
-            "propertyType": "Multi-Family",
-            "squareFootage": property_details["square_ft"],
-            "bedrooms": property_details["beds"],
-            "bathrooms": property_details["baths"],
-            "compCount": 15,
-        },
-    )
-
-    data = response.json()
-    return data
-
-
 def collect_property_details():
     full_address = questionary.text("Full address").ask()
     zillow_link = questionary.text("Zillow link").ask()
@@ -555,17 +460,6 @@ def collect_property_details():
         "has_tenants": has_tenants,
     }
 
-def display_property_details(property_details):
-    text = ""
-
-    for key in property_details:
-        text += f"{key}: {property_details[key]}\n"
-
-    console.print(
-        Panel(text, title="Property Details", title_align="center", padding=1)
-    )
-
-
 def add_property_to_supabase(property_details, supabase) -> bool:
     try:
         geocode = get_geocode_data(property_details["full_address"])
@@ -583,12 +477,6 @@ def add_property_to_supabase(property_details, supabase) -> bool:
         poi_count_data = get_poi_count_data(lat, lon, radius_miles=5)
         poi_data = {**poi_distance_data, **poi_count_data}
         console.print("Found POI proximity and count data", style="green bold")
-        solar_data = get_solar_potential_data(property_details["full_address"])
-        console.print("Found solar potential data", style="green bold")
-        electricity_costs = solar_data["cost_electricity_without_solar"]
-        console.print(
-            f"Found electricity costs: {electricity_costs}", style="green bold"
-        )
     except Exception as e:
         print(e)
 
@@ -597,7 +485,6 @@ def add_property_to_supabase(property_details, supabase) -> bool:
     property_details["transit_score"] = transit if transit != "NA" else 0
     property_details["lat"] = geocode["lat"]
     property_details["lon"] = geocode["lon"]
-    property_details["annual_electricity_cost_est"] = electricity_costs
     property_details["county"] = geocode["county"]
     property_details.update(poi_data)
 
@@ -616,7 +503,6 @@ def add_property_to_supabase(property_details, supabase) -> bool:
         print(f"Exception type: {type(e)}")
         return False
 
-
 def collect_unit_configurations(unit_count, address1):
     unit_configurations = []
     units_compared = 0
@@ -630,8 +516,8 @@ def collect_unit_configurations(unit_count, address1):
             rent_comp = {
                 "address1": address1,
                 "unit_num": units_compared + i + 1,
-                "beds": beds,
-                "baths": baths,
+                "beds": int(beds),
+                "baths": float(baths),
                 "rent_estimate": 0,
                 "rent_estimate_low": 0,
                 "rent_estimate_high": 0,
@@ -641,17 +527,6 @@ def collect_unit_configurations(unit_count, address1):
         units_compared += int(num_units)
 
     return unit_configurations
-
-
-def display_unit_configs(rent_comps):
-    table = Table(title="Rent Comparables")
-    table.add_column("Unit #")
-    table.add_column("Configuration", no_wrap=True)
-    for comp in rent_comps:
-        configuration = f"{comp["beds"]}-beds {comp["baths"]}-baths"
-        table.add_row(str(comp["unit_num"]), configuration)
-    console.print(table)
-
 
 def save_comps_to_db(comps, subject_rent_id, supabase):
     for comp in comps:
@@ -860,7 +735,7 @@ def add_rent_to_supabase(rent_comps, comparables, supabase) -> bool:
 
     for rent_comp in rent_comps:
         try:
-            query = supabase.table("rent_estimates").insert(rent_comp)
+            query = supabase.table("rent_estimates").upsert(rent_comp, on_conflict="address1,unit_num")
             response = query.execute()
             if hasattr(response, "data"):
                 print(f"Response data: {response.data}")
@@ -874,9 +749,11 @@ def add_rent_to_supabase(rent_comps, comparables, supabase) -> bool:
             return False
 
     for i, unit_comparables in enumerate(comparables):
-        if unit_comparables:  # Only save if there are comparables
+        if unit_comparables and i < len(new_ids):  # Only save if there are comparables
             rent_estimate_id = new_ids[i]
             save_comps_to_db(unit_comparables, rent_estimate_id, supabase)
+        elif unit_comparables and i >= len(new_ids):
+            print(f"Warning: No rent estimate ID for comparables at index {i}, skipping")
 
     return True
 
@@ -896,7 +773,7 @@ def add_rent_to_supabase_singlefamily(address1, unit_configs_w_rent, property_co
 
     for unit_config in unit_configs_w_rent:
         try:
-            query = supabase.table("rent_estimates").insert(unit_config)
+            query = supabase.table("rent_estimates").upsert(unit_config, on_conflict="address1,unit_num")
             response = query.execute()
             if hasattr(response, "data"):
                 print(f"Response data: {response.data}")
@@ -907,18 +784,19 @@ def add_rent_to_supabase_singlefamily(address1, unit_configs_w_rent, property_co
             print(f"Exception: {e}")
             print(f"Exception type: {type(e)}")
             return False
-    
-    save_property_comps_to_db(property_comparables, address1, supabase)
+
+    if property_comparables:
+        save_property_comps_to_db(property_comparables, address1, supabase)
     return True
 
-
-def run_add_property(supabase_client) -> dict:
+def run_add_property(supabase_client, reload_df_callback):
     console.print("Let's add a new property to analyze", style="bold red")
     proceed = False
+    property_details = {}
 
     while not proceed:
         property_details = collect_property_details()
-        display_property_details(property_details=property_details)
+        display_property_details(console, property_details=property_details)
         proceed = questionary.confirm("Does everything look correct?").ask()
         if not proceed:
             console.print("Add the property details again", style="bold blue")
@@ -934,6 +812,7 @@ def run_add_property(supabase_client) -> dict:
 
     console.print("Property details added to Supabase", style="bold green")
     proceed2 = False
+    unit_configs = []
 
     while not proceed2 and property_details["units"] != 0:
         unit_count = property_details["units"]
@@ -941,25 +820,50 @@ def run_add_property(supabase_client) -> dict:
             f"Let's now add our rent comparables for this property.\nWe will add details for the {unit_count} units.",
             style="bold blue",
         )
-        unit_configs = collect_unit_configurations(
-            unit_count, property_details["address1"]
-        )
-        display_unit_configs(unit_configs)
+        unit_configs = collect_unit_configurations(unit_count, property_details["address1"])
+        display_unit_configs(console, unit_configs)
         proceed2 = questionary.confirm("Does everything look correct?").ask()
         if not proceed2:
             console.print("Add the rent comparables again", style="bold blue")
 
     if property_details["units"] != 0:
-        rent_comps, comparables = get_rental_estimations_multifamily(property_details, unit_configs)
-        succeeded2 = add_rent_to_supabase(rent_comps, comparables, supabase_client)
+        succeeded_1 = add_rent_to_supabase(unit_configs, [], supabase_client)
     else:
-        unit_configs_w_rent, comparables, property_rent = get_rental_estimations_singlefamily(property_details)
-        succeeded2 = add_rent_to_supabase_singlefamily(property_details["address1"], unit_configs_w_rent, comparables, property_rent, supabase_client)
+        succeeded_1 = add_rent_to_supabase_singlefamily(property_details['address1'], unit_configs, None, {}, supabase_client)
 
-    if not succeeded2:
-        console.print("Something went wrong when adding rent comps", style="bold red")
-        return
+    if not succeeded_1:
+        console.print("Adding basic unit configurations and rent comparison for Phase 0 check failed", style="bold red")
+        return None
 
-    console.print("Property and rent comps added to Supabase", style="bold green")
+    reload_df_callback()
+    phase0_df = get_all_phase0_qualifying_properties()
+    is_valid_current = (phase0_df['address1'] == property_details["address1"]).any()
+    reduced_df = get_reduced_pp_df(0.10)
+    filtered_df = reduced_df.query(PHASE0_CRITERIA).copy()
+    is_valid_contingent = (filtered_df['address1'] == property_details["address1"]).any()
+
+    if is_valid_contingent or is_valid_current:
+        qual_type = "CONTINGENT" if (is_valid_contingent and not is_valid_current) else "CURRENT"
+        console.print(f"{property_details['address1']} qualifies for Phase 0: {qual_type}", style="bold green")
+        if property_details["units"] != 0:
+            rent_comps, comparables = get_rental_estimations_multifamily(property_details, unit_configs)
+            if rent_comps is None or comparables is None:
+                console.print("Failed to get rental estimations for multifamily property", style="bold red")
+                return
+            succeeded2 = add_rent_to_supabase(rent_comps, comparables, supabase_client)
+        else:
+            unit_configs_w_rent, comparables, property_rent = get_rental_estimations_singlefamily(property_details)
+            if unit_configs_w_rent is None or comparables is None or property_rent is None:
+                console.print("Failed to get rental estimations for single family property", style="bold red")
+                return
+            succeeded2 = add_rent_to_supabase_singlefamily(property_details["address1"], unit_configs_w_rent, comparables, property_rent, supabase_client)
+
+        if not succeeded2:
+            console.print("Something went wrong when adding rent comps", style="bold red")
+            return
+
+        console.print("Property and rent comps added to Supabase", style="bold green")
+    else:
+        console.print(f"{property_details['address1']} DOES NOT QUALIFY FOR PHASE 0", style="bold orange")
 
     return property_details

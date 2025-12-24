@@ -137,12 +137,14 @@ def safe_concat_columns(df, new_columns_dict):
     return pd.concat([df, pd.DataFrame(new_columns_dict, index=df.index)], axis=1)
 
 def apply_calculations_on_dataframe(df):
-    # Convert and clean existing columns
     cols = ["walk_score", "transit_score", "bike_score"]
     df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
     df[cols] = df[cols].fillna(0)
 
-    # Collect all new columns in a dictionary to add at once
+    def calculate_estimate(this_row):
+        factor = 0.0075 if this_row['units'] == 0 else 0.0105
+        return (this_row['purchase_price'] * (1 + ASSUMPTIONS['closing_costs_rate'])) * factor
+
     new_columns = {}
     new_columns["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
     new_columns["home_age"] = 2025 - df["built_in"].fillna(2025)
@@ -155,7 +157,7 @@ def apply_calculations_on_dataframe(df):
     new_columns["monthly_insurance"] = (df["purchase_price"] * ASSUMPTIONS['home_insurance_rate']) / 12
     new_columns["closing_costs"] = df["purchase_price"] * ASSUMPTIONS['closing_costs_rate']
     new_columns["cash_needed"] = new_columns["closing_costs"] + new_columns["down_payment"] - LOAN['upfront_discounts'] - (IA_FIRSTHOME_GRANT_AMT if (ASSUMPTIONS['ia_fhb_prog_upfront_option'] == "GRANT" and ASSUMPTIONS['using_ia_fhb_prog']) else 0)
-    new_columns["quick_monthly_rent_estimate"] = (df["purchase_price"] + new_columns["closing_costs"]) * 0.0075
+    new_columns["quick_monthly_rent_estimate"] = df.apply(lambda x: calculate_estimate(x), axis=1)
     new_columns['ammoritization_estimate'] = (new_columns['loan_amount'] * 0.017) / 12
     new_columns["total_rent"] = new_columns['quick_monthly_rent_estimate']
     new_columns["annual_rent"] = new_columns["total_rent"] * 12
@@ -166,16 +168,13 @@ def apply_calculations_on_dataframe(df):
     new_columns["monthly_cash_flow"] = new_columns["total_rent"] - new_columns["total_monthly_cost"] + new_columns['ammoritization_estimate']
     new_columns["annual_cash_flow"] = new_columns["monthly_cash_flow"] * 12
 
-    # Add all columns at once to avoid fragmentation
     df = safe_concat_columns(df, new_columns)
     return df
 
 def apply_investment_calculations(df):
-    # Calculate state tax rate once
     state_rate = get_state_tax_rate(ASSUMPTIONS['state_tax_code'])
     combined_tax_rate = FEDERAL_TAX_RATE + state_rate
 
-    # Stage 1: Add basic columns needed by df.apply() functions
     new_columns_stage1 = {}
     new_columns_stage1["mr_monthly_vacancy_costs"] = df["market_total_rent_estimate"] * ASSUMPTIONS['vacancy_rate']
     new_columns_stage1["mr_monthly_repair_costs"] = df["market_total_rent_estimate"] * ASSUMPTIONS['repair_savings_rate']
@@ -193,10 +192,8 @@ def apply_investment_calculations(df):
     new_columns_stage1["mr_annual_cash_flow_y1"] = new_columns_stage1["mr_monthly_cash_flow_y1"] * 12
     new_columns_stage1["mr_annual_cash_flow_y2"] = new_columns_stage1["mr_monthly_cash_flow_y2"] * 12
 
-    # Add stage 1 columns to dataframe so df.apply() functions can access them
     df = safe_concat_columns(df, new_columns_stage1)
 
-    # Stage 2: Add remaining columns including those using df.apply()
     new_columns_stage2 = {}
     new_columns_stage2["cap_rate_y1"] = df["mr_annual_NOI_y1"] / df["purchase_price"]
     new_columns_stage2["cap_rate_y2"] = df["mr_annual_NOI_y2"] / df["purchase_price"]
@@ -269,7 +266,6 @@ def apply_investment_calculations(df):
     new_columns_stage2["cash_flow_y2_downside_10pct"] = (df["market_total_rent_estimate"] * 0.9) - df["mr_total_monthly_cost"]
     new_columns_stage2["fha_self_sufficiency_ratio"] = (df["market_total_rent_estimate"] * 0.75) / new_columns_stage2["piti"]  # Uses Y2 rent (whole-property for SFH)
 
-    # Add stage 2 columns to avoid fragmentation
     df = safe_concat_columns(df, new_columns_stage2)
     return df
 
@@ -294,46 +290,58 @@ def reload_dataframe():
     df = apply_investment_calculations(df=df)
     console.print("[green]Property data reloaded successfully![/green]")
 
+def get_global_dataframe():
+    return df
+
 load_assumptions()
 load_loan(LAST_USED_LOAN)
 reload_dataframe()
 
-def get_all_phase1_qualifying_properties():
+PHASE0_CRITERIA = "square_ft >= 1000 & cash_needed <= 25000 & monthly_cash_flow >= -500"
+PHASE1_CRITERIA = (
+    "MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & beats_market "
+    "& mr_monthly_cash_flow_y1 >= -200 "
+    "& ((units == 0 & mr_monthly_cash_flow_y2 >= 50) | (units > 0 & mr_monthly_cash_flow_y2 >= 400))"
+)
+
+def get_all_phase0_qualifying_properties():
     """
-    This method filters all properties based on our criteria for what is a financially viable property
-    Current criteria using quick rent estimates:
+    This method filters all properties based on our criteria for financial viability using quick rent estimates:
       - status = 'active'
       - Cash needed must be below $25,000
-      - SFH/MF: Monthly Cashflow with cheapest unit not rented above -400 (house hacking)
-      - SFH/MF: Fully rented monthly cashflow above -200
+      - SFH/MF: Monthly total cashflow is above -200
       - Square Feet must be greater than or equal to 1000
-    Additional criteria when using market rent estimates:
+    """
+    return df.copy().query(PHASE0_CRITERIA).copy()
+
+def get_phase0_qualifiers_lacking_research():
+    """
+    This method finds all Phase 0 qualifying properties that lack market research required for future phases.
+    """
+    phase0_df = get_all_phase0_qualifying_properties()
+    return phase0_df.query("has_market_research == False")
+
+def get_all_phase1_qualifying_properties():
+    """
+    This method filters all properties based on our criteria for financial viability using market rent estimates
       - 1% rule (monthly gross rent must be 1% or more of purchase price)
       - 50% rule (operating expenses must be 50% or lower than gross rent)
       - Debt Service Coverage Ratio should be above 1.25
       - Net Present Value in 10 years must be positive, thus beating the stock market
+      - SFH/MF: Market Rent Monthly Cashflow Y1 must be above -400
+      - SFH: Market Rent Monthly Cashflow Y2 must be above -50
+      - MF: Market Rent Monthly Cashflow Y2 must be above 400
     """
-    criteria = (
-        "square_ft >= 1000 "
-        "& cash_needed <= 25000 "
-        "& ((units == 0 & monthly_cash_flow >= -200) | (units > 0 & monthly_cash_flow >= -200)) "
-        "& MGR_PP > 0.01 "
-        "& OpEx_Rent < 0.5 "
-        "& DSCR > 1.25 "
-        # "& monthly_cash_flow_y1 >= -400 "
-        "& beats_market "
-    )
-
-    base_df = df.copy()
-    filtered_df = base_df.query(criteria).copy()
+    base_df = get_all_phase0_qualifying_properties()
+    filtered_df = base_df.query(PHASE1_CRITERIA).copy()
     filtered_df["qualification_type"] = "current"
     qualifier_address1s = filtered_df["address1"].tolist()
     reduced_df = get_reduced_pp_df(0.10)
-    reduced_df = reduced_df.query(criteria).copy()
+    reduced_df = reduced_df.query(PHASE0_CRITERIA).query(PHASE1_CRITERIA).copy()
     reduced_df["qualification_type"] = "contingent"
     reduced_df = reduced_df[~reduced_df["address1"].isin(qualifier_address1s)].copy()
     creative_df = get_additional_room_rental_df()
-    creative_df = creative_df.query(criteria).copy()
+    creative_df = creative_df.query(PHASE0_CRITERIA).query(PHASE1_CRITERIA).copy()
     creative_df["qualification_type"] = "creative"
     return filtered_df, reduced_df, creative_df 
 
@@ -361,7 +369,7 @@ def get_all_phase2_qualifiers():
     This method filters phase 1 qualifiers based property condition, rentability, and affordability 
     Current criteria:
       - property must qualify for phase 1 research list
-      - property must not have any 'deal breakers'
+      - property must not have any 'dealbreakers'
       - fixed monthly costs to after tax income ratio must be greater than 0.45
       - Neighborhood Letter Grade must be C or higher
     """
@@ -410,6 +418,7 @@ def get_reduced_pp_df(reduction_factor):
     dataframe["original_price"] = dataframe["purchase_price"]
     dataframe["purchase_price"] = dataframe["purchase_price"] * (1 - reduction_factor) # new purchase price
     dataframe = apply_calculations_on_dataframe(df=dataframe)
+    dataframe = apply_investment_calculations(df=dataframe)
     return dataframe
 
 def analyze_property(property_id):
@@ -803,6 +812,7 @@ using_application = True
 def run_all_properties_options():
     using_all_properties = True
     choices = [
+        "Phase 0 - Qualifiers",
         "Phase 1 - Qualifiers",
         "Phase 1 - Total Rent Differences",
         "Phase 1.5 - Research List",
@@ -824,11 +834,14 @@ def run_all_properties_options():
             using_all_properties = False
         elif option == "All properties - Active":
             dataframe = df.query("status == 'active'")
-            display_all_properties(
-                properties_df=dataframe, df=df, title="All active properties using FHA", show_prop_type=True, console=console
-            )
+            display_all_properties(properties_df=dataframe, df=df, title="All active properties using FHA", show_prop_type=True, console=console)
+        elif option == "Phase 0 - Qualifiers":
+            phase0_df = get_all_phase0_qualifying_properties()
+            display_all_properties(properties_df=phase0_df, df=df, title="Phase 0 Qualifiers", show_prop_type=True, console=console, show_has_mr=True)
         elif option == "Phase 1 - Qualifiers":
-            display_all_phase1_qualifying_properties(console, df, get_all_phase1_qualifying_properties)
+            current, contingent, creative = get_all_phase1_qualifying_properties()
+            phase0_df = get_phase0_qualifiers_lacking_research()
+            display_all_phase1_qualifying_properties(console, df, current, contingent, creative, phase0_df)
         elif option == "Phase 1.5 - Research List":
             display_phase1_research_list(console, get_phase1_research_list, get_combined_phase1_qualifiers)
         elif option == "Phase 1 - Total Rent Differences":
@@ -947,11 +960,14 @@ if __name__ == "__main__":
         ).execute()
         analyze_property(property_id)
     elif option == "Add new property":
-      property_details = run_add_property(supabase_client=supabase)
-      handle_scrape_neighborhood_from_findneighborhoods(property_details['address1'], supabase, console, scraper, ask_user=True)
-      handle_rent_research_after_add(property_details['address1'], supabase, console, ask_user=True)
-      reload_dataframe()
-      display_new_property_qualification(console, property_details['address1'], get_all_phase1_qualifying_properties)
+      property_details = run_add_property(supabase_client=supabase, reload_df_callback=reload_dataframe)
+      if property_details is None:
+        console.print("[red]Property addition failed, skipping post-processing[/red]")
+      else:
+        handle_scrape_neighborhood_from_findneighborhoods(property_details['address1'], supabase, console, scraper, ask_user=True)
+        handle_rent_research_after_add(property_details['address1'], supabase, console, ask_user=True)
+        reload_dataframe()
+        display_new_property_qualification(console, property_details['address1'], get_all_phase1_qualifying_properties)
     elif option == "Scripts":
       run_scripts_options()
     elif option == "Loans":

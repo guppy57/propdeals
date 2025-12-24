@@ -1,7 +1,6 @@
 from rich.table import Table
 from rich.panel import Panel
 import pandas as pd
-import questionary
 from helpers import (
     calculate_additional_room_rent,
     calculate_quintile_colors_for_metrics,
@@ -19,6 +18,7 @@ def display_all_properties(
     show_status=False,
     show_min_rent_data=False,
     show_prop_type=False,
+    show_has_mr=False,
     sort_by="units",
 ):
     dataframe = df if properties_df is None else properties_df
@@ -67,6 +67,9 @@ def display_all_properties(
     table.add_column("OpEx_Rent", justify="right")
     table.add_column("DSCR", justify="right")
     table.add_column("NPV10", justify="right")
+
+    if show_has_mr:
+        table.add_column("Has MR", justify="center", style="bold white")
 
     if show_status:
         table.add_column("Status", justify="right", style="bold white")
@@ -126,6 +129,10 @@ def display_all_properties(
                 f"{format_currency(row["npv_10yr"])}"
             ]
         )
+
+        if show_has_mr:
+            color = "green" if row['has_market_research'] else "red"
+            row_args.append(f"[{color}]{"YES" if row['has_market_research'] else "NO"}[/{color}]")
 
         if show_status:
             row_args.append(row["status"])
@@ -208,10 +215,12 @@ def display_new_property_qualification(console, address1, get_all_phase1_qualify
         title="Phase 1 Qualification Results"
     ))
 
+def display_phase0_qualifiers_lacking_research(console, dataframe):
+    # should create a table with the following columns: address1, purchase_price, monthly_cash_flow, mr_monthly_cash_flow_y1, mr_monthly_cash_flow_y2
+    # sincve the mr cash flows are missing since research is missing, we should replace their values with "missing" - we don't even need to pull in the actual column values because they are missing
+    pass
 
-def display_all_phase1_qualifying_properties(console, df, get_all_phase1_qualifying_properties):
-    current, contingent, creative = get_all_phase1_qualifying_properties()
-
+def display_all_phase1_qualifying_properties(console, df, current, contingent, creative, phase0_df):
     display_all_properties(
         properties_df=current, df=df, title="Phase 1 Criteria Qualifiers - Current Prices", console=console,
     )
@@ -230,6 +239,8 @@ def display_all_phase1_qualifying_properties(console, df, get_all_phase1_qualify
       show_min_rent_data=True,
       console=console
     )
+
+    display_phase0_qualifiers_lacking_research(console, phase0_df)
 
 
 def display_all_phase2_qualifying_properties(console, df, get_all_phase2_properties):
@@ -950,4 +961,25 @@ def display_property_value_comparison(console, properties_data):
         )
 
     console.print("\n")
+    console.print(table)
+
+
+def display_property_details(console, property_details):
+    """Display property details in a panel for confirmation"""
+    text = ""
+    for key in property_details:
+        text += f"{key}: {property_details[key]}\n"
+    console.print(
+        Panel(text, title="Property Details", title_align="center", padding=1)
+    )
+
+
+def display_unit_configs(console, rent_comps):
+    """Display unit configurations in a table for confirmation"""
+    table = Table(title="Rent Comparables")
+    table.add_column("Unit #")
+    table.add_column("Configuration", no_wrap=True)
+    for comp in rent_comps:
+        configuration = f"{comp["beds"]}-beds {comp["baths"]}-baths"
+        table.add_row(str(comp["unit_num"]), configuration)
     console.print(table)
