@@ -960,7 +960,13 @@ if __name__ == "__main__":
         ).execute()
         analyze_property(property_id)
     elif option == "Add new property":
-      property_details = run_add_property(supabase_client=supabase, reload_df_callback=reload_dataframe)
+      property_details = run_add_property(
+          supabase_client=supabase,
+          reload_df_callback=reload_dataframe,
+          get_all_phase0_qualifying_properties=get_all_phase0_qualifying_properties,
+          get_reduced_pp_df=get_reduced_pp_df,
+          phase0_criteria=PHASE0_CRITERIA
+      )
       if property_details is None:
         console.print("[red]Property addition failed, skipping post-processing[/red]")
       else:

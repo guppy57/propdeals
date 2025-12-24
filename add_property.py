@@ -7,10 +7,6 @@ import questionary
 import requests
 from dotenv import load_dotenv
 from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-
-from run import get_all_phase0_qualifying_properties, get_global_dataframe, get_reduced_pp_df, PHASE0_CRITERIA
 from display import display_property_details, display_unit_configs
 
 load_dotenv()
@@ -789,7 +785,13 @@ def add_rent_to_supabase_singlefamily(address1, unit_configs_w_rent, property_co
         save_property_comps_to_db(property_comparables, address1, supabase)
     return True
 
-def run_add_property(supabase_client, reload_df_callback):
+def run_add_property(
+    supabase_client,
+    reload_df_callback,
+    get_all_phase0_qualifying_properties,
+    get_reduced_pp_df,
+    phase0_criteria
+):
     console.print("Let's add a new property to analyze", style="bold red")
     proceed = False
     property_details = {}
@@ -839,7 +841,7 @@ def run_add_property(supabase_client, reload_df_callback):
     phase0_df = get_all_phase0_qualifying_properties()
     is_valid_current = (phase0_df['address1'] == property_details["address1"]).any()
     reduced_df = get_reduced_pp_df(0.10)
-    filtered_df = reduced_df.query(PHASE0_CRITERIA).copy()
+    filtered_df = reduced_df.query(phase0_criteria).copy()
     is_valid_contingent = (filtered_df['address1'] == property_details["address1"]).any()
 
     if is_valid_contingent or is_valid_current:

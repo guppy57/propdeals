@@ -216,9 +216,41 @@ def display_new_property_qualification(console, address1, get_all_phase1_qualify
     ))
 
 def display_phase0_qualifiers_lacking_research(console, dataframe):
-    # should create a table with the following columns: address1, purchase_price, monthly_cash_flow, mr_monthly_cash_flow_y1, mr_monthly_cash_flow_y2
-    # sincve the mr cash flows are missing since research is missing, we should replace their values with "missing" - we don't even need to pull in the actual column values because they are missing
-    pass
+    """Display Phase 0 qualifying properties that lack market research data."""
+    # Handle empty dataframe case
+    if len(dataframe) == 0:
+        console.print("[dim]All Phase 0 properties have market research![/dim]")
+        return
+
+    # Create table
+    table = Table(
+        title="Phase 0 Qualifiers - Need Market Research",
+        show_header=True,
+        header_style="bold magenta"
+    )
+
+    # Add columns
+    table.add_column("Address", style="cyan", no_wrap=True)
+    table.add_column("Purchase Price", justify="right")
+    table.add_column("Monthly CF", justify="right")
+    table.add_column("MR CF Y1", justify="right")
+    table.add_column("MR CF Y2", justify="right")
+
+    # Add rows
+    for _, row in dataframe.iterrows():
+        # Determine cash flow color
+        cf_style = "red" if row["monthly_cash_flow"] < 0 else "green"
+
+        # Build row with formatted values
+        table.add_row(
+            str(row["address1"]),
+            format_currency(row["purchase_price"]),
+            f"[{cf_style}]{format_currency(row['monthly_cash_flow'])}[/{cf_style}]",
+            "[yellow]Missing[/yellow]",
+            "[yellow]Missing[/yellow]"
+        )
+
+    console.print(table)
 
 def display_all_phase1_qualifying_properties(console, df, current, contingent, creative, phase0_df):
     display_all_properties(
