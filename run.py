@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from InquirerPy import inquirer
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 from supabase import Client, create_client
 
 from add_property import run_add_property
@@ -35,14 +34,14 @@ from display import (
     display_phase1_total_rent_differences,
     display_property_metrics,
     display_y2_calculations,
+    display_property_overview_panel,
+    display_property_rent_estimates_table,
+    display_property_investment_metrics_table,
+    display_investment_requirements_panel,
 )
 from helpers import (
     calculate_monthly_take_home,
     calculate_mortgage,
-    express_percent_as_months_and_days,
-    format_currency,
-    format_number,
-    format_percentage,
     get_expected_gains,
     calculate_payback_period,
     get_state_tax_rate,
@@ -424,297 +423,19 @@ def get_reduced_pp_df(reduction_factor):
 def analyze_property(property_id):
     """Display detailed analysis for a single property"""
     row = df[df['address1'] == property_id].iloc[0]
-    
-    table = Table(title=f"Property Details: {property_id}", show_header=True, header_style="bold cyan")
-    table.add_column("Metric", style="yellow", no_wrap=True)
-    table.add_column("Quick Estimate", justify="right", style="cyan")
-    table.add_column("MR Year 1 (Live-in)", justify="right", style="green")
-    table.add_column("MR Year 2 (All Rent)", justify="right", style="blue")
-    table.add_column("", style="dim white", no_wrap=True)  # Separator/Investment Metric column
-    table.add_column("5Y", justify="right", style="magenta")
-    table.add_column("10Y", justify="right", style="bright_magenta")
-    table.add_column("20Y", justify="right", style="bright_cyan")
-    
-    units_value = int(row['units'])
-    if units_value == 0:
-        property_type_display = "Type: Single Family (Room Rental)"
-    elif units_value == 2:
-        property_type_display = "Type: Duplex"
-    elif units_value == 3:
-        property_type_display = "Type: Triplex"
-    elif units_value == 4:
-        property_type_display = "Type: Fourplex"
-    else:
-        property_type_display = f"Units: {units_value}"
-
-    console.print(Panel(f"[bold cyan]Property Overview[/bold cyan]\n"
-                      f"Address: {row['full_address']}\n"
-                      f"Purchase Price: {format_currency(row['purchase_price'])}\n"
-                      f"Bedrooms: {int(row['beds'])} | Bathrooms: {int(row['baths'])} | Sq Ft: {format_number(row['square_ft'])}\n"
-                      f"Built: {int(row['built_in']) if pd.notna(row['built_in']) else 'N/A'} (Age: {int(row['home_age']) if pd.notna(row['home_age']) else 'N/A'} years)\n"
-                      f"{property_type_display}\n"
-                      f"Cost per Sq Ft: {format_currency(row['cost_per_sqrft'])}\n"
-                      f"Neighborhood: {row["neighborhood"]} (rated: {row["neighborhood_letter_grade"]})",
-                      title="Basic Info"))
-
     property_rents = rents[rents['address1'] == property_id]
+    is_single_family = int(row['units']) == 0
 
     if property_rents.empty:
         console.print("[red]ERROR: No rent estimates found for this property![/red]")
         console.print("[yellow]This property may need rent estimates to be generated.[/yellow]")
         return
 
-    your_unit_index = property_rents['rent_estimate'].idxmin()
+    display_property_overview_panel(console, row)
+    display_property_rent_estimates_table(console, property_rents, is_single_family)
+    display_property_investment_metrics_table(console, row, is_single_family)
+    display_investment_requirements_panel(console, row, ASSUMPTIONS, LOAN, IA_FIRSTHOME_GRANT_AMT)
 
-    # Use contextual labels for single family vs multi-family
-    is_single_family = units_value == 0
-    table_title = "Room Rent Estimates" if is_single_family else "Unit Rent Estimates"
-    unit_label = "Room" if is_single_family else "Unit"
-    your_unit_label = "[bold red]Your Room[/bold red]" if is_single_family else "[bold red]Your Unit[/bold red]"
-
-    rent_table = Table(title=table_title, show_header=True, header_style="bold green")
-    rent_table.add_column(unit_label, style="cyan", justify="center")
-    rent_table.add_column("Configuration", style="yellow")
-    rent_table.add_column("Monthly Rent", justify="right", style="green")
-    rent_table.add_column("Status", style="magenta")
-
-    total_monthly_rent = 0
-    for idx, rent_row in property_rents.iterrows():
-        is_your_unit = idx == your_unit_index
-        unit_config = f"{int(rent_row['beds'])}-bed {int(rent_row['baths'])}-bath"
-        status = your_unit_label if is_your_unit else "Rental"
-        rent_style = "bold red" if is_your_unit else "green"
-        
-        rent_table.add_row(
-            str(int(rent_row['unit_num'])),
-            unit_config,
-            f"[{rent_style}]{format_currency(rent_row['rent_estimate'])}[/{rent_style}]",
-            status
-        )
-        total_monthly_rent += rent_row['rent_estimate']
-    
-    rent_table.add_row(
-        "[bold]Total[/bold]",
-        "",
-        f"[bold blue]{format_currency(total_monthly_rent)}[/bold blue]",
-        ""
-    )
-    
-    console.print(rent_table)
-    
-    if is_single_family:
-        # For single family homes, update table title to clarify the comparison
-        table.title = f"Investment Metrics: {property_id}"
-        table.columns[1].header = "Quick Estimate"
-        table.columns[2].header = "MR Year 1 (House Hacking)"
-        table.columns[3].header = "MR Year 2 (Full Rental)"
-
-    # Add cost breakdown rows at the top (with investment projections on the right)
-    table.add_row("Mortgage Payment",
-                  format_currency(row['monthly_mortgage']),
-                  format_currency(row['monthly_mortgage']),
-                  format_currency(row['monthly_mortgage']),
-                  "Investment Gain",
-                  format_currency(row['5y_forecast']),
-                  format_currency(row['10y_forecast']),
-                  format_currency(row['20y_forecast']))
-    table.add_row("MIP (Insurance)",
-                  format_currency(row['monthly_mip']),
-                  format_currency(row['monthly_mip']),
-                  format_currency(row['monthly_mip']),
-                  "Future Value",
-                  format_currency(row['future_value_5yr']),
-                  format_currency(row['future_value_10yr']),
-                  format_currency(row['future_value_20yr']))
-    table.add_row("Property Taxes",
-                  format_currency(row['monthly_taxes']),
-                  format_currency(row['monthly_taxes']),
-                  format_currency(row['monthly_taxes']),
-                  "Net Proceeds",
-                  format_currency(row['net_proceeds_5yr']),
-                  format_currency(row['net_proceeds_10yr']),
-                  format_currency(row['net_proceeds_20yr']))
-    table.add_row("Home Insurance",
-                  format_currency(row['monthly_insurance']),
-                  format_currency(row['monthly_insurance']),
-                  format_currency(row['monthly_insurance']),
-                  "Equity Multiple",
-                  format_number(row['equity_multiple_5yr']),
-                  format_number(row['equity_multiple_10yr']),
-                  format_number(row['equity_multiple_20yr']))
-    table.add_row("Vacancy Reserve",
-                  format_currency(row['monthly_vacancy_costs']),
-                  format_currency(row['mr_monthly_vacancy_costs']),
-                  format_currency(row['mr_monthly_vacancy_costs']),
-                  "Avg Annual Return %",
-                  format_percentage(row['avg_annual_return_5yr'] / 100),
-                  format_percentage(row['avg_annual_return_10yr'] / 100),
-                  format_percentage(row['avg_annual_return_20yr'] / 100))
-    table.add_row("Repair Reserve",
-                  format_currency(row['monthly_repair_costs']),
-                  format_currency(row['mr_monthly_repair_costs']),
-                  format_currency(row['mr_monthly_repair_costs']),
-                  "IRR",
-                  format_percentage(row['irr_5yr']),
-                  format_percentage(row['irr_10yr']),
-                  format_percentage(row['irr_20yr']))
-    table.add_row("[bold]Total Monthly Cost[/bold]",
-                  f"[bold red]{format_currency(row['total_monthly_cost'])}[/bold red]",
-                  f"[bold red]{format_currency(row['mr_total_monthly_cost'])}[/bold red]",
-                  f"[bold red]{format_currency(row['mr_total_monthly_cost'])}[/bold red]",
-                  "NPV",
-                  format_currency(row['npv_5yr']),
-                  format_currency(row['npv_10yr']),
-                  format_currency(row['npv_20yr']))
-
-    # Add common comparison rows
-    table.add_row("Annual Rent",
-                  format_currency(row['annual_rent']),
-                  format_currency(row['mr_annual_rent_y1']),
-                  format_currency(row['mr_annual_rent_y2']),
-                  "Fair Value",
-                  format_currency(row['fair_value_5yr']),
-                  format_currency(row['fair_value_10yr']),
-                  format_currency(row['fair_value_20yr']))
-
-    table.add_row("Monthly Rent",
-                  format_currency(row['total_rent']),
-                  format_currency(row['mr_net_rent_y1']) + " (net)" if not is_single_family else format_currency(row['mr_net_rent_y1']),
-                  format_currency(row['market_total_rent_estimate']),
-                  "Value Gap %",
-                  format_percentage(row['value_gap_pct_5yr'] / 100),
-                  format_percentage(row['value_gap_pct_10yr'] / 100),
-                  format_percentage(row['value_gap_pct_20yr'] / 100))
-
-    table.add_row("Operating Expenses",
-                  format_currency(row['operating_expenses']),
-                  format_currency(row['mr_operating_expenses']),
-                  format_currency(row['mr_operating_expenses']),
-                  "", "", "", "")
-    table.add_row("[bold]Monthly Cash Flow[/bold]",
-                  f"[bold {'red' if row['monthly_cash_flow'] < 0 else 'green'}]{format_currency(row['monthly_cash_flow'])}[/]",
-                  f"[bold {'red' if row['mr_monthly_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['mr_monthly_cash_flow_y1'])}[/]",
-                  f"[bold {'red' if row['mr_monthly_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['mr_monthly_cash_flow_y2'])}[/]",
-                  "", "", "", "")
-    table.add_row("[bold]Annual Cash Flow[/bold]",
-                  f"[bold {'red' if row['annual_cash_flow'] < 0 else 'green'}]{format_currency(row['annual_cash_flow'])}[/]",
-                  f"[bold {'red' if row['mr_annual_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['mr_annual_cash_flow_y1'])}[/]",
-                  f"[bold {'red' if row['mr_annual_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['mr_annual_cash_flow_y2'])}[/]",
-                  "", "", "", "")
-    table.add_row("Monthly NOI",
-                  "",
-                  format_currency(row['mr_monthly_NOI_y1']),
-                  format_currency(row['mr_monthly_NOI_y2']),
-                  "", "", "", "")
-    table.add_row("Annual NOI",
-                  "",
-                  format_currency(row['mr_annual_NOI_y1']),
-                  format_currency(row['mr_annual_NOI_y2']),
-                  "", "", "", "")
-    table.add_row("After-Tax Cash Flow",
-                  "",
-                  format_currency(row['after_tax_cash_flow_y1']),
-                  format_currency(row['after_tax_cash_flow_y2']),
-                  "", "", "", "")
-    table.add_row("Cap Rate",
-                  "",
-                  format_percentage(row['cap_rate_y1']),
-                  format_percentage(row['cap_rate_y2']),
-                  "", "", "", "")
-    table.add_row("Cash on Cash Return",
-                  "",
-                  format_percentage(row['CoC_y1']),
-                  format_percentage(row['CoC_y2']),
-                  "", "", "", "")
-    table.add_row("Gross Rent Multiplier",
-                  "",
-                  format_number(row['GRM_y1']),
-                  format_number(row['GRM_y2']),
-                  "", "", "", "")
-
-    downside_y1_style = "green" if row['cash_flow_y1_downside_10pct'] > 0 else "red"
-    downside_y2_style = "green" if row['cash_flow_y2_downside_10pct'] > 0 else "red"
-    table.add_row("Cash Flow (10% Rent Drop)",
-                  "",
-                  f"[{downside_y1_style}]{format_currency(row['cash_flow_y1_downside_10pct'])}[/{downside_y1_style}]",
-                  f"[{downside_y2_style}]{format_currency(row['cash_flow_y2_downside_10pct'])}[/{downside_y2_style}]",
-                  "", "", "", "")
-
-    # Industry-standard metrics (primarily Y2-based for SFH)
-    mgr_pp_style = "green" if row['MGR_PP'] >= 0.01 else "red"
-    opex_rent_style = "green" if 0.45 <= row['OpEx_Rent'] <= 0.55 else ("yellow" if 0.35 <= row['OpEx_Rent'] <= 0.65 else "red")
-    dscr_style = "green" if row['DSCR'] >= 1.25 else "red"
-    fha_style = "green" if row["fha_self_sufficiency_ratio"] >= 1 else "red"
-
-    if is_single_family:
-        # For SFH, show OER and break-even for both years
-        oer_quick = row['operating_expenses'] / row['total_rent'] if row['total_rent'] > 0 else 0
-        oer_y1 = row['mr_operating_expenses'] / row['total_rent'] if row['total_rent'] > 0 else 0
-        break_even_quick = row['total_monthly_cost'] / row['total_rent'] if row['total_rent'] > 0 else 0
-        break_even_y1 = row['mr_total_monthly_cost'] / row['total_rent'] if row['total_rent'] > 0 else 0
-        oer_quick_style = "green" if 0.45 <= oer_quick <= 0.55 else ("yellow" if 0.35 <= oer_quick <= 0.65 else "red")
-        oer_y1_style = "green" if 0.45 <= oer_y1 <= 0.55 else ("yellow" if 0.35 <= oer_y1 <= 0.65 else "red")
-
-        table.add_row("Operating Expense Ratio",
-                      f"[{oer_quick_style}]{format_percentage(oer_quick)}[/{oer_quick_style}]",
-                      f"[{oer_y1_style}]{format_percentage(oer_y1)}[/{oer_y1_style}]",
-                      f"[{opex_rent_style}]{format_percentage(row['oer'])}[/{opex_rent_style}]",
-                      "", "", "", "")
-        table.add_row("Break-Even Occupancy",
-                      format_percentage(break_even_quick),
-                      format_percentage(break_even_y1),
-                      format_percentage(row['break_even_occupancy']),
-                      "", "", "", "")
-    else:
-        table.add_row("Operating Expense Ratio","","",f"[{opex_rent_style}]{format_percentage(row['oer'])}[/{opex_rent_style}]","","","","")
-        table.add_row("Break-Even Occupancy","","",format_percentage(row['break_even_occupancy']),"","","","")
-
-    table.add_row("1% Rule (MGR/PP)","","",f"[{mgr_pp_style}]{format_percentage(row['MGR_PP'])}[/{mgr_pp_style}]","","","","")
-    table.add_row("50% Rule (OpEx/Rent)","","",f"[{opex_rent_style}]{format_percentage(row['OpEx_Rent'])}[/{opex_rent_style}]","","","","")
-    table.add_row("DSCR (Rent/Mortgage)","","",f"[{dscr_style}]{format_number(row['DSCR'])}[/{dscr_style}]","","","","")
-    table.add_row("FHA Self Sufficiency Ratio","","",f"[{fha_style}]{format_percentage(row['fha_self_sufficiency_ratio'])}[/{fha_style}]","","","","")
-    table.add_row("Rent Per Sqft","","",format_currency(row['rent_per_sqft']),"","","","")
-    table.add_row("Break-Even Vacancy","","",express_percent_as_months_and_days(row["break_even_vacancy"]),"","","","")
-    table.add_row("Effective Gross Income","","",format_currency(row['egi']),"","","","")
-    table.add_row("Debt Yield","","",format_percentage(row['debt_yield']),"","","","")
-    table.add_row("LTV Ratio","","",format_percentage(row['ltv_ratio']),"","","","")
-    price_per_label = "Price Per Bedroom" if is_single_family else "Price Per Door"
-    table.add_row(price_per_label,"","",format_currency(row['price_per_door']),"","","","")
-    table.add_row("Monthly Depreciation Deduction","","",format_currency(row['monthly_depreciation']),"","","","")
-    table.add_row("Monthly Tax Savings","","",format_currency(row['tax_savings_monthly']),"","","","")
-    table.add_row("Return on Equity (ROE) Y2","","",format_percentage(row['roe_y2']),"","","","")
-    table.add_row("Leverage Benefit","","",format_percentage(row['leverage_benefit']),"","","","")
-    payback_display = f"{row['payback_period_years']:.1f} years" if row['payback_period_years'] != float('inf') else "Never"
-    table.add_row("Payback Period","","",payback_display,"","","","")
-    console.print(table)
-
-    grant = format_currency(IA_FIRSTHOME_GRANT_AMT) if ASSUMPTIONS['ia_fhb_prog_upfront_option'] == "GRANT" and ASSUMPTIONS['using_ia_fhb_prog'] else "[dim]Not using grant option for Iowa First Home[/dim]"
-
-    investment_summary = (
-        f"[bold green]Investment Summary[/bold green]\n"
-        f"Down Payment: {format_currency(row['down_payment'])}\n"
-        f"Closing Costs: {format_currency(row['closing_costs'])}\n"
-        f"Lender Discounts: {format_currency(LOAN['upfront_discounts'])}\n"
-        f"IA FirstHome Grant: {grant}\n" 
-        f"[bold]Total Cash Needed: {format_currency(row['cash_needed'])}[/bold]\n"
-        f"Loan Amount: {format_currency(row['loan_amount'])}\n"
-        f"[bold blue]Purchase Price: {format_currency(row['purchase_price'])}[/bold blue]"
-    )
-
-    if ASSUMPTIONS['using_ia_fhb_prog'] and ASSUMPTIONS['ia_fhb_prog_upfront_option'] == "LOAN" and row["units"] == 0:
-        investment_summary += (
-            f"\n\n[bold yellow]Iowa First-Time Homebuyer Program:[/bold yellow]\n"
-            f"5% Forgivable Loan: {format_currency(row['5_pct_loan'])}\n"
-            f"Primary Mortgage: {format_currency(row['loan_amount'])}\n"
-            f"Total Financing: {format_currency(row['loan_amount'] + row['5_pct_loan'])}\n"
-            f"[dim](5% loan due at sale or refinance)[/dim]"
-        )
-
-    console.print(Panel(investment_summary, title="Investment Requirements"))
-
-    console.print("\n")
-
-    # Build menu choices based on property type
     research_menu_choices = [
         "Edit property assessment",
         "View risk assessment report",
