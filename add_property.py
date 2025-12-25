@@ -729,12 +729,14 @@ def save_property_comps_to_db(comps, address1, supabase):
 def add_rent_to_supabase(rent_comps, comparables, supabase) -> bool:
     new_ids = []
 
-    for rent_comp in rent_comps:
+    for i, rent_comp in enumerate(rent_comps):
         try:
+            console.print(f"  Upserting rent estimate for unit {i+1}/{len(rent_comps)}...", style="dim")
             query = supabase.table("rent_estimates").upsert(rent_comp, on_conflict="address1,unit_num")
             response = query.execute()
             if hasattr(response, "data"):
                 print(f"Response data: {response.data}")
+                console.print(f"  ✓ Unit {i+1} rent estimate saved", style="green")
                 new_ids.append(response.data[0]["id"])
             else:
                 print("Response has no 'data' attribute")
@@ -746,6 +748,7 @@ def add_rent_to_supabase(rent_comps, comparables, supabase) -> bool:
 
     for i, unit_comparables in enumerate(comparables):
         if unit_comparables and i < len(new_ids):  # Only save if there are comparables
+            console.print(f"  Saving {len(unit_comparables)} comparable rents for unit {i+1}...", style="dim")
             rent_estimate_id = new_ids[i]
             save_comps_to_db(unit_comparables, rent_estimate_id, supabase)
         elif unit_comparables and i >= len(new_ids):
@@ -755,10 +758,12 @@ def add_rent_to_supabase(rent_comps, comparables, supabase) -> bool:
 
 def add_rent_to_supabase_singlefamily(address1, unit_configs_w_rent, property_comparables, property_rent, supabase) -> bool:
     try:
+        console.print("  Updating property rent data...", style="dim")
         query = supabase.table("properties").update(property_rent).eq("address1", address1)
         response = query.execute()
         if hasattr(response, "data"):
             print(f"Response data: {response.data}")
+            console.print("  ✓ Property rent data updated", style="green")
         else:
             print("Response has no 'data' attribute (update call)")
             return False
@@ -767,12 +772,14 @@ def add_rent_to_supabase_singlefamily(address1, unit_configs_w_rent, property_co
         print(f"Exception type: {type(e)}")
         return False
 
-    for unit_config in unit_configs_w_rent:
+    for i, unit_config in enumerate(unit_configs_w_rent):
         try:
+            console.print(f"  Upserting rent estimate for unit {i+1}/{len(unit_configs_w_rent)}...", style="dim")
             query = supabase.table("rent_estimates").upsert(unit_config, on_conflict="address1,unit_num")
             response = query.execute()
             if hasattr(response, "data"):
                 print(f"Response data: {response.data}")
+                console.print(f"  ✓ Unit {i+1} rent estimate saved", style="green")
             else:
                 print("Response has no 'data' attribute (insert call)")
                 return False
@@ -782,6 +789,7 @@ def add_rent_to_supabase_singlefamily(address1, unit_configs_w_rent, property_co
             return False
 
     if property_comparables:
+        console.print(f"  Saving {len(property_comparables)} comparable rents...", style="dim")
         save_property_comps_to_db(property_comparables, address1, supabase)
     return True
 
@@ -803,6 +811,7 @@ def run_add_property(
         if not proceed:
             console.print("Add the property details again", style="bold blue")
 
+    console.print("Adding property details to Supabase...", style="bold cyan")
     succeeded = add_property_to_supabase(property_details, supabase_client)
 
     if not succeeded:
@@ -828,6 +837,7 @@ def run_add_property(
         if not proceed2:
             console.print("Add the rent comparables again", style="bold blue")
 
+    console.print("Adding unit configurations for Phase 0 qualification check...", style="bold cyan")
     if property_details["units"] != 0:
         succeeded_1 = add_rent_to_supabase(unit_configs, [], supabase_client)
     else:
@@ -837,6 +847,8 @@ def run_add_property(
         console.print("Adding basic unit configurations and rent comparison for Phase 0 check failed", style="bold red")
         return None
 
+    console.print("✓ Unit configurations added", style="green")
+    console.print("Evaluating Phase 0 qualification criteria...", style="bold cyan")
     reload_df_callback()
     phase0_df = get_all_phase0_qualifying_properties()
     is_valid_current = (phase0_df['address1'] == property_details["address1"]).any()
@@ -848,16 +860,22 @@ def run_add_property(
         qual_type = "CONTINGENT" if (is_valid_contingent and not is_valid_current) else "CURRENT"
         console.print(f"{property_details['address1']} qualifies for Phase 0: {qual_type}", style="bold green")
         if property_details["units"] != 0:
+            console.print("Fetching rental estimations from RentCast API...", style="bold cyan")
             rent_comps, comparables = get_rental_estimations_multifamily(property_details, unit_configs)
             if rent_comps is None or comparables is None:
                 console.print("Failed to get rental estimations for multifamily property", style="bold red")
                 return
+            console.print("✓ Rental estimations retrieved successfully", style="green")
+            console.print("Updating database with rental estimations and comparables...", style="bold cyan")
             succeeded2 = add_rent_to_supabase(rent_comps, comparables, supabase_client)
         else:
+            console.print("Fetching rental estimations from RentCast API...", style="bold cyan")
             unit_configs_w_rent, comparables, property_rent = get_rental_estimations_singlefamily(property_details)
             if unit_configs_w_rent is None or comparables is None or property_rent is None:
                 console.print("Failed to get rental estimations for single family property", style="bold red")
                 return
+            console.print("✓ Rental estimations retrieved successfully", style="green")
+            console.print("Updating database with rental estimations and comparables...", style="bold cyan")
             succeeded2 = add_rent_to_supabase_singlefamily(property_details["address1"], unit_configs_w_rent, comparables, property_rent, supabase_client)
 
         if not succeeded2:
