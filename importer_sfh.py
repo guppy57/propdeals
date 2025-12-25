@@ -24,7 +24,10 @@ from run import (
     load_assumptions,
     load_loan,
     reload_dataframe,
-    get_combined_phase1_qualifiers
+    get_combined_phase1_qualifiers,
+    get_all_phase0_qualifying_properties,
+    get_reduced_pp_df,
+    PHASE0_CRITERIA
 )
 
 # Initialize
@@ -128,6 +131,68 @@ def csv_row_to_property_details(row: pd.Series) -> Dict[str, Any]:
     return property_details
 
 
+def create_placeholder_unit_config_singlefamily(address1: str, beds: int, baths: float) -> Dict[str, Any]:
+    """
+    Create a single placeholder unit configuration for single-family homes.
+
+    Args:
+        address1: Property address (street address)
+        beds: Number of bedrooms
+        baths: Number of bathrooms
+
+    Returns:
+        Dictionary with placeholder unit configuration (rent estimates set to 0)
+    """
+    return {
+        "address1": address1,
+        "unit_num": 1,
+        "beds": beds,
+        "baths": baths,
+        "rent_estimate": 0,
+        "rent_estimate_low": 0,
+        "rent_estimate_high": 0,
+        "estimated_sqrft": 0
+    }
+
+
+def check_phase0_qualification(address1: str, console) -> tuple:
+    """
+    Check if a property qualifies for Phase 0 at current price or with 10% reduction.
+
+    Args:
+        address1: Property address to check
+        console: Rich console for output
+
+    Returns:
+        Tuple of (is_qualified: bool, qualification_type: str)
+        qualification_type can be "CURRENT", "CONTINGENT", or "NONE"
+    """
+    try:
+        # Reload dataframe to calculate Phase 0 metrics
+        reload_dataframe()
+
+        # Check if property qualifies at current price
+        phase0_df = get_all_phase0_qualifying_properties()
+        is_current = (phase0_df["address1"] == address1).any()
+
+        if is_current:
+            return (True, "CURRENT")
+
+        # Check if property qualifies with 10% price reduction
+        reduced_df = get_reduced_pp_df(0.10)
+        filtered_df = reduced_df.query(PHASE0_CRITERIA).copy()
+        is_contingent = (filtered_df["address1"] == address1).any()
+
+        if is_contingent:
+            return (True, "CONTINGENT")
+
+        return (False, "NONE")
+
+    except Exception as e:
+        console.print(f"  [yellow]⚠ Warning: Phase 0 check failed: {e}[/yellow]")
+        return (False, "ERROR")
+
+
 def generate_output_csv_path(input_filepath: str) -> str:
     """
     Generate output CSV filename from input CSV filename.
@@ -182,6 +247,11 @@ def import_properties(csv_filepath: str) -> Dict[str, Any]:
         "successful": 0,
         "skipped": 0,
         "errors": 0,
+        "phase0_qualified": 0,
+        "phase0_qualified_contingent": 0,
+        "phase0_failed": 0,
+        "phase0_qualified_api_failed": 0,
+        "properties_with_placeholders": 0,
         "phase1_qualified": 0,
         "total_api_cost": 0.0,
         "error_details": []
@@ -220,20 +290,85 @@ def import_properties(csv_filepath: str) -> Dict[str, Any]:
                     handle_scrape_neighborhood_from_findneighborhoods(property_details['address1'], supabase, console, scraper, ask_user=False)
                     console.print("  [green]✓[/green] Neighborhood added successfully")
 
-                    console.print("  [cyan]→[/cyan] Generating rent estimates...")
+                    # Create and save placeholder unit configurations
+                    console.print("  [cyan]→[/cyan] Creating placeholder unit configuration...")
+                    placeholder_unit = create_placeholder_unit_config_singlefamily(
+                        address1=property_details["address1"],
+                        beds=property_details["beds"],
+                        baths=property_details["baths"]
+                    )
+                    console.print("  [green]✓[/green] Placeholder unit configuration created")
+
+                    console.print("  [cyan]→[/cyan] Saving placeholder rent estimates to database...")
+                    try:
+                        add_rent_to_supabase_singlefamily(
+                            address1=property_details["address1"],
+                            unit_configs_w_rent=[placeholder_unit],
+                            property_comparables=None,
+                            property_rent={},
+                            supabase=supabase
+                        )
+                        console.print("  [green]✓[/green] Placeholder estimates saved")
+                        stats["properties_with_placeholders"] += 1
+                    except Exception as e:
+                        console.print(f"  [yellow]⚠ Warning: Could not save placeholder estimates: {e}[/yellow]")
+
+                    # Check Phase 0 qualification
+                    console.print("  [cyan]→[/cyan] Checking Phase 0 qualification...")
+                    is_qualified, qual_type = check_phase0_qualification(
+                        address1=property_details["address1"],
+                        console=console
+                    )
+
+                    if not is_qualified:
+                        console.print(f"  [yellow]⊘ Does not qualify for Phase 0 ({qual_type})[/yellow]")
+                        console.print("  [yellow]Skipping RentCast API and research calls[/yellow]")
+                        console.print("[bold yellow]⊘ Imported with placeholders (Phase 0 fail) - skipped API calls[/bold yellow]\n")
+                        stats["successful"] += 1
+                        stats["phase0_failed"] += 1
+                        imported_addresses.append(property_details["address1"])
+                        continue
+
+                    # Property qualifies for Phase 0 - proceed with RentCast and research
+                    console.print(f"  [green]✓[/green] Phase 0 qualifies ({qual_type})")
+
+                    console.print("  [cyan]→[/cyan] Generating rent estimates from RentCast API...")
                     unit_configs_w_rent, comparables, property_rent = get_rental_estimations_singlefamily(property_details)
-                    console.print("  [green]✓[/green] Rent estimates generated")
 
-                    console.print("  [cyan]→[/cyan] Saving rent estimates to database...")
-                    add_rent_to_supabase_singlefamily(property_details["address1"], unit_configs_w_rent, comparables, property_rent, supabase)
-                    console.print("  [green]✓[/green] Rent estimates saved")
+                    if unit_configs_w_rent is None or comparables is None or property_rent is None:
+                        console.print("  [red]✗ Failed to fetch rent estimates - using placeholders[/red]")
+                        stats["successful"] += 1
+                        stats["phase0_qualified_api_failed"] += 1
+                        if qual_type == "CONTINGENT":
+                            stats["phase0_qualified_contingent"] += 1
+                        else:
+                            stats["phase0_qualified"] += 1
+                        imported_addresses.append(property_details["address1"])
+                        console.print("[bold yellow]⊘ Imported (Phase 0 qualified but API failed)[/bold yellow]\n")
+                        continue
 
-                    console.print("  [cyan]→[/cyan] Conducting rent research for property...")
+                    console.print("  [green]✓[/green] Rent estimates retrieved from RentCast")
+
+                    console.print("  [cyan]→[/cyan] Updating database with actual rent estimates...")
+                    add_rent_to_supabase_singlefamily(
+                        property_details["address1"],
+                        unit_configs_w_rent,
+                        comparables,
+                        property_rent,
+                        supabase
+                    )
+                    console.print("  [green]✓[/green] Rent estimates updated in database")
+
+                    console.print("  [cyan]→[/cyan] Conducting rent research...")
                     handle_rent_research_after_add(property_details['address1'], supabase, console, ask_user=False)
-                    console.print("  [green]✓[/green] Rent research completed successfully")
+                    console.print("  [green]✓[/green] Rent research completed")
 
-                    console.print("[bold green]✓ Successfully imported![/bold green]\n")
+                    console.print("[bold green]✓ Successfully imported with Phase 0 qualification![/bold green]\n")
                     stats["successful"] += 1
+                    if qual_type == "CONTINGENT":
+                        stats["phase0_qualified_contingent"] += 1
+                    else:
+                        stats["phase0_qualified"] += 1
                 else:
                     console.print("[yellow]⊘ Property exists - skipping property/rent import[/yellow]")
                     console.print("[bold yellow]⊘ Property already exists - skipped[/bold yellow]\n")
@@ -318,6 +453,14 @@ def display_import_summary(stats: Dict[str, Any]):
     table.add_row("Successfully imported", f"[green]{stats['successful']}[/green]")
     table.add_row("Skipped (duplicates)", f"[yellow]{stats['skipped']}[/yellow]")
     table.add_row("Errors", f"[red]{stats['errors']}[/red]")
+    table.add_row("", "")
+    table.add_row("Phase 0 Qualifiers", f"[bold green]{stats['phase0_qualified'] + stats['phase0_qualified_contingent']}[/bold green]")
+    table.add_row("  - Current price", f"[green]{stats['phase0_qualified']}[/green]")
+    table.add_row("  - Contingent (10% reduction)", f"[green]{stats['phase0_qualified_contingent']}[/green]")
+    table.add_row("Phase 0 Non-qualifiers", f"[yellow]{stats['phase0_failed']}[/yellow]")
+    table.add_row("  - API fetch failed", f"[yellow]{stats['phase0_qualified_api_failed']}[/yellow]")
+    table.add_row("Properties with placeholders", f"[cyan]{stats['properties_with_placeholders']}[/cyan]")
+    table.add_row("", "")
     table.add_row("Phase 1 Qualifiers", f"[bold green]{stats['phase1_qualified']}[/bold green]")
 
     if stats["total_api_cost"] > 0:

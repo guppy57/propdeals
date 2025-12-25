@@ -296,7 +296,7 @@ load_assumptions()
 load_loan(LAST_USED_LOAN)
 reload_dataframe()
 
-PHASE0_CRITERIA = "square_ft >= 1000 & cash_needed <= 25000 & monthly_cash_flow >= -500"
+PHASE0_CRITERIA = "square_ft >= 1000 & cash_needed <= 25000 & monthly_cash_flow >= -250"
 PHASE1_CRITERIA = (
     "MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & beats_market "
     "& mr_monthly_cash_flow_y1 >= -200 "
@@ -681,7 +681,7 @@ if __name__ == "__main__":
         ).execute()
         analyze_property(property_id)
     elif option == "Add new property":
-      property_details = run_add_property(
+      property_details, passes_phase0 = run_add_property(
           supabase_client=supabase,
           reload_df_callback=reload_dataframe,
           get_all_phase0_qualifying_properties=get_all_phase0_qualifying_properties,
@@ -691,10 +691,12 @@ if __name__ == "__main__":
       if property_details is None:
         console.print("[red]Property addition failed, skipping post-processing[/red]")
       else:
-        handle_scrape_neighborhood_from_findneighborhoods(property_details['address1'], supabase, console, scraper, ask_user=True)
-        handle_rent_research_after_add(property_details['address1'], supabase, console, ask_user=True)
-        reload_dataframe()
-        display_new_property_qualification(console, property_details['address1'], get_all_phase1_qualifying_properties)
+        handle_scrape_neighborhood_from_findneighborhoods(property_details['address1'], supabase, console, scraper, ask_user=False)
+
+        if passes_phase0:
+          handle_rent_research_after_add(property_details['address1'], supabase, console, ask_user=True)
+          reload_dataframe()
+          display_new_property_qualification(console, property_details['address1'], get_all_phase1_qualifying_properties)
     elif option == "Scripts":
       run_scripts_options()
     elif option == "Loans":

@@ -562,9 +562,9 @@ def create_phase1_research_list_table(df, title):
 
         est_price_value = row.get('est_price')
         if pd.notna(est_price_value) and est_price_value > 0:
-            if est_price_value <= est_price_25:
+            if est_price_value >= est_price_75:
                 est_price_display = f"[green]{format_currency(est_price_value)}[/green]"
-            elif est_price_value <= est_price_75:
+            elif est_price_value >= est_price_25:
                 est_price_display = f"[yellow]{format_currency(est_price_value)}[/yellow]"
             else:
                 est_price_display = f"[red]{format_currency(est_price_value)}[/red]"
