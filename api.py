@@ -5,8 +5,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from supabase import create_client, Client
-from typing import Optional
-from run import reload_dataframe, get_all_phase1_qualifying_properties, get_combined_phase1_qualifiers, get_all_phase2_qualifiers
+from run import reload_dataframe, get_phase1_research_list 
 from inspections import InspectionsClient
 from helpers import convert_numpy_types
 
@@ -16,19 +15,11 @@ supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_
 inspections_client = InspectionsClient(supabase)
 df = None
 rents = None
+loan = 2
 
 def load_loan_details():
-    """Load FHA loan details from Supabase with fallback defaults"""
-    default_loan = {
-        'interest_rate': 0.065,  # 6.5%
-        'down_payment_rate': 0.035,  # 3.5%
-        'years': 30,
-        'mip_upfront_rate': 0.0175,
-        'mip_annual_rate': 0.0055
-    }
-    
     try:
-        fha_loan_get_response = supabase.table('loans').select("*").eq("id", 1).limit(1).single().execute()
+        fha_loan_get_response = supabase.table('loans').select("*").eq("id", 2).limit(1).single().execute()
         loan_data = fha_loan_get_response.data
         print("✅ Loaded loan details from database")
         return {
@@ -42,7 +33,7 @@ def load_loan_details():
     except Exception as e:
         print(f"⚠️ Failed to load loan details from database: {str(e)}")
         print("🔧 Using default loan settings")
-        return default_loan
+
 loan_details = load_loan_details()
 interest_rate = loan_details['interest_rate']
 apr_rate = loan_details['apr_rate']
@@ -121,37 +112,7 @@ async def root():
         "data": data_status
     }
 
-@app.get("/properties")
-async def get_all_properties_route(
-    status: Optional[str] = Query(None, description="Filter by property status (active, sold, passed)")
-):
-    global df
-    
-    if df is None or df.empty:
-        try:
-            print("🔄 Loading data on demand...")
-            properties_get_response = supabase.table('properties').select('*').limit(10000).execute()
-            df = pd.DataFrame(properties_get_response.data)
-            
-            if df.empty:
-                raise HTTPException(status_code=404, detail="No properties found in database")
-                
-        except Exception as e:
-            raise HTTPException(status_code=503, detail=f"Unable to load property data: {str(e)}")
-    
-    filtered_df = df.copy()
-    
-    if status:
-        filtered_df = filtered_df[filtered_df['status'] == status]
-    
-    properties = filtered_df.fillna(0).to_dict('records')
-    
-    return {
-        "count": len(filtered_df),
-        "properties": properties,
-    }
-
-@app.get("/properties/phase1")
+@app.get("/properties/phase1/tour-list")
 async def get_phase1_qualifiers_route():
     global df
 
@@ -160,99 +121,13 @@ async def get_phase1_qualifiers_route():
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail="No properties found")
     
-    assumptions_response = supabase.table('assumptions').select("*").eq("id", 1).limit(1).single().execute()
-    
     try:
-        current, contingent, creative = get_all_phase1_qualifying_properties()
-        current = convert_numpy_types(current.fillna(0).to_dict('records'))
-        contingent = convert_numpy_types(contingent.fillna(0).to_dict('records'))
-        creative = convert_numpy_types(creative.fillna(0).to_dict('records'))
-
-        ia_current, ia_contingent, ia_creative = get_all_phase1_qualifying_properties(False)
-        ia_current = convert_numpy_types(ia_current.fillna(0).to_dict('records'))
-        ia_contingent = convert_numpy_types(ia_contingent.fillna(0).to_dict('records'))
-        ia_creative = convert_numpy_types(ia_creative.fillna(0).to_dict('records'))
-
-        return {
-            "assumptions": assumptions_response.data,
-            "properties": {
-                "current_prices": current,
-                "contingent_10prcnt_price_reduction": contingent,
-                "creative_pricing": creative,
-            },
-            "inactive_properties": {
-                "current_prices": ia_current,
-                "contingent_10prcnt_price_reduction": ia_contingent,
-                "creative_pricing": ia_creative,
-            }
-        }
+        tour_list, _ = get_phase1_research_list() 
+        converted = convert_numpy_types(tour_list.fillna(0).to_dict('records'))
+        return { "properties": converted }
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail=f"Error filtering properties: {str(e)}")
-
-@app.get("/properties/phase2")
-async def get_phase2_data_checklist_route():
-    """
-    Gets all phase1 properties and their subsequent 'data checklist' to easily display the remaining work
-    we have to do to get all data needed for Phase 2
-    """
-    global df
-
-    reload_dataframe_logic()
-
-    if df is None or df.empty:
-        raise HTTPException(status_code=404, detail="No properties found")
-
-    try:
-        result = get_all_phase2_properties()
-        return {
-            "qualifiers": convert_numpy_types(
-                result["qualifiers"].fillna(0).to_dict("records")
-            )
-            if hasattr(result["qualifiers"], "to_dict")
-            else result["qualifiers"],
-            "disqualifiers": convert_numpy_types(
-                result["disqualifiers"].fillna(0).to_dict("records")
-            )
-            if hasattr(result["disqualifiers"], "to_dict")
-            else result["disqualifiers"],
-            "needs_research_1": convert_numpy_types(
-                result["needs_research_1"].fillna(0).to_dict("records")
-            )
-            if hasattr(result["needs_research_1"], "to_dict")
-            else result["needs_research_1"],
-            "needs_research_2": convert_numpy_types(
-                result["needs_research_2"].fillna(0).to_dict("records")
-            )
-            if hasattr(result["needs_research_2"], "to_dict")
-            else result["needs_research_2"],
-        }
-    except Exception as e:
-        print(e)
-        raise HTTPException(status_code=500, detail=f"Error getting phase2 properties: {str(e)}")
-
-# @app.get("/properties/phase2/{address1}/data-checklist")
-# async def get_phase2_data_checklist_for_property_route(address1: str):
-#     global df
-
-#     reload_dataframe_logic()
-
-#     if df is None or df.empty:
-#         raise HTTPException(status_code=404, detail="No properties found")
-    
-#     try:
-#         checklist = get_phase2_data_checklist()
-#         properties = get_combined_phase1_qualifiers()
-#         property = properties.query('address1 == @address1')
-
-#         return {
-#             "checklist": checklist[address1],
-#             "property": convert_numpy_types(property.fillna(0).to_dict('records')[0])
-#         }
-#     except Exception as e:
-#         print(e)
-#         raise HTTPException(status_code=500, detail=f"Error getting phase2 data checklist for property: {str(e)}")
-
 
 if __name__ == "__main__":
     import uvicorn
