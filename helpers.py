@@ -510,3 +510,142 @@ def normalize_neighborhood_name(name):
     normalized = normalized.replace("/", " / ")
 
     return normalized.lower()
+
+def estimate_renovation_cost(row):
+    """
+    Estimate professional renovation costs based on property condition score and age.
+
+    Uses Des Moines, IA pricing (Midwest multiplier 0.90x already factored into base costs).
+    Estimates costs for different property aspects based on condition score (1-5).
+
+    Args:
+        row: DataFrame row or dict with keys: property_condition_score, built_in,
+            square_ft, beds, baths, units
+
+    Returns:
+        Total estimated renovation cost in dollars (int)
+    """
+    # Extract property attributes with defaults
+    condition_score = row.get("property_condition_score", 3)
+    built_in = row.get("built_in", 2000)
+    square_ft = row.get("square_ft", 0)
+    beds = row.get("beds", 3)
+    baths = row.get("baths", 2)
+    units = row.get("units", 0)
+    estimated_windows = int(beds * 2.5 + 3) # Estimate window count: 2.5 windows per bedroom + 3 common area windows
+    units_for_calcs = max(1, units if not pd.isna(units) else 1) # Treat units=0 (single-family) as 1 unit for per-unit cost calculations
+
+    if built_in < 1950:
+        age_multiplier = 1.20  # +20% for pre-1950 (systems likely need full replacement)
+    elif built_in < 1980:
+        age_multiplier = 1.10  # +10% for 1950-1980 (older systems)
+    elif built_in < 2000:
+        age_multiplier = 1.00  # Base cost for 1980-2000
+    else:
+        age_multiplier = 0.90  # -10% for post-2000 (newer systems)
+
+    if condition_score == 1:  # Complete overhaul ($100-$150/sqft)
+        components = {
+            "foundation_repairs": 8000,
+            "roof_replacement": square_ft * 1.2 * 8,  # Accounts for roof pitch
+            "hvac_replacement": 7500 * units_for_calcs,
+            "electrical_upgrade": 5000,
+            "plumbing_replacement": 3000 * units_for_calcs,
+            "kitchen_gut": 25000 * units_for_calcs,
+            "bathroom_gut": 15000 * baths,
+            "flooring_full": square_ft * 8,
+            "windows_all": estimated_windows * 600,
+            "paint_interior": square_ft * 3,
+            "paint_exterior": square_ft * 1.2 * 3.5,
+            "drywall_repair": square_ft * 2,
+        }
+    elif condition_score == 2:  # Heavy renovation ($70-$100/sqft)
+        components = {
+            "foundation_repairs": 3000,
+            "roof_repair": square_ft * 1.2 * 4,
+            "hvac_repair": 3500 * units_for_calcs,
+            "electrical_update": 2500,
+            "plumbing_update": 1500 * units_for_calcs,
+            "kitchen_remodel": 18000 * units_for_calcs,
+            "bathroom_remodel": 10000 * baths,
+            "flooring_most": square_ft * 6,
+            "windows_some": estimated_windows * 0.5 * 600,  # 50% of windows
+            "paint_interior": square_ft * 2.5,
+            "paint_exterior": square_ft * 1.2 * 2.5,
+        }
+    elif condition_score == 3:  # Moderate updates ($50-$70/sqft)
+        components = {
+            "foundation_repairs": 1000,
+            "roof_repair": square_ft * 1.2 * 2,
+            "hvac_tune": 1500 * units_for_calcs,
+            "electrical_update": 1000,
+            "plumbing_fixtures": 800 * units_for_calcs,
+            "kitchen_update": 12000 * units_for_calcs,
+            "bathroom_update": 6000 * baths,
+            "flooring_partial": square_ft * 0.6 * 6,  # 60% of flooring
+            "paint_interior": square_ft * 2,
+            "appliances": 2500 * units_for_calcs,
+        }
+    elif condition_score == 4:  # Cosmetic refresh ($30-$50/sqft)
+        components = {
+            "paint_interior": square_ft * 2,
+            "paint_exterior": square_ft * 1.2 * 1.5,
+            "flooring_areas": square_ft * 0.3 * 6,  # 30% of flooring
+            "kitchen_cosmetic": 5000 * units_for_calcs,
+            "bathroom_cosmetic": 2000 * baths,
+            "landscaping": 1500,
+            "lighting_fixtures": 200 * units_for_calcs,
+            "appliances_some": 1500 * units_for_calcs,
+        }
+    else:  # condition_score == 5: Minor touchups ($15-$30/sqft)
+        components = {
+            "paint_touchup": square_ft * 1,
+            "minor_repairs": 2000,
+            "landscaping": 750,
+            "cleaning_deep": 500,
+            "fixtures_update": 500,
+        }
+
+    base_renovation_cost = sum(components.values()) # Calculate total base renovation cost
+    age_adjusted_cost = base_renovation_cost * age_multiplier # Apply age adjustment
+    contingency_factor = 1.10 # Add 10% contingency for unexpected issues
+    final_cost = int(age_adjusted_cost * contingency_factor)
+    return final_cost
+
+def estimate_arv(row, renovation_cost):
+    """
+    Estimate After Repair Value (ARV) - the as-completed appraised value.
+
+    Uses existing est_price if available, otherwise conservative calculation
+    based on purchase price + renovation value add.
+
+    Args:
+        row: DataFrame row or dict with keys: est_price, purchase_price
+        renovation_cost: Total estimated renovation cost from estimate_renovation_cost()
+
+    Returns:
+        Estimated ARV in dollars (float)
+    """
+    # Conservative multiplier: $1 spent on renovation adds $1.25 in value
+    # This is lower than typical 1.3-1.5x to account for:
+    # - Over-improvement risk
+    # - Market variation
+    # - Appraisal uncertainty
+    RENOVATION_VALUE_MULTIPLIER = 1.25
+
+    # Priority 1: Use existing estimated price if available and valid
+    est_price = row.get("est_price")
+    if pd.notna(est_price) and est_price > 0:
+        return float(est_price)
+
+    # Priority 2: Calculate based on purchase price + conservative value from renovations
+    purchase_price = row.get("purchase_price", 0)
+    if pd.isna(purchase_price):
+        purchase_price = 0
+
+    renovation_value_add = renovation_cost * RENOVATION_VALUE_MULTIPLIER
+    arv = purchase_price + renovation_value_add
+
+    # Ensure ARV is at least the purchase price
+    arv = max(arv, purchase_price)
+    return float(arv)

@@ -621,13 +621,9 @@ def create_phase1_research_list_table(df, title):
     return table
 
 
-def display_phase1_research_list(console, get_phase1_research_list, get_combined_phase1_qualifiers):
-    tour_list = get_phase1_research_list()
-    all_qualifiers = get_combined_phase1_qualifiers()
-    tour_addresses = tour_list['address1'].tolist()
-    not_on_tour = all_qualifiers[~all_qualifiers['address1'].isin(tour_addresses)].copy()
-    tour_list = tour_list.sort_values(by='neighborhood')
-    not_on_tour = not_on_tour.sort_values(by='neighborhood')
+def display_phase1_research_list(console, qualified_df, unqualified_df):
+    tour_list = qualified_df.sort_values(by='neighborhood')
+    not_on_tour = unqualified_df.sort_values(by='neighborhood')
 
     if len(tour_list) == 0:
         console.print("[dim]No properties on the tour list yet[/dim]\n")
@@ -1192,7 +1188,7 @@ def display_property_investment_metrics_table(console, row, is_single_family):
     table.add_row("Monthly Rent",
                   format_currency(row['total_rent']),
                   format_currency(row['mr_net_rent_y1']) + " (net)" if not is_single_family else format_currency(row['mr_net_rent_y1']),
-                  format_currency(row['market_total_rent_estimate']),
+                  format_currency(row['y2_rent_base']),
                   "Value Gap %",
                   format_percentage(row['value_gap_pct_5yr'] / 100),
                   format_percentage(row['value_gap_pct_10yr'] / 100),
@@ -1335,3 +1331,226 @@ def display_investment_requirements_panel(console, row, assumptions, loan, ia_fi
         )
 
     console.print(Panel(investment_summary, title="Investment Requirements"))
+
+def display_homestyle_overview_panel(console, row):
+    """
+    Display Fannie Mae HomeStyle Renovation loan overview for a property.
+
+    Args:
+        console: Rich console instance
+        row: Property DataFrame row with HomeStyle calculations
+    """
+    # Extract values
+    purchase_price = row.get("purchase_price", 0)
+    renovation_cost = row.get("hs_renovation_cost", 0)
+    total_project_cost = row.get("hs_total_project_cost", 0)
+    arv = row.get("hs_arv", 0)
+    max_loan = row.get("hs_max_loan_amount", 0)
+    cash_needed = row.get("hs_cash_needed", 0)
+    built_in_equity = row.get("hs_built_in_equity", 0)
+    equity_pct = row.get("hs_equity_pct", 0)
+    renovation_roi = row.get("hs_renovation_roi", 0)
+    is_feasible = row.get("hs_is_feasible", False)
+    deal_score = row.get("hs_deal_score", 0)
+    condition_score = row.get("property_condition_score", 3)
+
+    # Color coding
+    equity_color = "green" if equity_pct > 0.15 else "yellow" if equity_pct > 0.05 else "red"
+    roi_color = "green" if renovation_roi > 1.3 else "yellow" if renovation_roi > 1.1 else "red"
+    score_color = "green" if deal_score > 60 else "yellow" if deal_score > 40 else "red"
+    feasibility_text = "[green]✓ Feasible[/green]" if is_feasible else "[red]✗ Not Feasible[/red]"
+
+    # Condition score description
+    condition_map = {
+        1: "Complete Overhaul",
+        2: "Heavy Renovation",
+        3: "Moderate Updates",
+        4: "Cosmetic Refresh",
+        5: "Minor Touchups"
+    }
+    condition_desc = condition_map.get(int(condition_score), "Unknown")
+
+    # Color coding for borrowing gap
+    borrowing_gap = row.get("hs_borrowing_gap", 0)
+    gap_color = "green" if borrowing_gap == 0 else "yellow" if borrowing_gap < 10000 else "red"
+
+    # Calculate financing coverage percentage
+    reno_financed = row.get("hs_max_renovation_financing", 0)
+    financing_coverage = (reno_financed / renovation_cost * 100) if renovation_cost > 0 else 0
+
+    panel_content = f"""
+[bold cyan]Fannie Mae HomeStyle Renovation Loan Analysis - Primary Residence (97% LTV)[/bold cyan]
+
+[bold]Property Condition:[/bold]
+  Condition Score:       {int(condition_score)} - {condition_desc}
+
+[bold]Project Costs:[/bold]
+  Purchase Price:        {format_currency(purchase_price)}
+  Renovation Cost:       {format_currency(renovation_cost)}
+  Total Project Cost:    {format_currency(total_project_cost)}
+
+[bold]After Repair Value (ARV):[/bold]
+  Estimated ARV:         {format_currency(arv)}
+  ARV per Sqft:          {format_currency(row.get("hs_arv_per_sqft", 0))}
+
+[bold]Loan Details:[/bold]
+  Max Loan Amount:       {format_currency(max_loan)}
+  LTV Ratio:             97.0%
+  Down Payment (3%):     {format_currency(row.get("hs_down_payment", 0))}
+
+[bold]Renovation Financing Breakdown:[/bold]
+  Total Renovation:      {format_currency(renovation_cost)}
+  Amount Financed:       {format_currency(reno_financed)}
+  Out-of-Pocket Reno:    {format_currency(row.get("hs_out_of_pocket_renovation", 0))}
+  Financing Coverage:    {financing_coverage:.1f}%
+
+[bold]Total Cash Requirements:[/bold]
+  Down Payment:          {format_currency(row.get("hs_down_payment", 0))}
+  Out-of-Pocket Reno:    {format_currency(row.get("hs_out_of_pocket_renovation", 0))}
+  ─────────────────────────────────────
+  Total Cash Needed:     {format_currency(cash_needed)}
+  Borrowing Gap:         [{gap_color}]{format_currency(borrowing_gap)}[/{gap_color}]
+
+[bold]Value Creation:[/bold]
+  Built-in Equity:       [{equity_color}]{format_currency(built_in_equity)}[/{equity_color}]
+  Equity %:              [{equity_color}]{format_percentage(equity_pct)}[/{equity_color}]
+  Renovation ROI:        [{roi_color}]{renovation_roi:.2f}x[/{roi_color}]
+  Value Add:             {format_currency(row.get("hs_renovation_value_add", 0))}
+
+[bold]Deal Assessment:[/bold]
+  Deal Score:            [{score_color}]{deal_score:.1f}/100[/{score_color}]
+  Feasibility:           {feasibility_text}
+"""
+
+    console.print(Panel(
+        panel_content,
+        title=f"🏗️  HomeStyle Analysis - {row.get('address1', 'Unknown')}",
+        border_style="cyan",
+        padding=(1, 2)
+    ))
+
+def display_all_properties_homestyle_analysis(console, df, properties_df=None):
+    """
+    Display all properties with comprehensive HomeStyle renovation analysis.
+
+    Args:
+        console: Rich console instance
+        df: Properties DataFrame with HomeStyle calculations
+        properties_df: Optional filtered DataFrame to display
+    """
+    dataframe = df if properties_df is None else properties_df
+    
+    # Sort by deal score descending
+    dataframe = dataframe.sort_values("hs_deal_score", ascending=False)
+
+    table = Table(
+        title=f"All Properties - HomeStyle Renovation Analysis - PRIMARY RESIDENCE (97% LTV) ({len(dataframe)} properties)",
+        show_header=True,
+        header_style="bold cyan"
+    )
+
+    # Add columns
+    # Property basics
+    table.add_column("Address", style="cyan", no_wrap=False)
+    table.add_column("Price", justify="right")
+    table.add_column("PCS", justify="center")
+
+    # Costs & Values
+    table.add_column("Reno Cost", justify="right")
+    table.add_column("Total", justify="right")
+    table.add_column("ARV", justify="right")
+
+    # Financing
+    table.add_column("Max Loan (97%)", justify="right")
+    table.add_column("Down Payment (3%)", justify="right")
+
+    # Renovation Breakdown
+    table.add_column("Reno Financed", justify="right")
+    table.add_column("Reno Out-of-Pocket", justify="right")
+
+    # Cash Requirements
+    table.add_column("Total Cash Required", justify="right")
+    table.add_column("Borrowing Gap", justify="right")
+
+    # Deal Metrics
+    table.add_column("Built-in Equity", justify="right")
+    table.add_column("Equity %", justify="right")
+    table.add_column("ROI", justify="center")
+    table.add_column("Deal Score", justify="center")
+    table.add_column("Feasible", justify="center")
+
+    # Add rows
+    for _, row in dataframe.iterrows():
+        address = row.get("address1", "N/A")
+        purchase_price = row.get("purchase_price", 0)
+        condition = int(row.get("property_condition_score", 3))
+        reno_cost = row.get("hs_renovation_cost", 0)
+        total_project = row.get("hs_total_project_cost", 0)
+        arv = row.get("hs_arv", 0)
+        max_loan = row.get("hs_max_loan_amount", 0)
+        cash_needed = row.get("hs_cash_needed", 0)
+        equity = row.get("hs_built_in_equity", 0)
+        equity_pct = row.get("hs_equity_pct", 0)
+        roi = row.get("hs_renovation_roi", 0)
+        score = row.get("hs_deal_score", 0)
+        is_feasible = row.get("hs_is_feasible", False)
+        down_payment = row.get("hs_down_payment", 0)
+        reno_financed = row.get("hs_max_renovation_financing", 0)
+        reno_out_of_pocket = row.get("hs_out_of_pocket_renovation", 0)
+        borrowing_gap = row.get("hs_borrowing_gap", 0)
+
+        # Color coding for equity
+        if equity_pct > 0.15:
+            equity_color = "green"
+        elif equity_pct > 0.05:
+            equity_color = "yellow"
+        else:
+            equity_color = "red"
+
+        # Color coding for ROI
+        if roi > 1.3:
+            roi_color = "green"
+        elif roi > 1.1:
+            roi_color = "yellow"
+        else:
+            roi_color = "red"
+
+        # Color coding for deal score
+        if score > 60:
+            score_color = "green"
+        elif score > 40:
+            score_color = "yellow"
+        else:
+            score_color = "red"
+
+        feasible_text = "[green]✓[/green]" if is_feasible else "[red]✗[/red]"
+
+        # Color coding for borrowing gap
+        if borrowing_gap == 0:
+            gap_color = "green"
+        elif borrowing_gap < 10000:
+            gap_color = "yellow"
+        else:
+            gap_color = "red"
+
+        table.add_row(
+            address,
+            format_currency(purchase_price),
+            condition,
+            format_currency(reno_cost),
+            format_currency(total_project),
+            format_currency(arv),
+            format_currency(max_loan),
+            format_currency(down_payment),
+            format_currency(reno_financed),
+            format_currency(reno_out_of_pocket),
+            format_currency(cash_needed),
+            f"[{gap_color}]{format_currency(borrowing_gap)}[/{gap_color}]",
+            f"[{equity_color}]{format_currency(equity)}[/{equity_color}]",
+            f"[{equity_color}]{format_percentage(equity_pct)}[/{equity_color}]",
+            f"[{roi_color}]{roi:.2f}x[/{roi_color}]",
+            f"[{score_color}]{score:.0f}[/{score_color}]",
+            feasible_text
+        )
+
+    console.print(table)

@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 import questionary
 from dotenv import load_dotenv
 from InquirerPy import inquirer
@@ -29,6 +30,8 @@ from display import (
     display_all_phase2_qualifying_properties,
     display_all_properties,
     display_all_properties_info,
+    display_all_properties_homestyle_analysis,
+    display_homestyle_overview_panel,
     display_new_property_qualification,
     display_phase1_research_list,
     display_phase1_total_rent_differences,
@@ -49,7 +52,9 @@ from helpers import (
     calculate_irr,
     calculate_additional_room_rent,
     calculate_npv,
-    calculate_roe
+    calculate_roe,
+    estimate_renovation_cost,
+    estimate_arv,
 )
 from inspections import InspectionsClient
 from loans import LoansProvider
@@ -74,6 +79,7 @@ SELLING_COSTS_RATE = 0.07  # 7% selling costs (6% agent commission + 1% closing)
 CAPITAL_GAINS_RATE = 0.15  # 15% long-term capital gains tax
 DEPRECIATION_YEARS = 27.5  # Residential property depreciation period
 IA_FIRSTHOME_GRANT_AMT = 2500
+DEFAULT_PROPERTY_CONDITION_SCORE = 3  # Default to moderate condition (1-5 scale)
 
 def load_assumptions():
     global ASSUMPTIONS 
@@ -174,20 +180,55 @@ def apply_investment_calculations(df):
     state_rate = get_state_tax_rate(ASSUMPTIONS['state_tax_code'])
     combined_tax_rate = FEDERAL_TAX_RATE + state_rate
 
+    # Create conditional rent bases for different calculation purposes
+    rent_base_columns = {}
+
+    # Year 1 OpEx base: Use whole-property rent for SFH (conservative), sum for MF
+    rent_base_columns["y1_opex_rent_base"] = df.apply(
+        lambda row: (
+            row["rent_estimate"]
+            if row["units"] == 0 and pd.notna(row["rent_estimate"]) and row["rent_estimate"] > 0
+            else row["market_total_rent_estimate"]
+        ),
+        axis=1
+    )
+
+    # Year 2 rent base: Use whole-property rent for SFH, sum for MF
+    rent_base_columns["y2_rent_base"] = df.apply(
+        lambda row: (
+            row["rent_estimate"]
+            if row["units"] == 0 and pd.notna(row["rent_estimate"]) and row["rent_estimate"] > 0
+            else row["market_total_rent_estimate"]
+        ),
+        axis=1
+    )
+
+    # Track which rent source is used (for debugging/display)
+    rent_base_columns["y2_rent_base_source"] = df.apply(
+        lambda row: (
+            "whole_property"
+            if row["units"] == 0 and pd.notna(row["rent_estimate"]) and row["rent_estimate"] > 0
+            else "room_sum"
+        ),
+        axis=1
+    )
+
+    df = safe_concat_columns(df, rent_base_columns)
+
     new_columns_stage1 = {}
-    new_columns_stage1["mr_monthly_vacancy_costs"] = df["market_total_rent_estimate"] * ASSUMPTIONS['vacancy_rate']
-    new_columns_stage1["mr_monthly_repair_costs"] = df["market_total_rent_estimate"] * ASSUMPTIONS['repair_savings_rate']
+    new_columns_stage1["mr_monthly_vacancy_costs"] = df["y1_opex_rent_base"] * ASSUMPTIONS['vacancy_rate']
+    new_columns_stage1["mr_monthly_repair_costs"] = df["y1_opex_rent_base"] * ASSUMPTIONS['repair_savings_rate']
     new_columns_stage1["mr_operating_expenses"] = new_columns_stage1['mr_monthly_vacancy_costs'] + new_columns_stage1['mr_monthly_repair_costs'] + df['monthly_taxes'] + df['monthly_insurance']
     new_columns_stage1["mr_total_monthly_cost"] = df['monthly_mortgage'] + df['monthly_mip'] + new_columns_stage1['mr_operating_expenses']
     new_columns_stage1["mr_net_rent_y1"] = df['market_total_rent_estimate'] - df['min_rent']
     new_columns_stage1["mr_annual_rent_y1"] = new_columns_stage1["mr_net_rent_y1"] * 12
-    new_columns_stage1["mr_annual_rent_y2"] = df["market_total_rent_estimate"] * 12
+    new_columns_stage1["mr_annual_rent_y2"] = df["y2_rent_base"] * 12
     new_columns_stage1["mr_monthly_NOI_y1"] = new_columns_stage1["mr_net_rent_y1"] - new_columns_stage1["mr_operating_expenses"]
-    new_columns_stage1["mr_monthly_NOI_y2"] = df["market_total_rent_estimate"] - new_columns_stage1["mr_operating_expenses"]
+    new_columns_stage1["mr_monthly_NOI_y2"] = df["y2_rent_base"] - new_columns_stage1["mr_operating_expenses"]
     new_columns_stage1["mr_annual_NOI_y1"] = new_columns_stage1["mr_monthly_NOI_y1"] * 12
     new_columns_stage1["mr_annual_NOI_y2"] = new_columns_stage1["mr_monthly_NOI_y2"] * 12
     new_columns_stage1["mr_monthly_cash_flow_y1"] = new_columns_stage1["mr_net_rent_y1"] - new_columns_stage1["mr_total_monthly_cost"] + df["ammoritization_estimate"]
-    new_columns_stage1["mr_monthly_cash_flow_y2"] = df["market_total_rent_estimate"] - new_columns_stage1["mr_total_monthly_cost"] + df["ammoritization_estimate"]
+    new_columns_stage1["mr_monthly_cash_flow_y2"] = df["y2_rent_base"] - new_columns_stage1["mr_total_monthly_cost"] + df["ammoritization_estimate"]
     new_columns_stage1["mr_annual_cash_flow_y1"] = new_columns_stage1["mr_monthly_cash_flow_y1"] * 12
     new_columns_stage1["mr_annual_cash_flow_y2"] = new_columns_stage1["mr_monthly_cash_flow_y2"] * 12
 
@@ -200,19 +241,19 @@ def apply_investment_calculations(df):
     new_columns_stage2["CoC_y2"] = df["mr_annual_cash_flow_y2"] / df["cash_needed"]
     new_columns_stage2["GRM_y1"] = df["purchase_price"] / df["mr_annual_rent_y1"] # Gross Rent Multiplier (lower = better)
     new_columns_stage2["GRM_y2"] = df["purchase_price"] / df["mr_annual_rent_y2"]
-    new_columns_stage2["MGR_PP"] = df["market_total_rent_estimate"] / df["purchase_price"] # Monthly Gross Rent : Purchase Price, goal is for it to be greater than 0.01
-    new_columns_stage2["OpEx_Rent"] = df["mr_operating_expenses"] / df["market_total_rent_estimate"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
-    new_columns_stage2["DSCR"] = df["market_total_rent_estimate"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
+    new_columns_stage2["MGR_PP"] = df["y2_rent_base"] / df["purchase_price"] # Monthly Gross Rent : Purchase Price, goal is for it to be greater than 0.01
+    new_columns_stage2["OpEx_Rent"] = df["mr_operating_expenses"] / df["y2_rent_base"] # Operating Expenses : Gross Rent, goal is for it to be ~50%
+    new_columns_stage2["DSCR"] = df["y2_rent_base"] / df["monthly_mortgage"] # Debt Service Coverage Ratio, goal is for it to be greater than 1.25
     new_columns_stage2["ltv_ratio"] = df["loan_amount"] / df["purchase_price"] # Loan-to-Value ratio
     new_columns_stage2["price_per_door"] = df.apply(
         lambda row: row["purchase_price"] / row["beds"] if row["units"] == 0 else row["purchase_price"] / row["units"],
         axis=1
     ) # Price per unit/door (or per bedroom for single family)
-    new_columns_stage2["rent_per_sqft"] = df["market_total_rent_estimate"] / df["square_ft"] # Monthly rent per square foot (Y2 for SFH)
-    new_columns_stage2["break_even_occupancy"] = df["mr_total_monthly_cost"] / df["market_total_rent_estimate"] # Break-even occupancy rate
+    new_columns_stage2["rent_per_sqft"] = df["y2_rent_base"] / df["square_ft"] # Monthly rent per square foot (Y2 for SFH)
+    new_columns_stage2["break_even_occupancy"] = df["mr_total_monthly_cost"] / df["y2_rent_base"] # Break-even occupancy rate
     new_columns_stage2["break_even_vacancy"] = 1.0 - new_columns_stage2["break_even_occupancy"]
-    new_columns_stage2["oer"] = df["mr_operating_expenses"] / df["market_total_rent_estimate"] # Operating Expense Ratio (standard industry metric)
-    new_columns_stage2["egi"] = df["market_total_rent_estimate"] - df["mr_monthly_vacancy_costs"] # Effective Gross Income
+    new_columns_stage2["oer"] = df["mr_operating_expenses"] / df["y2_rent_base"] # Operating Expense Ratio (standard industry metric)
+    new_columns_stage2["egi"] = df["y2_rent_base"] - df["mr_monthly_vacancy_costs"] # Effective Gross Income
     new_columns_stage2["debt_yield"] = df["mr_annual_NOI_y2"] / df["loan_amount"] # Debt Yield (lender metric)
     new_columns_stage2["5y_forecast"] = df.apply(get_expected_gains, axis=1, args=(5,ASSUMPTIONS,LOAN,))
     new_columns_stage2["10y_forecast"] = df.apply(get_expected_gains, axis=1, args=(10,ASSUMPTIONS,LOAN,))
@@ -262,10 +303,57 @@ def apply_investment_calculations(df):
     new_columns_stage2["value_gap_pct_20yr"] = (new_columns_stage2["npv_20yr"] / df["cash_needed"]) * 100
     new_columns_stage2["beats_market"] = new_columns_stage2["npv_10yr"] > 0
     new_columns_stage2["cash_flow_y1_downside_10pct"] = (df["mr_net_rent_y1"] * 0.9) - df["mr_total_monthly_cost"]
-    new_columns_stage2["cash_flow_y2_downside_10pct"] = (df["market_total_rent_estimate"] * 0.9) - df["mr_total_monthly_cost"]
-    new_columns_stage2["fha_self_sufficiency_ratio"] = (df["market_total_rent_estimate"] * 0.75) / new_columns_stage2["piti"]  # Uses Y2 rent (whole-property for SFH)
+    new_columns_stage2["cash_flow_y2_downside_10pct"] = (df["y2_rent_base"] * 0.9) - df["mr_total_monthly_cost"]
+    new_columns_stage2["fha_self_sufficiency_ratio"] = (df["y2_rent_base"] * 0.75) / new_columns_stage2["piti"]  # Uses Y2 rent (whole-property for SFH)
 
     df = safe_concat_columns(df, new_columns_stage2)
+    return df
+
+def apply_homestyle_calculations(df):
+    df['property_condition_score'] = df['property_condition_score'].fillna(DEFAULT_PROPERTY_CONDITION_SCORE)
+
+    new_columns_stage1 = {}
+    new_columns_stage1["hs_renovation_cost"] = df.apply(estimate_renovation_cost, axis=1)
+    new_columns_stage1["hs_arv"] = df.apply(lambda row: estimate_arv(row, new_columns_stage1["hs_renovation_cost"].loc[row.name]), axis=1)
+    new_columns_stage1["hs_total_project_cost"] = df["purchase_price"] + new_columns_stage1["hs_renovation_cost"]
+    df = pd.concat([df, pd.DataFrame(new_columns_stage1, index=df.index)], axis=1)
+
+    new_columns_stage2 = {}
+    new_columns_stage2["hs_ltv_limit"] = 0.97  # 97% LTV for FHA primary residence
+    new_columns_stage2["hs_max_loan_arv_basis"] = df["hs_arv"] * 0.97
+    new_columns_stage2["hs_max_loan_cost_basis"] = df["hs_total_project_cost"] * 0.97
+    new_columns_stage2["hs_max_loan_amount"] = np.minimum(new_columns_stage2["hs_max_loan_arv_basis"], new_columns_stage2["hs_max_loan_cost_basis"])
+    new_columns_stage2["hs_max_renovation_financing"] = np.minimum(df["hs_renovation_cost"], np.maximum(0, new_columns_stage2["hs_max_loan_amount"] - df["purchase_price"]))
+    new_columns_stage2["hs_down_payment"] = df["hs_total_project_cost"] * 0.03
+    new_columns_stage2["hs_out_of_pocket_renovation"] = np.maximum(0, df["hs_renovation_cost"] - new_columns_stage2["hs_max_renovation_financing"])
+    new_columns_stage2["hs_cash_needed"] = new_columns_stage2["hs_down_payment"] + new_columns_stage2["hs_out_of_pocket_renovation"]
+    new_columns_stage2["hs_borrowing_gap"] = np.maximum(0, df["hs_total_project_cost"] - new_columns_stage2["hs_max_loan_amount"])
+    new_columns_stage2["hs_ltv_ratio"] = np.where(df["hs_arv"] > 0, new_columns_stage2["hs_max_loan_amount"] / df["hs_arv"], 0)
+    new_columns_stage2["hs_built_in_equity"] = df["hs_arv"] - df["hs_total_project_cost"]
+    new_columns_stage2["hs_equity_pct"] = np.where(df["hs_arv"] > 0, new_columns_stage2["hs_built_in_equity"] / df["hs_arv"], 0)
+    new_columns_stage2["hs_cost_per_sqft"] = np.where(df["square_ft"] > 0, df["hs_total_project_cost"] / df["square_ft"], 0)
+    new_columns_stage2["hs_arv_per_sqft"] = np.where(df["square_ft"] > 0, df["hs_arv"] / df["square_ft"], 0)
+    new_columns_stage2["hs_renovation_value_add"] = df["hs_arv"] - df["purchase_price"]
+    new_columns_stage2["hs_renovation_roi"] = np.where(df["hs_renovation_cost"] > 0, new_columns_stage2["hs_renovation_value_add"] / df["hs_renovation_cost"], 0)
+    new_columns_stage2["hs_all_in_basis"] = new_columns_stage2["hs_cash_needed"] + new_columns_stage2["hs_max_loan_amount"]
+
+    # Feasibility check: Is max loan sufficient to cover purchase + most renovations?
+    # TRUE = feasible (renovation financing covers at least 75% of renovation cost)
+    new_columns_stage2["hs_is_feasible"] = np.where(
+        df["hs_renovation_cost"] > 0,
+        new_columns_stage2["hs_max_renovation_financing"] >= (df["hs_renovation_cost"] * 0.75),
+        True
+    )
+
+    # Deal quality score (higher = better deal)
+    # Combines equity built-in, renovation ROI, and feasibility
+    new_columns_stage2["hs_deal_score"] = (
+        (new_columns_stage2["hs_equity_pct"] * 0.4) +  # 40% weight on equity
+        (np.minimum(new_columns_stage2["hs_renovation_roi"], 2.0) * 0.4) +  # 40% weight on ROI (cap at 2.0)
+        np.where(new_columns_stage2["hs_is_feasible"], 0.2, 0)  # 20% weight on feasibility
+    ) * 100  # Scale to 0-100
+
+    df = pd.concat([df, pd.DataFrame(new_columns_stage2, index=df.index)], axis=1)
     return df
 
 def reload_dataframe():
@@ -287,6 +375,7 @@ def reload_dataframe():
     df = df.merge(neighborhoods_df, on="address1", how="left")
     df = apply_calculations_on_dataframe(df=df)
     df = apply_investment_calculations(df=df)
+    df = apply_homestyle_calculations(df=df)
     console.print("[green]Property data reloaded successfully![/green]")
 
 def get_global_dataframe():
@@ -360,8 +449,10 @@ def get_phase1_research_list():
     """
     combined = get_combined_phase1_qualifiers()
     criteria = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & status == 'active'"
-    filtered = combined.query(criteria).copy()
-    return filtered 
+    qualified_df = combined.query(criteria).copy()
+    qualified_addresses = qualified_df['address1'].tolist()
+    unqualified_df = combined[~combined['address1'].isin(qualified_addresses)].copy()
+    return qualified_df, unqualified_df
 
 def get_all_phase2_qualifiers():
     """
@@ -455,6 +546,7 @@ def analyze_property(property_id):
         "Scrape neighborhood from FindNeighborhoods.dsm.city",
         "Run neighborhood analysis",
         "Extract neighborhood letter grade",
+        "View HomeStyle renovation analysis",
         "Export property analysis to PDF",
         "Skip - return to main menu"
     ])
@@ -492,6 +584,8 @@ def analyze_property(property_id):
     elif research_choice == "Extract neighborhood letter grade":
         handle_extract_neighborhood_grade(property_id, supabase, console, neighborhoods)
         reload_dataframe()
+    elif research_choice == "View HomeStyle renovation analysis":
+        display_homestyle_overview_panel(console, row)
     elif research_choice == "Record price change":
         handle_price_change(property_id, row["purchase_price"], supabase)
         reload_dataframe()
@@ -537,11 +631,13 @@ def run_all_properties_options():
         "Phase 1 - Qualifiers",
         "Phase 1 - Total Rent Differences",
         "Phase 1.5 - Research List",
+        "Phase 1.5 - HomeStyle Analysis for Research List",
         "Phase 2 - Qualifiers",
         "All properties - Active",
         "All properties - Y2 Calculations",
         "All properties - Property Info",
         "All properties - Investment Metrics",
+        "All properties - HomeStyle Analysis",
         "All properties - Sold / Passed",
         "Go back",
     ]
@@ -564,7 +660,12 @@ def run_all_properties_options():
             phase0_df = get_phase0_qualifiers_lacking_research()
             display_all_phase1_qualifying_properties(console, df, current, contingent, creative, phase0_df)
         elif option == "Phase 1.5 - Research List":
-            display_phase1_research_list(console, get_phase1_research_list, get_combined_phase1_qualifiers)
+            qualified_df, unqualified_df = get_phase1_research_list()
+            display_phase1_research_list(console, qualified_df, unqualified_df)
+        elif option == "Phase 1.5 - HomeStyle Analysis for Research List":
+            qualified_df, unqualified_df = get_phase1_research_list()
+            display_all_properties_homestyle_analysis(console, df, qualified_df)
+            display_all_properties_homestyle_analysis(console, df, unqualified_df)
         elif option == "Phase 1 - Total Rent Differences":
             display_phase1_total_rent_differences(console, get_combined_phase1_qualifiers)
         elif option == "All properties - Y2 Calculations":
@@ -573,6 +674,8 @@ def run_all_properties_options():
             display_all_properties_info(console, df, properties_df=df)
         elif option == "All properties - Investment Metrics":
             display_property_metrics(console, df, get_combined_phase1_qualifiers)
+        elif option == "All properties - HomeStyle Analysis":
+            display_all_properties_homestyle_analysis(console, df)
         elif option == "All properties - Sold / Passed":
             dataframe = df.query("status != 'active'")
             display_all_properties(
@@ -595,8 +698,8 @@ def run_scripts_options():
     if option == "Go back":
       using_scripts = False
     elif option == "Add property valuations to all Phase 1 properties":
-      phase1_df = get_combined_phase1_qualifiers()
-      scripts.run_add_property_values_script(properties_df=phase1_df)
+      qualified_df, _ = get_phase1_research_list() 
+      scripts.run_add_property_values_script(properties_df=qualified_df)
       reload_dataframe()
 
 def run_loans_options():
