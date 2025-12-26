@@ -1199,6 +1199,65 @@ def display_property_investment_metrics_table(console, row, is_single_family):
                   format_currency(row['mr_operating_expenses']),
                   format_currency(row['mr_operating_expenses']),
                   "", "", "", "")
+
+    # Utilities Breakdown
+    table.add_row("",
+                  "", "", "", "", "", "", "")  # Blank separator row
+
+    table.add_row("[bold]Utilities Breakdown:[/bold]",
+                  "", "", "", "", "", "", "")
+
+    table.add_row("  Electric",
+                  format_currency(row['monthly_utility_electric']),
+                  format_currency(row['monthly_utility_electric']),
+                  format_currency(row['monthly_utility_electric']),
+                  "", "", "", "")
+
+    table.add_row("  Gas",
+                  format_currency(row['monthly_utility_gas']),
+                  format_currency(row['monthly_utility_gas']),
+                  format_currency(row['monthly_utility_gas']),
+                  "", "", "", "")
+
+    table.add_row("  Water/Sewer",
+                  format_currency(row['monthly_utility_water']),
+                  format_currency(row['monthly_utility_water']),
+                  format_currency(row['monthly_utility_water']),
+                  "", "", "", "")
+
+    table.add_row("  Trash",
+                  format_currency(row['monthly_utility_trash']),
+                  format_currency(row['monthly_utility_trash']),
+                  format_currency(row['monthly_utility_trash']),
+                  "", "", "", "")
+
+    table.add_row("  Internet",
+                  format_currency(row['monthly_utility_internet']),
+                  format_currency(row['monthly_utility_internet']),
+                  format_currency(row['monthly_utility_internet']),
+                  "", "", "", "")
+
+    table.add_row("[bold]Total Utilities[/bold]",
+                  f"[bold]{format_currency(row['monthly_utility_total'])}[/bold]",
+                  f"[bold]{format_currency(row['monthly_utility_total'])}[/bold]",
+                  f"[bold]{format_currency(row['monthly_utility_total'])}[/bold]",
+                  "", "", "", "")
+
+    table.add_row("  Roommate Contribution",
+                  f"[green]+{format_currency(row['roommate_utilities'])}[/green]",
+                  f"[green]+{format_currency(row['roommate_utilities_y1'])}[/green]",
+                  f"[green]+{format_currency(row['roommate_utilities_y2'])}[/green]",
+                  "", "", "", "")
+
+    table.add_row("  Owner Pays",
+                  format_currency(row['owner_utilities']),
+                  format_currency(row['owner_utilities_y1']),
+                  format_currency(row['owner_utilities_y2']),
+                  "", "", "", "")
+
+    table.add_row("",
+                  "", "", "", "", "", "", "")  # Blank separator row
+
     table.add_row("[bold]Monthly Cash Flow[/bold]",
                   f"[bold {'red' if row['monthly_cash_flow'] < 0 else 'green'}]{format_currency(row['monthly_cash_flow'])}[/]",
                   f"[bold {'red' if row['mr_monthly_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['mr_monthly_cash_flow_y1'])}[/]",

@@ -103,7 +103,18 @@ def load_assumptions():
         ),
         "discount_rate": assumptions_get_response.data["discount_rate"],
         "using_ia_fhb_prog": assumptions_get_response.data["using_ia_fhb_prog"],
-        "ia_fhb_prog_upfront_option": assumptions_get_response.data["ia_fhb_prog_upfront_option"]
+        "ia_fhb_prog_upfront_option": assumptions_get_response.data["ia_fhb_prog_upfront_option"],
+        # Des Moines, IA utility costs (2025)
+        # Sources: EnergySage (electric), RealEstates.network (gas/water),
+        #          City of Des Moines (trash), RSINC (internet)
+        # Last updated: 2025-12-25
+        # Valid through: 2025-04 (4-month purchasing timeline)
+        "utility_electric_base": 136.00,  # per month (~$137 avg, 13¢/kWh, 1060 kWh/mo)
+        "utility_gas_base": 106.40,       # per month annual avg ($155.84 winter, $56.95 summer)
+        "utility_water_base": 49.00,      # per month (Iowa average)
+        "utility_trash_base": 18.00,      # per month (Des Moines: $17.91 for 96-gal cart)
+        "utility_internet_base": 60.00,   # per month (Iowa avg: $59.75) - SFH only
+        "utility_baseline_sqft": 1500,    # baseline square footage for scaling electric/gas
     }
     console.print(
         f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]"
@@ -169,21 +180,56 @@ def apply_calculations_on_dataframe(df):
     new_columns["monthly_vacancy_costs"] = new_columns["total_rent"] * ASSUMPTIONS['vacancy_rate']
     new_columns["monthly_repair_costs"] = new_columns["total_rent"] * ASSUMPTIONS['repair_savings_rate']
     new_columns["operating_expenses"] = new_columns["monthly_vacancy_costs"] + new_columns["monthly_repair_costs"] + new_columns["monthly_taxes"] + new_columns["monthly_insurance"]
-    new_columns["total_monthly_cost"] = new_columns["monthly_mortgage"] + new_columns["monthly_mip"] + new_columns["operating_expenses"]
-    new_columns["monthly_cash_flow"] = new_columns["total_rent"] - new_columns["total_monthly_cost"] + new_columns['ammoritization_estimate']
-    new_columns["annual_cash_flow"] = new_columns["monthly_cash_flow"] * 12
+    # For electric/gas: use owner's unit sqft (not total building sqft)
+    # For SFH: owner_unit_sqft = total sqft
+    # For multi-family: owner_unit_sqft = actual unit sqft from rent_estimates
+    sqft_scaling_owner_unit = df["owner_unit_sqft"] / ASSUMPTIONS['utility_baseline_sqft']
+    units_for_calcs = df["units"].apply(lambda x: max(1, x if pd.notna(x) and x > 0 else 1))
+    new_columns["monthly_utility_electric"] = ASSUMPTIONS['utility_electric_base'] * sqft_scaling_owner_unit
+    new_columns["monthly_utility_gas"] = ASSUMPTIONS['utility_gas_base'] * sqft_scaling_owner_unit
+    # Water: Tenants pay their own water bills directly (owner pays $0)
+    new_columns["monthly_utility_water"] = df.apply(
+        lambda row: 0 if row['units'] > 0 else ASSUMPTIONS['utility_water_base'],
+        axis=1
+    )
+    new_columns["monthly_utility_trash"] = ASSUMPTIONS['utility_trash_base'] * units_for_calcs
+    # Internet: SFH pays for house-hacking connection; MF tenants pay their own
+    new_columns["monthly_utility_internet"] = df.apply(
+        lambda row: ASSUMPTIONS['utility_internet_base'] if row['units'] == 0 else 0,
+        axis=1
+    )
+    new_columns["monthly_utility_total"] = (
+        new_columns["monthly_utility_electric"] +
+        new_columns["monthly_utility_gas"] +
+        new_columns["monthly_utility_water"] +
+        new_columns["monthly_utility_trash"] +
+        new_columns["monthly_utility_internet"]
+    )
 
+    # Calculate roommate utility contributions (what roommates pay)
+    def calculate_roommate_utilities(row, idx):
+        beds_safe = row['beds'] if pd.notna(row['beds']) and row['beds'] > 0 else 3
+        utility_total = new_columns["monthly_utility_total"].iloc[idx]
+        if row['units'] == 0:  # SFH house hack
+            return utility_total * (beds_safe - 1) / beds_safe
+        else:  # Multi-family
+            return 0  # Owner pays full unit
+
+    new_columns["roommate_utilities"] = pd.Series(
+        [calculate_roommate_utilities(row, idx) for idx, row in df.iterrows()],
+        index=df.index
+    )
+    new_columns["owner_utilities"] = new_columns["monthly_utility_total"] - new_columns["roommate_utilities"]
+    new_columns["total_monthly_cost"] = new_columns["monthly_mortgage"] + new_columns["monthly_mip"] + new_columns["operating_expenses"] + new_columns["monthly_utility_total"]
+    new_columns["monthly_cash_flow"] = new_columns["total_rent"] - new_columns["total_monthly_cost"] + new_columns['ammoritization_estimate'] + new_columns["roommate_utilities"]
+    new_columns["annual_cash_flow"] = new_columns["monthly_cash_flow"] * 12
     df = safe_concat_columns(df, new_columns)
     return df
 
 def apply_investment_calculations(df):
     state_rate = get_state_tax_rate(ASSUMPTIONS['state_tax_code'])
     combined_tax_rate = FEDERAL_TAX_RATE + state_rate
-
-    # Create conditional rent bases for different calculation purposes
     rent_base_columns = {}
-
-    # Year 1 OpEx base: Use whole-property rent for SFH (conservative), sum for MF
     rent_base_columns["y1_opex_rent_base"] = df.apply(
         lambda row: (
             row["rent_estimate"]
@@ -193,7 +239,6 @@ def apply_investment_calculations(df):
         axis=1
     )
 
-    # Year 2 rent base: Use whole-property rent for SFH, sum for MF
     rent_base_columns["y2_rent_base"] = df.apply(
         lambda row: (
             row["rent_estimate"]
@@ -203,7 +248,6 @@ def apply_investment_calculations(df):
         axis=1
     )
 
-    # Track which rent source is used (for debugging/display)
     rent_base_columns["y2_rent_base_source"] = df.apply(
         lambda row: (
             "whole_property"
@@ -215,22 +259,57 @@ def apply_investment_calculations(df):
 
     df = safe_concat_columns(df, rent_base_columns)
 
+    def calculate_roommate_utilities_y1(row):
+        """Calculate what roommates pay in Year 1 (live-in)"""
+        beds_safe = row['beds'] if pd.notna(row['beds']) and row['beds'] > 0 else 3
+        if row['units'] == 0:  # SFH house hack
+            return row['monthly_utility_total'] * (beds_safe - 1) / beds_safe
+        else:  # Multi-family
+            return 0  # Owner pays full unit
+
+    roommate_utilities_y1 = df.apply(calculate_roommate_utilities_y1, axis=1)
+    roommate_utilities_y2 = df['monthly_utility_total']  # Year 2: tenants pay all
+    owner_utilities_y1 = df['monthly_utility_total'] - roommate_utilities_y1
+    owner_utilities_y2 = df['monthly_utility_total'] - roommate_utilities_y2  # = 0
+
     new_columns_stage1 = {}
     new_columns_stage1["mr_monthly_vacancy_costs"] = df["y1_opex_rent_base"] * ASSUMPTIONS['vacancy_rate']
     new_columns_stage1["mr_monthly_repair_costs"] = df["y1_opex_rent_base"] * ASSUMPTIONS['repair_savings_rate']
     new_columns_stage1["mr_operating_expenses"] = new_columns_stage1['mr_monthly_vacancy_costs'] + new_columns_stage1['mr_monthly_repair_costs'] + df['monthly_taxes'] + df['monthly_insurance']
-    new_columns_stage1["mr_total_monthly_cost"] = df['monthly_mortgage'] + df['monthly_mip'] + new_columns_stage1['mr_operating_expenses']
-    new_columns_stage1["mr_net_rent_y1"] = df['market_total_rent_estimate'] - df['min_rent']
+    new_columns_stage1["mr_total_monthly_cost"] = df['monthly_mortgage'] + df['monthly_mip'] + new_columns_stage1['mr_operating_expenses'] + df['monthly_utility_total']
+
+    # Add trash to tenant rents for multi-family
+    # Y1: (units - 1) tenant units × $18/month
+    # Y2: all units × $18/month
+    trash_adjustment_y1 = df.apply(
+        lambda row: (row['units'] - 1) * 18 if row['units'] > 0 else 0,
+        axis=1
+    )
+    trash_adjustment_y2 = df.apply(
+        lambda row: row['units'] * 18 if row['units'] > 0 else 0,
+        axis=1
+    )
+
+    # Y1 and Y2 net rents with trash adjustments
+    new_columns_stage1["mr_net_rent_y1"] = df['market_total_rent_estimate'] - df['min_rent'] + trash_adjustment_y1
+    new_columns_stage1["mr_net_rent_y2"] = df["y2_rent_base"] + trash_adjustment_y2
+
     new_columns_stage1["mr_annual_rent_y1"] = new_columns_stage1["mr_net_rent_y1"] * 12
-    new_columns_stage1["mr_annual_rent_y2"] = df["y2_rent_base"] * 12
+    new_columns_stage1["mr_annual_rent_y2"] = new_columns_stage1["mr_net_rent_y2"] * 12
+
     new_columns_stage1["mr_monthly_NOI_y1"] = new_columns_stage1["mr_net_rent_y1"] - new_columns_stage1["mr_operating_expenses"]
-    new_columns_stage1["mr_monthly_NOI_y2"] = df["y2_rent_base"] - new_columns_stage1["mr_operating_expenses"]
+    new_columns_stage1["mr_monthly_NOI_y2"] = new_columns_stage1["mr_net_rent_y2"] - new_columns_stage1["mr_operating_expenses"]
     new_columns_stage1["mr_annual_NOI_y1"] = new_columns_stage1["mr_monthly_NOI_y1"] * 12
     new_columns_stage1["mr_annual_NOI_y2"] = new_columns_stage1["mr_monthly_NOI_y2"] * 12
-    new_columns_stage1["mr_monthly_cash_flow_y1"] = new_columns_stage1["mr_net_rent_y1"] - new_columns_stage1["mr_total_monthly_cost"] + df["ammoritization_estimate"]
-    new_columns_stage1["mr_monthly_cash_flow_y2"] = df["y2_rent_base"] - new_columns_stage1["mr_total_monthly_cost"] + df["ammoritization_estimate"]
+
+    new_columns_stage1["mr_monthly_cash_flow_y1"] = new_columns_stage1["mr_net_rent_y1"] - new_columns_stage1["mr_total_monthly_cost"] + df["ammoritization_estimate"] + roommate_utilities_y1
+    new_columns_stage1["mr_monthly_cash_flow_y2"] = new_columns_stage1["mr_net_rent_y2"] - new_columns_stage1["mr_total_monthly_cost"] + df["ammoritization_estimate"] + roommate_utilities_y2
     new_columns_stage1["mr_annual_cash_flow_y1"] = new_columns_stage1["mr_monthly_cash_flow_y1"] * 12
     new_columns_stage1["mr_annual_cash_flow_y2"] = new_columns_stage1["mr_monthly_cash_flow_y2"] * 12
+    new_columns_stage1["roommate_utilities_y1"] = roommate_utilities_y1
+    new_columns_stage1["roommate_utilities_y2"] = roommate_utilities_y2
+    new_columns_stage1["owner_utilities_y1"] = owner_utilities_y1
+    new_columns_stage1["owner_utilities_y2"] = owner_utilities_y2
 
     df = safe_concat_columns(df, new_columns_stage1)
 
@@ -371,6 +450,26 @@ def reload_dataframe():
     min_rent_units.columns = ["address1", "min_rent_unit", "min_rent_unit_beds"]
     rent_summary = rent_summary.merge(min_rent_units, on="address1", how="left")
     df = df.merge(rent_summary, on="address1", how="left")
+
+    # Get owner's unit sqft from rent_estimates (min_rent_unit is the unit owner lives in)
+    owner_unit_sqft = rents.loc[
+        rents.groupby("address1")["rent_estimate"].idxmin(),
+        ["address1", "estimated_sqrft"]
+    ].rename(columns={"estimated_sqrft": "owner_unit_sqft"})
+
+    # Merge owner unit sqft into main dataframe
+    df = df.merge(owner_unit_sqft, on="address1", how="left")
+
+    # Fill missing owner_unit_sqft: use total_sqft/units for multi-family, total_sqft for SFH
+    df["owner_unit_sqft"] = df.apply(
+        lambda row: (
+            row["owner_unit_sqft"]
+            if pd.notna(row["owner_unit_sqft"]) and row["owner_unit_sqft"] > 0
+            else (row["square_ft"] / row["units"] if row["units"] > 0 else row["square_ft"])
+        ),
+        axis=1
+    )
+
     neighborhoods_df = neighborhoods.get_neighborhoods_dataframe(supabase)
     df = df.merge(neighborhoods_df, on="address1", how="left")
     df = apply_calculations_on_dataframe(df=df)
@@ -385,10 +484,10 @@ load_assumptions()
 load_loan(LAST_USED_LOAN)
 reload_dataframe()
 
-PHASE0_CRITERIA = "square_ft >= 1000 & cash_needed <= 25000 & monthly_cash_flow >= -250"
+PHASE0_CRITERIA = "square_ft >= 1000 & cash_needed <= 25000 & monthly_cash_flow >= -350"
 PHASE1_CRITERIA = (
     "MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & beats_market "
-    "& mr_monthly_cash_flow_y1 >= -200 "
+    "& mr_monthly_cash_flow_y1 >= -400 "
     "& ((units == 0 & mr_monthly_cash_flow_y2 >= 50) | (units > 0 & mr_monthly_cash_flow_y2 >= 400))"
 )
 
@@ -448,7 +547,7 @@ def get_phase1_research_list():
     - Cashflow Year 2 must be above -$50
     """
     combined = get_combined_phase1_qualifiers()
-    criteria = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & status == 'active'"
+    criteria = "((neighborhood_letter_grade in ['A','B','C']) | is_fsbo) & status == 'active'"
     qualified_df = combined.query(criteria).copy()
     qualified_addresses = qualified_df['address1'].tolist()
     unqualified_df = combined[~combined['address1'].isin(qualified_addresses)].copy()
@@ -690,7 +789,7 @@ def run_all_properties_options():
 
 def run_scripts_options():
   using_scripts = True
-  choices = ["Go back", "Add property valuations to all Phase 1 properties"]
+  choices = ["Go back", "Add property valuations to all Phase 1.5 qualifiers"]
   scripts = ScriptsProvider(supabase_client=supabase, console=console)
 
   while using_scripts:
