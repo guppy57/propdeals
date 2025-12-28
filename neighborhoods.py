@@ -472,13 +472,13 @@ class NeighborhoodsClient():
         try:
             response = (
                 supabase.table("property_neighborhood")
-                .select("address1, neighborhoods(name, letter_grade)")
+                .select("address1, neighborhoods(name, letter_grade, niche_com_letter_grade)")
                 .execute()
             )
 
             if not response.data:
                 return pd.DataFrame(
-                    columns=["address1", "neighborhood", "neighborhood_letter_grade"]
+                    columns=["address1", "neighborhood", "neighborhood_letter_grade", "niche_com_letter_grade"]
                 )
 
             neighborhoods_df = pd.DataFrame(response.data)
@@ -498,12 +498,19 @@ class NeighborhoodsClient():
                     if x and isinstance(x, dict) and "letter_grade" in x
                     else None
                 )
+                neighborhoods_df["niche_com_letter_grade"] = neighborhoods_df[
+                    "neighborhoods"
+                ].apply(
+                    lambda x: x["niche_com_letter_grade"]
+                    if x and isinstance(x, dict) and "niche_com_letter_grade" in x
+                    else None
+                )
                 neighborhoods_df = neighborhoods_df[
-                    ["address1", "neighborhood", "neighborhood_letter_grade"]
+                    ["address1", "neighborhood", "neighborhood_letter_grade", "niche_com_letter_grade"]
                 ]
             else:
                 return pd.DataFrame(
-                    columns=["address1", "neighborhood", "neighborhood_letter_grade"]
+                    columns=["address1", "neighborhood", "neighborhood_letter_grade", "niche_com_letter_grade"]
                 )
 
             neighborhoods_df = neighborhoods_df.dropna(subset=["neighborhood"])
@@ -513,7 +520,7 @@ class NeighborhoodsClient():
             print(f"Error fetching neighborhoods: {e}")
             # Return empty dataframe on error
             return pd.DataFrame(
-                columns=["address1", "neighborhood", "neighborhood_letter_grade"]
+                columns=["address1", "neighborhood", "neighborhood_letter_grade", "niche_com_letter_grade"]
             )
     
     def get_neighborhood_for_property(self, address1, supabase):
