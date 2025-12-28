@@ -122,7 +122,7 @@ def load_assumptions():
 
 def load_loan(loan_id):
     global LOAN
-    console.print("[yellow]Reloading FHA loan data...[/yellow]")
+    console.print("[yellow]Reloading loan data...[/yellow]")
     loan_provider = LoansProvider(supabase_client=supabase, console=console)
     loan = loan_provider.get_loan_by_id(loan_id)
     LOAN = {
@@ -134,7 +134,7 @@ def load_loan(loan_id):
         "mip_annual_rate": loan.mip_annual_rate,
         "upfront_discounts": loan.upfront_discounts
     }
-    console.print("[green]Loan data reloaded successfully![/green]")
+    console.print(f"[green]Loan {loan.name} data reloaded successfully![/green]")
 
 def safe_concat_columns(df, new_columns_dict):
     """
@@ -152,6 +152,89 @@ def safe_concat_columns(df, new_columns_dict):
     # Add all new columns at once (maintains fragmentation fix)
     return pd.concat([df, pd.DataFrame(new_columns_dict, index=df.index)], axis=1)
 
+def apply_closing_costs_calculations(df):
+    totals = {}
+    lender_costs = {}
+    # TODO - eventually replace with fees attached to the loans table in Supabase
+    lender_costs["loan_origination_fee"] = df["loan_amount"] * 0.008 # 0.5 - 1% of loan
+    lender_costs["credit_reporting_fee"] = 50
+    lender_costs["appraisal_fee"] = 370
+    lender_costs["flood_certification_fee"] = 20
+    lender_costs["tax_service_fee"] = 75
+    lender_costs["processing_fee"]= 500
+    lender_costs["underwriting_fee"] = 600
+    df = safe_concat_columns(df, lender_costs)
+
+    totals["total_lender_costs"] = (
+        df["loan_origination_fee"] + df["credit_reporting_fee"] + df["appraisal_fee"] +
+        df["flood_certification_fee"] + df["tax_service_fee"] + df["processing_fee"] + df["underwriting_fee"]
+    )
+
+    title_costs = {} # Title and Escrow
+    title_costs["title_search_fee"] = 300
+    title_costs["lenders_title_insurance"] = df["loan_amount"] * 0.0075 # 0.5 - 1%
+    title_costs["owners_title_insurance"] = df["loan_amount"] * 0.0075 # 0.5 - 1%
+    title_costs["settlement_fee"] = 300
+    title_costs["attorney_fee"] = 750 # optional but highly recommended
+    df = safe_concat_columns(df, title_costs)
+
+    totals["total_title_costs"] = (
+        df["title_search_fee"] + df["lenders_title_insurance"] + df["owners_title_insurance"] + 
+        df["settlement_fee"] + df["attorney_fee"]
+    )
+
+    government_costs = {}
+    government_costs["deed_recording_fee"] = 27
+    government_costs["mortgage_recording_fee"] = 22
+    # $1.60per $1000 of purchase price, but first $500 of purchase price is exempt
+    government_costs["polk_county_transfer_tax"] = ((df["purchase_price"] - 500) / 1000) * 1.6
+    government_costs["polk_county_transfer_fee"] = 5
+    df = safe_concat_columns(df, government_costs)
+
+    totals["total_government_costs"] = (
+      df["deed_recording_fee"] + df["mortgage_recording_fee"] + df["polk_county_transfer_tax"] + 
+      df["polk_county_transfer_fee"]
+    )
+
+    prepaid_costs = {}
+    prepaid_costs["prepaid_home_insurance"] = df["monthly_insurance"] * 12
+    prepaid_costs["prepaid_property_tax"] = df["monthly_taxes"] * 4 # 2-6 months, typicaly 2-3 months
+    # assuming a closing date on the 15th, so first mortgage payment is ~1.5 months away
+    prepaid_costs["prepaid_interest"] = df["loan_amount"] * ((LOAN["apr_rate"] / 365) * 46)
+    df = safe_concat_columns(df, prepaid_costs)
+
+    totals["total_prepaid_costs"] = df["prepaid_home_insurance"] + df["prepaid_property_tax"] + df["prepaid_interest"]
+
+    escrow_costs = {} # reserves held by lender and NOT a prepayment like prepaid_costs
+    escrow_costs["insurance_reserve"] = df["monthly_insurance"] * 2 # typically 2 months
+    escrow_costs["tax_reserve"] = df["monthly_taxes"] * 4 # typically 2-6 months
+    df = safe_concat_columns(df, escrow_costs)
+
+    totals["total_escrow_costs"] = df["insurance_reserve"] + df["tax_reserve"]
+
+    optional_costs = {}
+    optional_costs["home_inspection_fee"] = 400
+    optional_costs["property_survey_fee"] = 500
+    optional_costs["pest_inspection_fee"] = 100
+    optional_costs["courier_fees"] = 35
+    optional_costs["notary_fees"] = 25
+    df = safe_concat_columns(df, optional_costs)
+
+    totals["total_optional_costs"] = (
+      df["home_inspection_fee"] + df["property_survey_fee"] + df["pest_inspection_fee"] + 
+      df["courier_fees"] + df["notary_fees"]
+    )
+
+    df = safe_concat_columns(df, totals)
+
+    df["closing_costs"] = (
+        df["total_lender_costs"] + df["total_title_costs"] + df["total_government_costs"] + 
+        df["total_prepaid_costs"] + df["total_escrow_costs"] + df["total_optional_costs"]
+    )
+    df["closing_costs_prcnt"] = df["closing_costs"] / df["purchase_price"]
+
+    return df
+
 def apply_calculations_on_dataframe(df):
     cols = ["walk_score", "transit_score", "bike_score"]
     df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
@@ -161,25 +244,32 @@ def apply_calculations_on_dataframe(df):
         factor = 0.0075 if this_row['units'] == 0 else 0.0105
         return (this_row['purchase_price'] * (1 + ASSUMPTIONS['closing_costs_rate'])) * factor
 
+    basic_columns = {}
+    basic_columns["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
+    basic_columns["home_age"] = 2025 - df["built_in"].fillna(2025)
+    basic_columns["down_payment"] = df["purchase_price"] * LOAN["down_payment_rate"]
+    basic_columns["5_pct_loan"] = df["purchase_price"] * 0.05
+    upfront_mip = 0 if LOAN["down_payment_rate"] == 0.035 else (df["purchase_price"] * LOAN['mip_upfront_rate']) # upfront PMI only on FHA loans
+    basic_columns["loan_amount"] = df["purchase_price"] - basic_columns["down_payment"] + upfront_mip
+    basic_columns["monthly_mortgage"] = basic_columns["loan_amount"].apply(lambda x: calculate_mortgage(x, LOAN["apr_rate"], LOAN["loan_length_years"]))
+    basic_columns["monthly_mip"] = (basic_columns["loan_amount"] * LOAN["mip_annual_rate"]) / 12
+    basic_columns["monthly_taxes"] = (df["purchase_price"] * ASSUMPTIONS["property_tax_rate"]) / 12
+    basic_columns["monthly_insurance"] = (df["purchase_price"] * ASSUMPTIONS["home_insurance_rate"]) / 12
+    df = safe_concat_columns(df, basic_columns)
+    df = apply_closing_costs_calculations(df)
+
     new_columns = {}
-    new_columns["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
-    new_columns["home_age"] = 2025 - df["built_in"].fillna(2025)
-    new_columns["down_payment"] = df["purchase_price"] * LOAN['down_payment_rate']
-    new_columns["5_pct_loan"] = df["purchase_price"] * 0.05
-    new_columns["loan_amount"] = df["purchase_price"] - new_columns["down_payment"] + (df["purchase_price"] * LOAN['mip_upfront_rate'])
-    new_columns["monthly_mortgage"] = new_columns["loan_amount"].apply(lambda x: calculate_mortgage(x, LOAN['apr_rate'], LOAN['loan_length_years']))
-    new_columns["monthly_mip"] = (new_columns["loan_amount"] * LOAN['mip_annual_rate']) / 12
-    new_columns["monthly_taxes"] = (df["purchase_price"] * ASSUMPTIONS['property_tax_rate']) / 12
-    new_columns["monthly_insurance"] = (df["purchase_price"] * ASSUMPTIONS['home_insurance_rate']) / 12
-    new_columns["closing_costs"] = df["purchase_price"] * ASSUMPTIONS['closing_costs_rate']
-    new_columns["cash_needed"] = new_columns["closing_costs"] + new_columns["down_payment"] - LOAN['upfront_discounts'] - (IA_FIRSTHOME_GRANT_AMT if (ASSUMPTIONS['ia_fhb_prog_upfront_option'] == "GRANT" and ASSUMPTIONS['using_ia_fhb_prog']) else 0)
+    new_columns["cash_needed"] = df["closing_costs"] + df["down_payment"] - LOAN["upfront_discounts"]
     new_columns["quick_monthly_rent_estimate"] = df.apply(lambda x: calculate_estimate(x), axis=1)
-    new_columns['ammoritization_estimate'] = (new_columns['loan_amount'] * 0.017) / 12
+    new_columns["ammoritization_estimate"] = (df["loan_amount"] * 0.017) / 12
     new_columns["total_rent"] = new_columns['quick_monthly_rent_estimate']
     new_columns["annual_rent"] = new_columns["total_rent"] * 12
     new_columns["monthly_vacancy_costs"] = new_columns["total_rent"] * ASSUMPTIONS['vacancy_rate']
     new_columns["monthly_repair_costs"] = new_columns["total_rent"] * ASSUMPTIONS['repair_savings_rate']
-    new_columns["operating_expenses"] = new_columns["monthly_vacancy_costs"] + new_columns["monthly_repair_costs"] + new_columns["monthly_taxes"] + new_columns["monthly_insurance"]
+    new_columns["operating_expenses"] = (
+        new_columns["monthly_vacancy_costs"] + new_columns["monthly_repair_costs"] +
+        df["monthly_taxes"] + df["monthly_insurance"]
+    )
     # For electric/gas: use owner's unit sqft (not total building sqft)
     # For SFH: owner_unit_sqft = total sqft
     # For multi-family: owner_unit_sqft = actual unit sqft from rent_estimates
@@ -188,22 +278,13 @@ def apply_calculations_on_dataframe(df):
     new_columns["monthly_utility_electric"] = ASSUMPTIONS['utility_electric_base'] * sqft_scaling_owner_unit
     new_columns["monthly_utility_gas"] = ASSUMPTIONS['utility_gas_base'] * sqft_scaling_owner_unit
     # Water: Tenants pay their own water bills directly (owner pays $0)
-    new_columns["monthly_utility_water"] = df.apply(
-        lambda row: 0 if row['units'] > 0 else ASSUMPTIONS['utility_water_base'],
-        axis=1
-    )
+    new_columns["monthly_utility_water"] = df.apply(lambda row: 0 if row['units'] > 0 else ASSUMPTIONS['utility_water_base'], axis=1)
     new_columns["monthly_utility_trash"] = ASSUMPTIONS['utility_trash_base'] * units_for_calcs
     # Internet: SFH pays for house-hacking connection; MF tenants pay their own
-    new_columns["monthly_utility_internet"] = df.apply(
-        lambda row: ASSUMPTIONS['utility_internet_base'] if row['units'] == 0 else 0,
-        axis=1
-    )
+    new_columns["monthly_utility_internet"] = df.apply(lambda row: ASSUMPTIONS['utility_internet_base'] if row['units'] == 0 else 0, axis=1)
     new_columns["monthly_utility_total"] = (
-        new_columns["monthly_utility_electric"] +
-        new_columns["monthly_utility_gas"] +
-        new_columns["monthly_utility_water"] +
-        new_columns["monthly_utility_trash"] +
-        new_columns["monthly_utility_internet"]
+        new_columns["monthly_utility_electric"] + new_columns["monthly_utility_gas"] + new_columns["monthly_utility_water"] +
+        new_columns["monthly_utility_trash"] + new_columns["monthly_utility_internet"]
     )
 
     # Calculate roommate utility contributions (what roommates pay)
@@ -215,12 +296,9 @@ def apply_calculations_on_dataframe(df):
         else:  # Multi-family
             return 0  # Owner pays full unit
 
-    new_columns["roommate_utilities"] = pd.Series(
-        [calculate_roommate_utilities(row, idx) for idx, row in df.iterrows()],
-        index=df.index
-    )
+    new_columns["roommate_utilities"] = pd.Series([calculate_roommate_utilities(row, idx) for idx, row in df.iterrows()], index=df.index)
     new_columns["owner_utilities"] = new_columns["monthly_utility_total"] - new_columns["roommate_utilities"]
-    new_columns["total_monthly_cost"] = new_columns["monthly_mortgage"] + new_columns["monthly_mip"] + new_columns["operating_expenses"] + new_columns["monthly_utility_total"]
+    new_columns["total_monthly_cost"] = df["monthly_mortgage"] + df["monthly_mip"] + new_columns["operating_expenses"] + new_columns["monthly_utility_total"]
     new_columns["monthly_cash_flow"] = new_columns["total_rent"] - new_columns["total_monthly_cost"] + new_columns['ammoritization_estimate'] + new_columns["roommate_utilities"]
     new_columns["annual_cash_flow"] = new_columns["monthly_cash_flow"] * 12
     df = safe_concat_columns(df, new_columns)
@@ -395,7 +473,7 @@ def apply_homestyle_calculations(df):
     new_columns_stage1["hs_renovation_cost"] = df.apply(estimate_renovation_cost, axis=1)
     new_columns_stage1["hs_arv"] = df.apply(lambda row: estimate_arv(row, new_columns_stage1["hs_renovation_cost"].loc[row.name]), axis=1)
     new_columns_stage1["hs_total_project_cost"] = df["purchase_price"] + new_columns_stage1["hs_renovation_cost"]
-    df = pd.concat([df, pd.DataFrame(new_columns_stage1, index=df.index)], axis=1)
+    df = safe_concat_columns(df, new_columns_stage1)
 
     new_columns_stage2 = {}
     new_columns_stage2["hs_ltv_limit"] = 0.97  # 97% LTV for FHA primary residence
@@ -432,7 +510,7 @@ def apply_homestyle_calculations(df):
         np.where(new_columns_stage2["hs_is_feasible"], 0.2, 0)  # 20% weight on feasibility
     ) * 100  # Scale to 0-100
 
-    df = pd.concat([df, pd.DataFrame(new_columns_stage2, index=df.index)], axis=1)
+    df = safe_concat_columns(df, new_columns_stage2)
     return df
 
 def reload_dataframe():
@@ -547,7 +625,7 @@ def get_phase1_research_list():
     - Cashflow Year 2 must be above -$50
     """
     combined = get_combined_phase1_qualifiers()
-    criteria = "((neighborhood_letter_grade in ['A','B','C']) | is_fsbo) & status == 'active'"
+    criteria = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & status == 'active'"
     qualified_df = combined.query(criteria).copy()
     qualified_addresses = qualified_df['address1'].tolist()
     unqualified_df = combined[~combined['address1'].isin(qualified_addresses)].copy()

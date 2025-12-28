@@ -58,6 +58,7 @@ def display_all_properties(
 
     table.add_column("Price", justify="right", no_wrap=True)
     table.add_column("Cash Needed", justify="right")
+    table.add_column("CC %", justify="right")
     table.add_column("Costs/mo", justify="right", style="yellow")
     table.add_column("CF", justify="right", no_wrap=True)
     table.add_column("MR_CFY1", justify="right")
@@ -118,6 +119,7 @@ def display_all_properties(
             [
                 f"[{price_style}]{format_currency(row['purchase_price'])}[/{price_style}]",
                 f"[{cash_style}]{format_currency(row['cash_needed'])}[/{cash_style}]",
+                f"[green]{format_percentage(row['closing_costs_prcnt'])}[/green]",
                 format_currency(row["total_monthly_cost"]),
                 f"[{cf_style}]{format_currency(row['monthly_cash_flow'])}[/{cf_style}]",
                 f"[{get_color(mrcfy1)}]{format_currency(mrcfy1)}[/{get_color(mrcfy1)}]",

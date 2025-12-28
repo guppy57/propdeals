@@ -1,5 +1,4 @@
 import os
-import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -21,7 +20,6 @@ from helpers import normalize_neighborhood_name
 @dataclass
 class NeighborhoodResearchConfig:
     """Configuration for neighborhood research operations"""
-
     reasoning_model: str = "gpt-5.1"
     instant_model: str = "gpt-5-nano"
     effort: str = "high"
