@@ -156,7 +156,7 @@ def apply_closing_costs_calculations(df):
     totals = {}
     lender_costs = {}
     # TODO - eventually replace with fees attached to the loans table in Supabase
-    lender_costs["loan_origination_fee"] = df["loan_amount"] * 0.008 # 0.5 - 1% of loan
+    lender_costs["loan_origination_fee"] = df["loan_amount"] * 0.01 # 0.5 - 1% of loan
     lender_costs["credit_reporting_fee"] = 50
     lender_costs["appraisal_fee"] = 370
     lender_costs["flood_certification_fee"] = 20
@@ -171,22 +171,24 @@ def apply_closing_costs_calculations(df):
     )
 
     title_costs = {} # Title and Escrow
-    title_costs["title_search_fee"] = 300
-    title_costs["lenders_title_insurance"] = df["loan_amount"] * 0.0075 # 0.5 - 1%
-    title_costs["owners_title_insurance"] = df["loan_amount"] * 0.0075 # 0.5 - 1%
+    title_costs["abstract_update_fee"] = 250  # Iowa-specific: updating the abstract
+    title_costs["title_examination_fee"] = 350  # Attorney reviews abstract and issues title opinion
+    title_costs["title_guaranty_certificate"] = 175 # flat 175 unless purchase price is above $750k
+    title_costs["owners_title_insurance"] = 0 # free with lender's certificate in Iowa
     title_costs["settlement_fee"] = 300
-    title_costs["attorney_fee"] = 750 # optional but highly recommended
+    title_costs["attorney_fee"] = 500# additional attorney buffer on top of title exam fee
+
     df = safe_concat_columns(df, title_costs)
 
     totals["total_title_costs"] = (
-        df["title_search_fee"] + df["lenders_title_insurance"] + df["owners_title_insurance"] + 
-        df["settlement_fee"] + df["attorney_fee"]
+        df["abstract_update_fee"] + df["title_guaranty_certificate"] + df["title_guaranty_certificate"] + 
+        df["owners_title_insurance"] + df["settlement_fee"] + df["attorney_fee"]
     )
 
     government_costs = {}
     government_costs["deed_recording_fee"] = 27
     government_costs["mortgage_recording_fee"] = 22
-    # $1.60per $1000 of purchase price, but first $500 of purchase price is exempt
+    # $1.60 per $1000 of purchase price, but first $500 of purchase price is exempt
     government_costs["polk_county_transfer_tax"] = ((df["purchase_price"] - 500) / 1000) * 1.6
     government_costs["polk_county_transfer_fee"] = 5
     df = safe_concat_columns(df, government_costs)
@@ -198,23 +200,24 @@ def apply_closing_costs_calculations(df):
 
     prepaid_costs = {}
     prepaid_costs["prepaid_home_insurance"] = df["monthly_insurance"] * 12
-    prepaid_costs["prepaid_property_tax"] = df["monthly_taxes"] * 4 # 2-6 months, typicaly 2-3 months
-    # assuming a closing date on the 15th, so first mortgage payment is ~1.5 months away
-    prepaid_costs["prepaid_interest"] = df["loan_amount"] * ((LOAN["apr_rate"] / 365) * 46)
+    # This is settled with seller - may be credit or debit depending on timing
+    prepaid_costs["property_tax_proration"] = df["monthly_taxes"] * 4 # 2-6 months, typicaly 2-3 months
+    # assuming a closing date on the 1st of a month (it may not be, but better to be conservative)
+    prepaid_costs["prepaid_interest"] = df["loan_amount"] * ((LOAN["apr_rate"] / 365) * 30)
     df = safe_concat_columns(df, prepaid_costs)
 
-    totals["total_prepaid_costs"] = df["prepaid_home_insurance"] + df["prepaid_property_tax"] + df["prepaid_interest"]
+    totals["total_prepaid_costs"] = df["prepaid_home_insurance"] + df["property_tax_proration"] + df["prepaid_interest"]
 
     escrow_costs = {} # reserves held by lender and NOT a prepayment like prepaid_costs
-    escrow_costs["insurance_reserve"] = df["monthly_insurance"] * 2 # typically 2 months
-    escrow_costs["tax_reserve"] = df["monthly_taxes"] * 4 # typically 2-6 months
+    escrow_costs["insurance_reserve"] = df["monthly_insurance"] * 3 # typically 3 months
+    escrow_costs["tax_reserve"] = df["monthly_taxes"] * 3 # typically 2-6 months
     df = safe_concat_columns(df, escrow_costs)
 
     totals["total_escrow_costs"] = df["insurance_reserve"] + df["tax_reserve"]
 
     optional_costs = {}
     optional_costs["home_inspection_fee"] = 400
-    optional_costs["property_survey_fee"] = 500
+    optional_costs["property_survey_fee"] = 600
     optional_costs["pest_inspection_fee"] = 100
     optional_costs["courier_fees"] = 35
     optional_costs["notary_fees"] = 25
