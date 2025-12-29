@@ -574,8 +574,9 @@ def create_phase1_research_list_table(df, title):
             est_price_display = "N/A"
 
         grade = row['neighborhood_letter_grade'] if pd.notna(row['neighborhood_letter_grade']) else 'N/A'
+        niche_grade = row['niche_com_letter_grade'] if pd.notna(row['niche_com_letter_grade']) else 'N/A'
         neighborhood = row['neighborhood'] if pd.notna(row['neighborhood']) else 'N/A'
-        neighborhood_display = f"{grade} - {neighborhood}"
+        neighborhood_display = f"{grade}/{niche_grade} - {neighborhood}"
 
         cost_inc_value = row['costs_to_income']
         if cost_inc_value <= cost_inc_25:
