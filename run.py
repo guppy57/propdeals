@@ -133,7 +133,8 @@ def load_loan(loan_id):
         "loan_length_years": loan.years,
         "mip_upfront_rate": loan.mip_upfront_rate,
         "mip_annual_rate": loan.mip_annual_rate,
-        "upfront_discounts": loan.upfront_discounts
+        "upfront_discounts": loan.upfront_discounts,
+        "loan_type": loan.loan_type
     }
     console.print(f"[green]Loan {loan.name} data reloaded successfully![/green]")
 
@@ -253,7 +254,7 @@ def apply_calculations_on_dataframe(df):
     basic_columns["home_age"] = 2025 - df["built_in"].fillna(2025)
     basic_columns["down_payment"] = df["purchase_price"] * LOAN["down_payment_rate"]
     basic_columns["5_pct_loan"] = df["purchase_price"] * 0.05
-    upfront_mip = 0 if LOAN["down_payment_rate"] == 0.035 else (df["purchase_price"] * LOAN['mip_upfront_rate']) # upfront PMI only on FHA loans
+    upfront_mip = 0 if LOAN["loan_type"] == "FHA" else (df["purchase_price"] * LOAN['mip_upfront_rate']) # upfront PMI only on FHA loans
     basic_columns["loan_amount"] = df["purchase_price"] - basic_columns["down_payment"] + upfront_mip
     basic_columns["monthly_mortgage"] = basic_columns["loan_amount"].apply(lambda x: calculate_mortgage(x, LOAN["apr_rate"], LOAN["loan_length_years"]))
     basic_columns["monthly_mip"] = (basic_columns["loan_amount"] * LOAN["mip_annual_rate"]) / 12
@@ -862,7 +863,7 @@ def run_all_properties_options():
             display_all_properties(
                 properties_df=dataframe,
                 df=df,
-                title="All inactive properties using FHA",
+                title="All inactive properties",
                 show_status=True,
                 console=console,
             )
