@@ -449,7 +449,9 @@ def apply_investment_calculations(df):
     new_columns_stage2["avg_annual_return_20yr"] = ((new_columns_stage2["20y_forecast"] / df["cash_needed"]) / 20) * 100
     new_columns_stage2["roe_y2"] = df.apply(calculate_roe, axis=1, args=[LOAN,])
     new_columns_stage2["leverage_benefit"] = new_columns_stage2["CoC_y2"] - (df["mr_annual_NOI_y2"] / df["purchase_price"])
-    new_columns_stage2["payback_period_years"] = df.apply(calculate_payback_period, axis=1)
+    new_columns_stage2["payback_period_years"] = df.apply(
+        lambda row: calculate_payback_period(row, ASSUMPTIONS, LOAN), axis=1
+    )
     new_columns_stage2["irr_5yr"] = df.apply(calculate_irr, axis=1, args=(5,ASSUMPTIONS,LOAN))
     new_columns_stage2["irr_10yr"] = df.apply(calculate_irr, axis=1, args=(10,ASSUMPTIONS,LOAN))
     new_columns_stage2["irr_20yr"] = df.apply(calculate_irr, axis=1, args=(20,ASSUMPTIONS,LOAN))

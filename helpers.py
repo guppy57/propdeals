@@ -227,11 +227,20 @@ def get_expected_gains(row, length_years, assumptions, loan):
     y1_cashflow = row["mr_annual_cash_flow_y1"]
     y2_cashflow = row["mr_annual_cash_flow_y2"]
 
+    # Calculate when MIP drops off (None for FHA, year number for conventional)
+    mip_dropoff_year = calculate_mip_dropoff_year(row, loan)
+    annual_mip = row.get('monthly_mip', 0) * 12
+
     # Year 1 is the base year (no appreciation applied)
     cumulative_cashflow = y1_cashflow
     for year in range(2, length_years + 1):
         # Year 2 starts with base y2_cashflow, then compounds
         yearly_cashflow = y2_cashflow * ((1 + assumptions['rent_appreciation_rate']) ** (year - 2))
+
+        # Add back MIP if it has dropped off (conventional only)
+        if mip_dropoff_year is not None and year >= mip_dropoff_year:
+            yearly_cashflow += annual_mip
+
         cumulative_cashflow += yearly_cashflow
 
     rate = assumptions['appreciation_rate'] if row["units"] == 0 else assumptions['mf_appreciation_rate']
@@ -249,8 +258,10 @@ def get_expected_gains(row, length_years, assumptions, loan):
     equity_gains = loan_amount - remaining_balance
     return cumulative_cashflow + appreciation_gains + equity_gains
 
-def calculate_payback_period(row):
-    """Calculate payback period accounting for Year 1 losses"""
+def calculate_payback_period(row, assumptions, loan):
+    """Calculate payback period accounting for Year 1 losses, rent appreciation, and MIP drop-off"""
+
+    # Determine total amount to recover
     if row["mr_annual_cash_flow_y1"] < 0:
         # Year 1 we lose money, need to recover initial investment + Year 1 losses
         total_to_recover = row["cash_needed"] + abs(row["mr_annual_cash_flow_y1"])
@@ -261,9 +272,35 @@ def calculate_payback_period(row):
     if row["mr_annual_cash_flow_y2"] <= 0:
         return float("inf")  # Never pays back
 
-    # +1 for Year 1 already passed
-    payback_years = 1 + (total_to_recover / row["mr_annual_cash_flow_y2"])
-    return payback_years
+    # Calculate when MIP drops off
+    mip_dropoff_year = calculate_mip_dropoff_year(row, loan)
+    annual_mip = row.get('monthly_mip', 0) * 12
+
+    # Iterate through years until recovered
+    cumulative_recovery = 0
+    year = 1  # Year 1 already accounted for above
+
+    while cumulative_recovery < total_to_recover and year <= 100:  # 100 year cap for safety
+        year += 1
+
+        # Calculate this year's cash flow
+        yearly_cashflow = row["mr_annual_cash_flow_y2"] * (
+            (1 + assumptions['rent_appreciation_rate']) ** (year - 2)
+        )
+
+        # Add back MIP if dropped off
+        if mip_dropoff_year is not None and year >= mip_dropoff_year:
+            yearly_cashflow += annual_mip
+
+        cumulative_recovery += yearly_cashflow
+
+        # Check if we've recovered enough
+        if cumulative_recovery >= total_to_recover:
+            # Interpolate to get fractional year
+            years_into_period = (total_to_recover - (cumulative_recovery - yearly_cashflow)) / yearly_cashflow
+            return year - 1 + years_into_period
+
+    return float("inf")  # Didn't recover within 100 years
 
 def get_state_tax_rate(state_code):
     """Get state marginal tax rate from state code"""
@@ -327,11 +364,20 @@ def calculate_irr(row, years, assumptions, loan):
         # Year 1 cash flow
         cash_flows.append(row["mr_annual_cash_flow_y1"])
 
+        # Calculate when MIP drops off (None for FHA, year number for conventional)
+        mip_dropoff_year = calculate_mip_dropoff_year(row, loan)
+        annual_mip = row.get('monthly_mip', 0) * 12
+
         # Years 2 through N: compounded with rent appreciation
         for year in range(2, years + 1):
             yearly_cashflow = row["mr_annual_cash_flow_y2"] * (
                 (1 + assumptions['rent_appreciation_rate']) ** (year - 2)
             )
+
+            # Add back MIP if it has dropped off this year (conventional loans only)
+            if mip_dropoff_year is not None and year >= mip_dropoff_year:
+                yearly_cashflow += annual_mip
+
             cash_flows.append(yearly_cashflow)
 
         # Final year: add net proceeds from sale
@@ -352,16 +398,25 @@ def calculate_npv(row, years, assumptions, loan):
     # Year 1 cash flow
     cash_flows.append(row["mr_annual_cash_flow_y1"])
 
+    # Calculate when MIP drops off (None for FHA, year number for conventional)
+    mip_dropoff_year = calculate_mip_dropoff_year(row, loan)
+    annual_mip = row.get('monthly_mip', 0) * 12
+
     # Years 2 through N: compounded with rent appreciation
     for year in range(2, years + 1):
         yearly_cashflow = row["mr_annual_cash_flow_y2"] * (
             (1 + assumptions['rent_appreciation_rate']) ** (year - 2)
         )
+
+        # Add back MIP if it has dropped off this year (conventional loans only)
+        if mip_dropoff_year is not None and year >= mip_dropoff_year:
+            yearly_cashflow += annual_mip
+
         cash_flows.append(yearly_cashflow)
 
-        # Final year: add net proceeds from sale
-        net_proceeds = calculate_net_proceeds(row, years, assumptions=assumptions, loan=loan)
-        cash_flows[-1] += net_proceeds
+    # Final year: add net proceeds from sale
+    net_proceeds = calculate_net_proceeds(row, years, assumptions=assumptions, loan=loan)
+    cash_flows[-1] += net_proceeds
 
     # Calculate NPV: discount each cash flow back to present
     npv = 0
@@ -393,6 +448,44 @@ def calculate_roe(row, loan):
     if current_equity > 0:
         return row["mr_annual_cash_flow_y2"] / current_equity
     return 0
+
+def calculate_mip_dropoff_year(row, loan):
+    """
+    Calculate which year MIP/PMI drops off for conventional loans.
+
+    Args:
+        row: Property data with loan_amount, purchase_price
+        loan: Loan parameters with loan_type, apr_rate, loan_length_years
+
+    Returns:
+        int: Year when MIP drops off (1-based), or None if never drops off (FHA)
+    """
+    # FHA loans: MIP never drops off
+    if loan.get('loan_type') == 'FHA':
+        return None
+
+    # Conventional loans: MIP drops off when LTV ≤ 80%
+    loan_amount = row['loan_amount']
+    purchase_price = row['purchase_price']
+    monthly_rate = loan['apr_rate'] / 12
+    num_payments = loan['loan_length_years'] * 12
+
+    # Target: remaining balance ≤ 80% of original purchase price
+    target_balance = purchase_price * 0.80
+
+    # Iterate through years to find when balance drops below target
+    for year in range(1, loan['loan_length_years'] + 1):
+        months_paid = year * 12
+        remaining_balance = loan_amount * (
+            ((1 + monthly_rate) ** num_payments - (1 + monthly_rate) ** months_paid)
+            / ((1 + monthly_rate) ** num_payments - 1)
+        )
+
+        if remaining_balance <= target_balance:
+            return year
+
+    # Should not reach here if loan terms are normal, but return None as fallback
+    return None
 
 def calculate_additional_room_rent(row):
     return int(row["min_rent_unit_beds"] - 1) * 400
