@@ -266,7 +266,7 @@ def apply_calculations_on_dataframe(df):
     new_columns = {}
     new_columns["cash_needed"] = df["closing_costs"] + df["down_payment"] - LOAN["upfront_discounts"]
     new_columns["quick_monthly_rent_estimate"] = df.apply(lambda x: calculate_estimate(x), axis=1)
-    new_columns["ammoritization_estimate"] = (df["loan_amount"] * 0.017) / 12
+    new_columns["ammoritization_estimate"] = df["monthly_mortgage"] - (df["loan_amount"] * LOAN["apr_rate"] / 12)
     new_columns["total_rent"] = new_columns['quick_monthly_rent_estimate']
     new_columns["annual_rent"] = new_columns["total_rent"] * 12
     new_columns["monthly_vacancy_costs"] = new_columns["total_rent"] * ASSUMPTIONS['vacancy_rate']
@@ -568,7 +568,7 @@ load_assumptions()
 load_loan(LAST_USED_LOAN)
 reload_dataframe()
 
-PHASE0_CRITERIA = "square_ft >= 1000 & cash_needed <= 25000 & monthly_cash_flow >= -350"
+PHASE0_CRITERIA = "square_ft >= 1000 & cash_needed <= 25000 & monthly_cash_flow >= -400"
 PHASE1_CRITERIA = (
     "MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & beats_market "
     "& mr_monthly_cash_flow_y1 >= -400 "
