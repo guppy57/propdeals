@@ -1616,3 +1616,43 @@ def display_all_properties_homestyle_analysis(console, df, properties_df=None):
         )
 
     console.print(table)
+
+def display_loans(console, loans):
+    if not loans:
+        console.print("[red]Loans could not be fetched![/red]")
+        return
+
+    table = Table(
+        title="Available Loans", show_header=True, header_style="bold magenta"
+    )
+
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("interest Rate", justify="right", style="green")
+    table.add_column("APR Rate", justify="right", style="green")
+    table.add_column("Down Payment", justify="right", style="yellow")
+    table.add_column("Term (Years)", justify="right", style="blue")
+    table.add_column("MIP Upfront", justify="right", style="orange3")
+    table.add_column("MIP Annual", justify="right", style="orange3")
+    table.add_column("Fees", justify="right", style="red")
+    table.add_column("Upfront Discounts", justify="right", style="red")
+    table.add_column("Preapproved Amount", justify="right", style="purple")
+    table.add_column("Expiration Date", style="white")
+
+    for loan in loans:
+        preapproved_amount = loan.preapproved_amount or 0.0
+
+        table.add_row(
+            str(loan.name),
+            f"{loan.interest_rate * 100:.2f}%",
+            f"{loan.apr_rate * 100:.2f}%",
+            f"{loan.down_payment_rate * 100:.1f}%",
+            str(loan.years),
+            f"{loan.mip_upfront_rate * 100:.2f}%",
+            f"{loan.mip_annual_rate * 100:.2f}%",
+            format_currency(loan.lender_fees),
+            f"${loan.upfront_discounts:,.2f}",
+            f"${preapproved_amount:,}",
+            str(loan.expiration_date),
+        )
+
+    console.print(table)

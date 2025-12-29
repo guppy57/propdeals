@@ -41,6 +41,7 @@ from display import (
     display_property_rent_estimates_table,
     display_property_investment_metrics_table,
     display_investment_requirements_panel,
+    display_loans
 )
 from helpers import (
     calculate_monthly_take_home,
@@ -917,7 +918,8 @@ def run_loans_options():
       else:
         console.print("[red]Failed to add loan[/red]")
     elif option == "View loans":
-      loans_provider.display_loans()
+      loans = loans_provider.get_loans()
+      display_loans(console=console, loans=loans)
     elif option == "Change loans for session":
       selected_loan_id = handle_changing_loan(supabase, console)
       LAST_USED_LOAN = selected_loan_id
