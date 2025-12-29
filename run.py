@@ -303,7 +303,10 @@ def apply_calculations_on_dataframe(df):
 
     new_columns["roommate_utilities"] = pd.Series([calculate_roommate_utilities(row, idx) for idx, row in df.iterrows()], index=df.index)
     new_columns["owner_utilities"] = new_columns["monthly_utility_total"] - new_columns["roommate_utilities"]
-    new_columns["total_monthly_cost"] = df["monthly_mortgage"] + df["monthly_mip"] + new_columns["operating_expenses"] + new_columns["monthly_utility_total"]
+    new_columns["total_monthly_cost"] = (
+        df["monthly_mortgage"] + new_columns["operating_expenses"] + new_columns["monthly_utility_total"] + 
+        (df["monthly_mip"] if LOAN["down_payment_rate"] < 0.2 else 0)
+    )
     new_columns["monthly_cash_flow"] = new_columns["total_rent"] - new_columns["total_monthly_cost"] + new_columns['ammoritization_estimate'] + new_columns["roommate_utilities"]
     new_columns["annual_cash_flow"] = new_columns["monthly_cash_flow"] * 12
     df = safe_concat_columns(df, new_columns)
@@ -376,15 +379,12 @@ def apply_investment_calculations(df):
     # Y1 and Y2 net rents with trash adjustments
     new_columns_stage1["mr_net_rent_y1"] = df['market_total_rent_estimate'] - df['min_rent'] + trash_adjustment_y1
     new_columns_stage1["mr_net_rent_y2"] = df["y2_rent_base"] + trash_adjustment_y2
-
     new_columns_stage1["mr_annual_rent_y1"] = new_columns_stage1["mr_net_rent_y1"] * 12
     new_columns_stage1["mr_annual_rent_y2"] = new_columns_stage1["mr_net_rent_y2"] * 12
-
     new_columns_stage1["mr_monthly_NOI_y1"] = new_columns_stage1["mr_net_rent_y1"] - new_columns_stage1["mr_operating_expenses"]
     new_columns_stage1["mr_monthly_NOI_y2"] = new_columns_stage1["mr_net_rent_y2"] - new_columns_stage1["mr_operating_expenses"]
     new_columns_stage1["mr_annual_NOI_y1"] = new_columns_stage1["mr_monthly_NOI_y1"] * 12
     new_columns_stage1["mr_annual_NOI_y2"] = new_columns_stage1["mr_monthly_NOI_y2"] * 12
-
     new_columns_stage1["mr_monthly_cash_flow_y1"] = new_columns_stage1["mr_net_rent_y1"] - new_columns_stage1["mr_total_monthly_cost"] + df["ammoritization_estimate"] + roommate_utilities_y1
     new_columns_stage1["mr_monthly_cash_flow_y2"] = new_columns_stage1["mr_net_rent_y2"] - new_columns_stage1["mr_total_monthly_cost"] + df["ammoritization_estimate"] + roommate_utilities_y2
     new_columns_stage1["mr_annual_cash_flow_y1"] = new_columns_stage1["mr_monthly_cash_flow_y1"] * 12
@@ -393,7 +393,6 @@ def apply_investment_calculations(df):
     new_columns_stage1["roommate_utilities_y2"] = roommate_utilities_y2
     new_columns_stage1["owner_utilities_y1"] = owner_utilities_y1
     new_columns_stage1["owner_utilities_y2"] = owner_utilities_y2
-
     df = safe_concat_columns(df, new_columns_stage1)
 
     new_columns_stage2 = {}
