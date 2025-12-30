@@ -245,10 +245,6 @@ def apply_calculations_on_dataframe(df):
     df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
     df[cols] = df[cols].fillna(0)
 
-    def calculate_estimate(this_row):
-        factor = 0.0075 if this_row['units'] == 0 else 0.0105
-        return (this_row['purchase_price'] * (1 + ASSUMPTIONS['closing_costs_rate'])) * factor
-
     basic_columns = {}
     basic_columns["cost_per_sqrft"] = df["purchase_price"] / df["square_ft"]
     basic_columns["home_age"] = 2025 - df["built_in"].fillna(2025)
@@ -265,7 +261,11 @@ def apply_calculations_on_dataframe(df):
 
     new_columns = {}
     new_columns["cash_needed"] = df["closing_costs"] + df["down_payment"] - LOAN["upfront_discounts"]
-    new_columns["quick_monthly_rent_estimate"] = df.apply(lambda x: calculate_estimate(x), axis=1)
+    # Vectorized rent estimate calculation (replaces slow .apply() with lambda)
+    factor = np.where(df['units'] == 0, 0.0075, 0.0105)
+    new_columns["quick_monthly_rent_estimate"] = (
+        df['purchase_price'] * (1 + ASSUMPTIONS['closing_costs_rate'])
+    ) * factor
     new_columns["ammoritization_estimate"] = df["monthly_mortgage"] - (df["loan_amount"] * LOAN["apr_rate"] / 12)
     new_columns["total_rent"] = new_columns['quick_monthly_rent_estimate']
     new_columns["annual_rent"] = new_columns["total_rent"] * 12
@@ -293,15 +293,18 @@ def apply_calculations_on_dataframe(df):
     )
 
     # Calculate roommate utility contributions (what roommates pay)
-    def calculate_roommate_utilities(row, idx):
-        beds_safe = row['beds'] if pd.notna(row['beds']) and row['beds'] > 0 else 3
-        utility_total = new_columns["monthly_utility_total"].iloc[idx]
-        if row['units'] == 0:  # SFH house hack
-            return utility_total * (beds_safe - 1) / beds_safe
-        else:  # Multi-family
-            return 0  # Owner pays full unit
+    # Vectorized calculation - replaces slow .iterrows() loop
+    beds_safe = df['beds'].fillna(3).clip(lower=1)
+    utility_total = new_columns["monthly_utility_total"]
 
-    new_columns["roommate_utilities"] = pd.Series([calculate_roommate_utilities(row, idx) for idx, row in df.iterrows()], index=df.index)
+    # SFH house hack: utility_total * (beds - 1) / beds
+    # Multi-family: 0 (owner pays full unit)
+    roommate_utilities_sfh = utility_total * (beds_safe - 1) / beds_safe
+    new_columns["roommate_utilities"] = np.where(
+        df['units'] == 0,
+        roommate_utilities_sfh,
+        0
+    )
     new_columns["owner_utilities"] = new_columns["monthly_utility_total"] - new_columns["roommate_utilities"]
     new_columns["total_monthly_cost"] = (
         df["monthly_mortgage"] + new_columns["operating_expenses"] + new_columns["monthly_utility_total"] + 
@@ -315,32 +318,26 @@ def apply_calculations_on_dataframe(df):
 def apply_investment_calculations(df):
     state_rate = get_state_tax_rate(ASSUMPTIONS['state_tax_code'])
     combined_tax_rate = FEDERAL_TAX_RATE + state_rate
+
+    # Vectorized rent base calculations (replaces 3 redundant .apply() calls)
+    # Calculate condition once and reuse for all three columns
+    is_sfh_with_estimate = (
+        (df['units'] == 0) &
+        df['rent_estimate'].notna() &
+        (df['rent_estimate'] > 0)
+    )
+
     rent_base_columns = {}
-    rent_base_columns["y1_opex_rent_base"] = df.apply(
-        lambda row: (
-            row["rent_estimate"]
-            if row["units"] == 0 and pd.notna(row["rent_estimate"]) and row["rent_estimate"] > 0
-            else row["market_total_rent_estimate"]
-        ),
-        axis=1
+    rent_base_columns["y1_opex_rent_base"] = np.where(
+        is_sfh_with_estimate,
+        df['rent_estimate'],
+        df['market_total_rent_estimate']
     )
-
-    rent_base_columns["y2_rent_base"] = df.apply(
-        lambda row: (
-            row["rent_estimate"]
-            if row["units"] == 0 and pd.notna(row["rent_estimate"]) and row["rent_estimate"] > 0
-            else row["market_total_rent_estimate"]
-        ),
-        axis=1
-    )
-
-    rent_base_columns["y2_rent_base_source"] = df.apply(
-        lambda row: (
-            "whole_property"
-            if row["units"] == 0 and pd.notna(row["rent_estimate"]) and row["rent_estimate"] > 0
-            else "room_sum"
-        ),
-        axis=1
+    rent_base_columns["y2_rent_base"] = rent_base_columns["y1_opex_rent_base"]
+    rent_base_columns["y2_rent_base_source"] = np.where(
+        is_sfh_with_estimate,
+        "whole_property",
+        "room_sum"
     )
 
     df = safe_concat_columns(df, rent_base_columns)

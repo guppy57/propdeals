@@ -1,11 +1,13 @@
 import os
+import time
 import pandas as pd
+from threading import Lock
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from supabase import create_client, Client
-from run import reload_dataframe, get_phase1_research_list 
+from run import reload_dataframe, get_phase1_research_list
 from inspections import InspectionsClient
 from helpers import convert_numpy_types
 
@@ -16,6 +18,14 @@ inspections_client = InspectionsClient(supabase)
 df = None
 rents = None
 loan = 2
+
+# Phase1 tour list cache
+phase1_cache = {
+    'data': None,
+    'timestamp': 0,
+    'lock': Lock()
+}
+CACHE_TTL_SECONDS = 300  # 5 minutes
 
 def load_loan_details():
     try:
@@ -59,6 +69,30 @@ def reload_dataframe_logic():
         properties_get_response = supabase.table('properties').select('*').limit(10000).execute()
         df = pd.DataFrame(properties_get_response.data)
         rents = None
+
+def get_cached_phase1_tour_list():
+    """Get cached phase1 tour list if fresh, otherwise recalculate"""
+    global phase1_cache
+
+    with phase1_cache['lock']:
+        current_time = time.time()
+        cache_age = current_time - phase1_cache['timestamp']
+
+        # Return cached data if still fresh
+        if phase1_cache['data'] is not None and cache_age < CACHE_TTL_SECONDS:
+            return phase1_cache['data']
+
+        # Cache miss or stale - recalculate
+        reload_dataframe_logic()
+        tour_list, _ = get_phase1_research_list()
+        converted = convert_numpy_types(tour_list.fillna(0).to_dict('records'))
+        result = {"properties": converted}
+
+        # Update cache
+        phase1_cache['data'] = result
+        phase1_cache['timestamp'] = current_time
+
+        return result
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -114,20 +148,22 @@ async def root():
 
 @app.get("/properties/phase1/tour-list")
 async def get_phase1_qualifiers_route():
-    global df
-
-    reload_dataframe_logic()
-    
-    if df is None or df.empty:
-        raise HTTPException(status_code=404, detail="No properties found")
-    
     try:
-        tour_list, _ = get_phase1_research_list() 
-        converted = convert_numpy_types(tour_list.fillna(0).to_dict('records'))
-        return { "properties": converted }
+        return get_cached_phase1_tour_list()
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail=f"Error filtering properties: {str(e)}")
+
+@app.post("/cache/invalidate")
+async def invalidate_cache():
+    """Invalidate all caches - call this after manual property updates"""
+    global phase1_cache
+
+    with phase1_cache['lock']:
+        phase1_cache['data'] = None
+        phase1_cache['timestamp'] = 0
+
+    return {"message": "Cache invalidated successfully"}
 
 if __name__ == "__main__":
     import uvicorn
