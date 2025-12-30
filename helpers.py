@@ -49,6 +49,9 @@ def convert_numpy_types(obj):
         return int(obj)
     elif isinstance(obj, np.floating):
         val = float(obj)
+        # Convert NaN to None (null in JSON)
+        if math.isnan(val):
+            return None
         # Replace inf/-inf with 0 for JSON compatibility
         if math.isinf(val):
             return 0
@@ -57,6 +60,8 @@ def convert_numpy_types(obj):
         return obj.tolist()
     elif isinstance(obj, float):
         # Handle regular Python floats too
+        if math.isnan(obj):
+            return None
         if math.isinf(obj):
             return 0
         return obj

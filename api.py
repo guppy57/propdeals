@@ -85,7 +85,7 @@ def get_cached_phase1_tour_list():
         # Cache miss or stale - recalculate
         reload_dataframe_logic()
         tour_list, _ = get_phase1_research_list()
-        converted = convert_numpy_types(tour_list.fillna(0).to_dict('records'))
+        converted = convert_numpy_types(tour_list.to_dict('records'))
         result = {"properties": converted}
 
         # Update cache
