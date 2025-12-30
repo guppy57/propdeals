@@ -574,6 +574,8 @@ PHASE1_CRITERIA = (
     "& mr_monthly_cash_flow_y1 >= -400 "
     "& ((units == 0 & mr_monthly_cash_flow_y2 >= 50) | (units > 0 & mr_monthly_cash_flow_y2 >= 400))"
 )
+PHASE1_TOUR_CRITERIA = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & status == 'active'"
+
 
 def get_all_phase0_qualifying_properties():
     """
@@ -631,8 +633,7 @@ def get_phase1_research_list():
     - Cashflow Year 2 must be above -$50
     """
     combined = get_combined_phase1_qualifiers()
-    criteria = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & status == 'active'"
-    qualified_df = combined.query(criteria).copy()
+    qualified_df = combined.query(PHASE1_TOUR_CRITERIA).copy()
     qualified_addresses = qualified_df['address1'].tolist()
     unqualified_df = combined[~combined['address1'].isin(qualified_addresses)].copy()
     return qualified_df, unqualified_df
