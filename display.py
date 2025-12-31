@@ -1598,7 +1598,7 @@ def display_all_properties_homestyle_analysis(console, df, properties_df=None):
         table.add_row(
             address,
             format_currency(purchase_price),
-            condition,
+            str(condition),
             format_currency(reno_cost),
             format_currency(total_project),
             format_currency(arv),
