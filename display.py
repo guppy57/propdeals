@@ -10,6 +10,17 @@ from helpers import (
     format_percentage,
 )
 
+def get_higher_is_better_color(value, p40, p60):
+    """Return color based on 40th/60th percentile (higher values = better = greener)"""
+    if pd.isna(value) or value is None:
+        return "dim white"
+    if value >= p60:
+        return "green"
+    elif value >= p40:
+        return "yellow"
+    else:
+        return "red"
+
 def display_all_properties(
     console,
     df,
@@ -37,6 +48,10 @@ def display_all_properties(
     cash_80th = dataframe["cash_needed"].quantile(0.80)
     costs_to_income_75th_percentile = dataframe["costs_to_income"].quantile(0.75)
     costs_to_income_25th_percentile = dataframe["costs_to_income"].quantile(0.25)
+    coc_y1_40th = dataframe["CoC_y1"].quantile(0.40)
+    coc_y1_60th = dataframe["CoC_y1"].quantile(0.60)
+    coc_y2_40th = dataframe["CoC_y2"].quantile(0.40)
+    coc_y2_60th = dataframe["CoC_y2"].quantile(0.60)
 
     def get_quintile_color(value, p20, p40, p60, p80):
         """Return color based on quintile position (lower values = better = greener)"""
@@ -63,6 +78,8 @@ def display_all_properties(
     table.add_column("CF", justify="right", no_wrap=True)
     table.add_column("MR_CFY1", justify="right")
     table.add_column("MR_CFY2", justify="right")
+    table.add_column("CoC_Y1", justify="right")
+    table.add_column("CoC_Y2", justify="right")
     table.add_column("Cost/Inc", justify="right", style="bold white")
     table.add_column("MGR_PP", justify="right")
     table.add_column("OpEx_Rent", justify="right")
@@ -111,9 +128,11 @@ def display_all_properties(
         
         def get_color(amount):
             return "green" if amount >= 0 else "red"
-        
+
         mrcfy1 = row['mr_monthly_cash_flow_y1']
         mrcfy2 = row['mr_monthly_cash_flow_y2']
+        coc_y1_style = get_higher_is_better_color(row["CoC_y1"], coc_y1_40th, coc_y1_60th)
+        coc_y2_style = get_higher_is_better_color(row["CoC_y2"], coc_y2_40th, coc_y2_60th)
 
         row_args.extend(
             [
@@ -124,6 +143,8 @@ def display_all_properties(
                 f"[{cf_style}]{format_currency(row['monthly_cash_flow'])}[/{cf_style}]",
                 f"[{get_color(mrcfy1)}]{format_currency(mrcfy1)}[/{get_color(mrcfy1)}]",
                 f"[{get_color(mrcfy2)}]{format_currency(mrcfy2)}[/{get_color(mrcfy2)}]",
+                f"[{coc_y1_style}]{format_percentage(row['CoC_y1'])}[/{coc_y1_style}]",
+                f"[{coc_y2_style}]{format_percentage(row['CoC_y2'])}[/{coc_y2_style}]",
                 f"[{costs_to_income_style}]{format_percentage(row['costs_to_income'])}[/{costs_to_income_style}]",
                 f"{format_percentage(row["MGR_PP"])}",
                 f"{format_percentage(row["OpEx_Rent"])}",
