@@ -1271,6 +1271,16 @@ def display_property_investment_metrics_table(console, row, is_single_family):
                   f"[bold {'red' if row['mr_annual_cash_flow_y1'] < 0 else 'green'}]{format_currency(row['mr_annual_cash_flow_y1'])}[/]",
                   f"[bold {'red' if row['mr_annual_cash_flow_y2'] < 0 else 'green'}]{format_currency(row['mr_annual_cash_flow_y2'])}[/]",
                   "", "", "", "")
+    table.add_row("Amortization Percent",
+                  format_percentage(row['ammoritization_estimate'] / row['monthly_mortgage']),
+                  "-",
+                  "-",
+                  "", "", "", "")
+    table.add_row("Amortization $ Applied",
+                  format_currency(row['ammoritization_estimate']),
+                  "-",
+                  "-",
+                  "", "", "", "")
     table.add_row("Monthly NOI",
                   "",
                   format_currency(row['mr_monthly_NOI_y1']),

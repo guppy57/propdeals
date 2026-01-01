@@ -385,8 +385,8 @@ def apply_investment_calculations(df):
     new_columns_stage1["mr_monthly_NOI_y2"] = new_columns_stage1["mr_net_rent_y2"] - new_columns_stage1["mr_operating_expenses"]
     new_columns_stage1["mr_annual_NOI_y1"] = new_columns_stage1["mr_monthly_NOI_y1"] * 12
     new_columns_stage1["mr_annual_NOI_y2"] = new_columns_stage1["mr_monthly_NOI_y2"] * 12
-    new_columns_stage1["mr_monthly_cash_flow_y1"] = new_columns_stage1["mr_net_rent_y1"] - new_columns_stage1["mr_total_monthly_cost"] + df["ammoritization_estimate"] + roommate_utilities_y1
-    new_columns_stage1["mr_monthly_cash_flow_y2"] = new_columns_stage1["mr_net_rent_y2"] - new_columns_stage1["mr_total_monthly_cost"] + df["ammoritization_estimate"] + roommate_utilities_y2
+    new_columns_stage1["mr_monthly_cash_flow_y1"] = new_columns_stage1["mr_net_rent_y1"] - new_columns_stage1["mr_total_monthly_cost"] + roommate_utilities_y1
+    new_columns_stage1["mr_monthly_cash_flow_y2"] = new_columns_stage1["mr_net_rent_y2"] - new_columns_stage1["mr_total_monthly_cost"] + roommate_utilities_y2
     new_columns_stage1["mr_annual_cash_flow_y1"] = new_columns_stage1["mr_monthly_cash_flow_y1"] * 12
     new_columns_stage1["mr_annual_cash_flow_y2"] = new_columns_stage1["mr_monthly_cash_flow_y2"] * 12
     new_columns_stage1["roommate_utilities_y1"] = roommate_utilities_y1
