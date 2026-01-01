@@ -41,7 +41,8 @@ from display import (
     display_property_rent_estimates_table,
     display_property_investment_metrics_table,
     display_investment_requirements_panel,
-    display_loans
+    display_loans,
+    display_current_context_panel
 )
 from helpers import (
     calculate_monthly_take_home,
@@ -116,6 +117,7 @@ def load_assumptions():
         "utility_trash_base": 18.00,      # per month (Des Moines: $17.91 for 96-gal cart)
         "utility_internet_base": 60.00,   # per month (Iowa avg: $59.75) - SFH only
         "utility_baseline_sqft": 1500,    # baseline square footage for scaling electric/gas
+        "description": assumptions_get_response.data['description']
     }
     console.print(
         f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]"
@@ -127,6 +129,7 @@ def load_loan(loan_id):
     loan_provider = LoansProvider(supabase_client=supabase, console=console)
     loan = loan_provider.get_loan_by_id(loan_id)
     LOAN = {
+        "name": loan.name,
         "interest_rate": loan.interest_rate,
         "apr_rate": loan.apr_rate,
         "down_payment_rate": loan.down_payment_rate,
@@ -930,6 +933,8 @@ if __name__ == "__main__":
   while using_application:
     choices = ['All properties', 'One property', 'One property - phase 1 research list', "Add new property", "Scripts", "Loans", "Refresh data", "Quit"]
     option = questionary.select("What would you like to analyze?", choices=choices).ask()
+
+    display_current_context_panel(console, LOAN["name"], ASSUMPTIONS["description"])
 
     if option == "Quit":
       using_application = False

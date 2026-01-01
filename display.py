@@ -1656,3 +1656,15 @@ def display_loans(console, loans):
         )
 
     console.print(table)
+
+def display_current_context_panel(console, loan_name, assumptions_description):
+    """Display a panel showing current loan and assumptions names."""
+    panel_content = (
+        f"[bold cyan]Loan:[/bold cyan] {loan_name}\n"
+        f"[bold cyan]Assumptions:[/bold cyan] {assumptions_description}"
+    )
+    console.print(Panel(
+        panel_content,
+        title="Current Configuration",
+        border_style="cyan"
+    ))
