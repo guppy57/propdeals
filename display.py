@@ -1699,3 +1699,15 @@ def display_current_context_panel(console, loan_name, assumptions_description):
         title="Current Configuration",
         border_style="cyan"
     ))
+
+def display_start_screen_summary(console):
+    ## Metrics
+    # list all metrics
+
+    ## TASKS (these should be listed with an "open checkbox")
+    # list all properties in Phase 0 lacking market research
+    # list all properties in Phase 1 missing neighborhoods, letter grades, and niche.com grades
+    # list all properties in Phase 1.5 Touring lacking estimate price
+    # list all properties in Phase 1.5 Touring missing assessments
+    # list all properties in Phase 1.5 Touring missing tours    
+    pass

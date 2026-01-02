@@ -5,6 +5,7 @@ import numpy as np
 import numpy_financial as npf
 import unicodedata
 
+
 def format_currency(value):
     """Format currency values with $ sign, commas, and 2 decimal places"""
     if pd.isna(value) or value is None:
@@ -13,11 +14,13 @@ def format_currency(value):
         return f"(${abs(value):,.2f})"
     return f"${value:,.2f}"
 
+
 def format_percentage(value):
     """Format percentage values with % sign and 2 decimal places"""
     if pd.isna(value) or value is None:
         return "N/A"
     return f"{value * 100:.2f}%"
+
 
 def format_number(value):
     """Format regular numbers to 2 decimal places"""
@@ -25,17 +28,19 @@ def format_number(value):
         return "N/A"
     return f"{value:.2f}"
 
+
 def calculate_mortgage(principal, annual_rate, years):
-  monthly_rate = annual_rate / 12
-  num_payments = years * 12
+    monthly_rate = annual_rate / 12
+    num_payments = years * 12
 
-  monthly_payment = (
-      principal
-      * (monthly_rate * ((1 + monthly_rate) ** num_payments))
-      / (((1 + monthly_rate) ** num_payments) - 1)
-  )
+    monthly_payment = (
+        principal
+        * (monthly_rate * ((1 + monthly_rate) ** num_payments))
+        / (((1 + monthly_rate) ** num_payments) - 1)
+    )
 
-  return monthly_payment
+    return monthly_payment
+
 
 def convert_numpy_types(obj):
     """Convert numpy types to native Python types for JSON serialization"""
@@ -68,7 +73,8 @@ def convert_numpy_types(obj):
     else:
         return obj
 
-def calculate_monthly_take_home(gross_annual_income, state_tax_code='IA'):
+
+def calculate_monthly_take_home(gross_annual_income, state_tax_code="IA"):
     """
     Calculate monthly after-tax pay for Iowa resident.
 
@@ -121,6 +127,7 @@ def calculate_monthly_take_home(gross_annual_income, state_tax_code='IA'):
 
     return monthly_take_home
 
+
 def express_percent_as_months_and_days(rate: float) -> str:
     try:
         days = math.ceil(365 * rate)
@@ -129,6 +136,7 @@ def express_percent_as_months_and_days(rate: float) -> str:
         return f"{months}m {days_left}d"
     except Exception:
         return "0m 0d"
+
 
 def is_property_maps_done_vectorized(df: pd.DataFrame) -> pd.Series:
     """
@@ -173,16 +181,22 @@ def is_property_maps_done_vectorized(df: pd.DataFrame) -> pd.Series:
     return is_done
 
 
-def is_property_assessment_done_vectorized(df: pd.DataFrame) -> pd.Series:
+def is_property_assessment_done_vectorized(df: pd.DataFrame) -> pd.DataFrame:
     """
     Vectorized version of is_property_assessment_done.
-    Returns a Series of bool indicating whether each property has complete assessment data.
+    Returns a DataFrame containing only properties with INCOMPLETE assessment data.
+
+    Checks for completeness across:
+    - 9 boolean fields (obtained_county_records, has_short_ownership_pattern, etc.)
+    - 3 numeric fields (previous_owner_count, last_purchase_price, last_purchase_date)
+    - 5 text fields (setbacks, easements, county_record_notes, permit_notes, whitepages_notes)
 
     Args:
         df: DataFrame with properties
 
     Returns:
-        Series of bool values
+        DataFrame containing only rows where assessment is incomplete.
+        Returns empty DataFrame if all properties have complete assessments.
     """
     bool_fields = [
         "obtained_county_records",
@@ -206,25 +220,30 @@ def is_property_assessment_done_vectorized(df: pd.DataFrame) -> pd.Series:
         "whitepages_notes",
     ]
 
-    # Start with all True
-    is_done = pd.Series(True, index=df.index)
+    # Create mask for incomplete properties (True = incomplete)
+    is_incomplete = pd.Series(False, index=df.index)
 
-    # Check bool_fields and other_fields - must not be None or NaN
+    # Check bool_fields and other_fields - mark as incomplete if field is null
     for field in bool_fields + other_fields:
         if field in df.columns:
-            is_done &= df[field].notna()
+            is_incomplete |= df[field].isna()
         else:
-            is_done = False  # Column doesn't exist
+            is_incomplete = (
+                True  # Mark all as incomplete if required column doesn't exist
+            )
 
-    # Check text_fields - must not be None, NaN, or empty string
+    # Check text_fields - mark as incomplete if null or empty string
     for field in text_fields:
         if field in df.columns:
-            # Must be not null AND not empty string
-            is_done &= df[field].notna() & (df[field] != "")
+            is_incomplete |= df[field].isna() | (df[field] == "")
         else:
-            is_done = False  # Column doesn't exist
+            is_incomplete = (
+                True  # Mark all as incomplete if required column doesn't exist
+            )
 
-    return is_done
+    # Return only the incomplete properties
+    return df[is_incomplete].copy()
+
 
 def get_expected_gains(row, length_years, assumptions, loan):
     current_home_value = row["purchase_price"]
@@ -234,13 +253,15 @@ def get_expected_gains(row, length_years, assumptions, loan):
 
     # Calculate when MIP drops off (None for FHA, year number for conventional)
     mip_dropoff_year = calculate_mip_dropoff_year(row, loan)
-    annual_mip = row.get('monthly_mip', 0) * 12
+    annual_mip = row.get("monthly_mip", 0) * 12
 
     # Year 1 is the base year (no appreciation applied)
     cumulative_cashflow = y1_cashflow
     for year in range(2, length_years + 1):
         # Year 2 starts with base y2_cashflow, then compounds
-        yearly_cashflow = y2_cashflow * ((1 + assumptions['rent_appreciation_rate']) ** (year - 2))
+        yearly_cashflow = y2_cashflow * (
+            (1 + assumptions["rent_appreciation_rate"]) ** (year - 2)
+        )
 
         # Add back MIP if it has dropped off (conventional only)
         if mip_dropoff_year is not None and year >= mip_dropoff_year:
@@ -248,10 +269,14 @@ def get_expected_gains(row, length_years, assumptions, loan):
 
         cumulative_cashflow += yearly_cashflow
 
-    rate = assumptions['appreciation_rate'] if row["units"] == 0 else assumptions['mf_appreciation_rate']
+    rate = (
+        assumptions["appreciation_rate"]
+        if row["units"] == 0
+        else assumptions["mf_appreciation_rate"]
+    )
     appreciation_gains = current_home_value * ((1 + rate) ** length_years - 1)
-    monthly_rate = loan['apr_rate'] / 12
-    num_payments = loan['loan_length_years'] * 12
+    monthly_rate = loan["apr_rate"] / 12
+    num_payments = loan["loan_length_years"] * 12
     total_payments_in_period = length_years * 12
     remaining_balance = loan_amount * (
         (
@@ -262,6 +287,7 @@ def get_expected_gains(row, length_years, assumptions, loan):
     )
     equity_gains = loan_amount - remaining_balance
     return cumulative_cashflow + appreciation_gains + equity_gains
+
 
 def calculate_payback_period(row, assumptions, loan):
     """Calculate payback period accounting for Year 1 losses, rent appreciation, and MIP drop-off"""
@@ -279,18 +305,20 @@ def calculate_payback_period(row, assumptions, loan):
 
     # Calculate when MIP drops off
     mip_dropoff_year = calculate_mip_dropoff_year(row, loan)
-    annual_mip = row.get('monthly_mip', 0) * 12
+    annual_mip = row.get("monthly_mip", 0) * 12
 
     # Iterate through years until recovered
     cumulative_recovery = 0
     year = 1  # Year 1 already accounted for above
 
-    while cumulative_recovery < total_to_recover and year <= 100:  # 100 year cap for safety
+    while (
+        cumulative_recovery < total_to_recover and year <= 100
+    ):  # 100 year cap for safety
         year += 1
 
         # Calculate this year's cash flow
         yearly_cashflow = row["mr_annual_cash_flow_y2"] * (
-            (1 + assumptions['rent_appreciation_rate']) ** (year - 2)
+            (1 + assumptions["rent_appreciation_rate"]) ** (year - 2)
         )
 
         # Add back MIP if dropped off
@@ -302,10 +330,13 @@ def calculate_payback_period(row, assumptions, loan):
         # Check if we've recovered enough
         if cumulative_recovery >= total_to_recover:
             # Interpolate to get fractional year
-            years_into_period = (total_to_recover - (cumulative_recovery - yearly_cashflow)) / yearly_cashflow
+            years_into_period = (
+                total_to_recover - (cumulative_recovery - yearly_cashflow)
+            ) / yearly_cashflow
             return year - 1 + years_into_period
 
     return float("inf")  # Didn't recover within 100 years
+
 
 def get_state_tax_rate(state_code):
     """Get state marginal tax rate from state code"""
@@ -315,25 +346,35 @@ def get_state_tax_rate(state_code):
     }
     return state_rates.get(state_code, 0.05)  # Default to 5% if state not found
 
+
 def calculate_net_proceeds(
-    row, years, selling_costs_rate=0.07, capital_gains_rate=0.15, assumptions={}, loan={}
+    row,
+    years,
+    selling_costs_rate=0.07,
+    capital_gains_rate=0.15,
+    assumptions={},
+    loan={},
 ):
     """Calculate net proceeds from sale after N years"""
     # Future property value (single family vs multi-family appreciation rates)
-    rate = assumptions['appreciation_rate'] if row["units"] == 0 else assumptions['mf_appreciation_rate']
+    rate = (
+        assumptions["appreciation_rate"]
+        if row["units"] == 0
+        else assumptions["mf_appreciation_rate"]
+    )
     future_value = row["purchase_price"] * ((1 + rate) ** years)
 
     # Remaining loan balance
     loan_amount = row["loan_amount"]
-    monthly_rate = loan['apr_rate'] / 12
-    num_payments = loan['loan_length_years'] * 12
+    monthly_rate = loan["apr_rate"] / 12
+    num_payments = loan["loan_length_years"] * 12
     total_payments_in_period = years * 12
     additional_loan = (
         row["5_pct_loan"]
         if (
             row["units"] == 0
-            and assumptions['using_ia_fhb_prog']
-            and assumptions['ia_fhb_prog_upfront_option'] == "LOAN"
+            and assumptions["using_ia_fhb_prog"]
+            and assumptions["ia_fhb_prog_upfront_option"] == "LOAN"
         )
         else 0
     )
@@ -360,6 +401,7 @@ def calculate_net_proceeds(
 
     return net_proceeds
 
+
 def calculate_irr(row, years, assumptions, loan):
     """Calculate Internal Rate of Return over N years"""
     try:
@@ -371,12 +413,12 @@ def calculate_irr(row, years, assumptions, loan):
 
         # Calculate when MIP drops off (None for FHA, year number for conventional)
         mip_dropoff_year = calculate_mip_dropoff_year(row, loan)
-        annual_mip = row.get('monthly_mip', 0) * 12
+        annual_mip = row.get("monthly_mip", 0) * 12
 
         # Years 2 through N: compounded with rent appreciation
         for year in range(2, years + 1):
             yearly_cashflow = row["mr_annual_cash_flow_y2"] * (
-                (1 + assumptions['rent_appreciation_rate']) ** (year - 2)
+                (1 + assumptions["rent_appreciation_rate"]) ** (year - 2)
             )
 
             # Add back MIP if it has dropped off this year (conventional loans only)
@@ -386,7 +428,9 @@ def calculate_irr(row, years, assumptions, loan):
             cash_flows.append(yearly_cashflow)
 
         # Final year: add net proceeds from sale
-        net_proceeds = calculate_net_proceeds(row, years, assumptions=assumptions, loan=loan)
+        net_proceeds = calculate_net_proceeds(
+            row, years, assumptions=assumptions, loan=loan
+        )
         cash_flows[-1] += net_proceeds
 
         # Calculate IRR
@@ -394,6 +438,7 @@ def calculate_irr(row, years, assumptions, loan):
         return irr if not math.isnan(irr) else 0
     except Exception:
         return 0  # Return 0 if calculation fails
+
 
 def calculate_npv(row, years, assumptions, loan):
     """Calculate Net Present Value over N years using discount_rate"""
@@ -405,12 +450,12 @@ def calculate_npv(row, years, assumptions, loan):
 
     # Calculate when MIP drops off (None for FHA, year number for conventional)
     mip_dropoff_year = calculate_mip_dropoff_year(row, loan)
-    annual_mip = row.get('monthly_mip', 0) * 12
+    annual_mip = row.get("monthly_mip", 0) * 12
 
     # Years 2 through N: compounded with rent appreciation
     for year in range(2, years + 1):
         yearly_cashflow = row["mr_annual_cash_flow_y2"] * (
-            (1 + assumptions['rent_appreciation_rate']) ** (year - 2)
+            (1 + assumptions["rent_appreciation_rate"]) ** (year - 2)
         )
 
         # Add back MIP if it has dropped off this year (conventional loans only)
@@ -420,22 +465,25 @@ def calculate_npv(row, years, assumptions, loan):
         cash_flows.append(yearly_cashflow)
 
     # Final year: add net proceeds from sale
-    net_proceeds = calculate_net_proceeds(row, years, assumptions=assumptions, loan=loan)
+    net_proceeds = calculate_net_proceeds(
+        row, years, assumptions=assumptions, loan=loan
+    )
     cash_flows[-1] += net_proceeds
 
     # Calculate NPV: discount each cash flow back to present
     npv = 0
     for year, cash_flow in enumerate(cash_flows):
-        npv += cash_flow / ((1 + assumptions['discount_rate']) ** year)
+        npv += cash_flow / ((1 + assumptions["discount_rate"]) ** year)
 
     return npv
+
 
 def calculate_roe(row, loan):
     """Calculate Return on Equity for Year 2"""
     # Equity after Year 1 = down payment + principal paid in Year 1
     loan_amount = row["loan_amount"]
-    monthly_rate = loan['apr_rate'] / 12
-    num_payments = loan['loan_length_years'] * 12
+    monthly_rate = loan["apr_rate"] / 12
+    num_payments = loan["loan_length_years"] * 12
 
     # Remaining balance after 1 year (12 payments)
     remaining_balance_y1 = loan_amount * (
@@ -454,6 +502,7 @@ def calculate_roe(row, loan):
         return row["mr_annual_cash_flow_y2"] / current_equity
     return 0
 
+
 def calculate_mip_dropoff_year(row, loan):
     """
     Calculate which year MIP/PMI drops off for conventional loans.
@@ -466,20 +515,20 @@ def calculate_mip_dropoff_year(row, loan):
         int: Year when MIP drops off (1-based), or None if never drops off (FHA)
     """
     # FHA loans: MIP never drops off
-    if loan.get('loan_type') == 'FHA':
+    if loan.get("loan_type") == "FHA":
         return None
 
     # Conventional loans: MIP drops off when LTV ≤ 80%
-    loan_amount = row['loan_amount']
-    purchase_price = row['purchase_price']
-    monthly_rate = loan['apr_rate'] / 12
-    num_payments = loan['loan_length_years'] * 12
+    loan_amount = row["loan_amount"]
+    purchase_price = row["purchase_price"]
+    monthly_rate = loan["apr_rate"] / 12
+    num_payments = loan["loan_length_years"] * 12
 
     # Target: remaining balance ≤ 80% of original purchase price
     target_balance = purchase_price * 0.80
 
     # Iterate through years to find when balance drops below target
-    for year in range(1, loan['loan_length_years'] + 1):
+    for year in range(1, loan["loan_length_years"] + 1):
         months_paid = year * 12
         remaining_balance = loan_amount * (
             ((1 + monthly_rate) ** num_payments - (1 + monthly_rate) ** months_paid)
@@ -492,8 +541,10 @@ def calculate_mip_dropoff_year(row, loan):
     # Should not reach here if loan terms are normal, but return None as fallback
     return None
 
+
 def calculate_additional_room_rent(row):
     return int(row["min_rent_unit_beds"] - 1) * 400
+
 
 def calculate_quintile_colors_for_metrics(dataframe):
     """
@@ -584,6 +635,7 @@ def calculate_quintile_colors_for_metrics(dataframe):
 
     return color_map
 
+
 def normalize_neighborhood_name(name):
     """
     Normalize neighborhood name by:
@@ -609,6 +661,7 @@ def normalize_neighborhood_name(name):
 
     return normalized.lower()
 
+
 def estimate_renovation_cost(row):
     """
     Estimate professional renovation costs based on property condition score and age.
@@ -630,11 +683,17 @@ def estimate_renovation_cost(row):
     beds = row.get("beds", 3)
     baths = row.get("baths", 2)
     units = row.get("units", 0)
-    estimated_windows = int(beds * 2.5 + 3) # Estimate window count: 2.5 windows per bedroom + 3 common area windows
-    units_for_calcs = max(1, units if not pd.isna(units) else 1) # Treat units=0 (single-family) as 1 unit for per-unit cost calculations
+    estimated_windows = int(
+        beds * 2.5 + 3
+    )  # Estimate window count: 2.5 windows per bedroom + 3 common area windows
+    units_for_calcs = max(
+        1, units if not pd.isna(units) else 1
+    )  # Treat units=0 (single-family) as 1 unit for per-unit cost calculations
 
     if built_in < 1950:
-        age_multiplier = 1.20  # +20% for pre-1950 (systems likely need full replacement)
+        age_multiplier = (
+            1.20  # +20% for pre-1950 (systems likely need full replacement)
+        )
     elif built_in < 1980:
         age_multiplier = 1.10  # +10% for 1950-1980 (older systems)
     elif built_in < 2000:
@@ -704,11 +763,14 @@ def estimate_renovation_cost(row):
             "fixtures_update": 500,
         }
 
-    base_renovation_cost = sum(components.values()) # Calculate total base renovation cost
-    age_adjusted_cost = base_renovation_cost * age_multiplier # Apply age adjustment
-    contingency_factor = 1.10 # Add 10% contingency for unexpected issues
+    base_renovation_cost = sum(
+        components.values()
+    )  # Calculate total base renovation cost
+    age_adjusted_cost = base_renovation_cost * age_multiplier  # Apply age adjustment
+    contingency_factor = 1.10  # Add 10% contingency for unexpected issues
     final_cost = int(age_adjusted_cost * contingency_factor)
     return final_cost
+
 
 def estimate_arv(row, renovation_cost):
     """
@@ -747,3 +809,16 @@ def estimate_arv(row, renovation_cost):
     # Ensure ARV is at least the purchase price
     arv = max(arv, purchase_price)
     return float(arv)
+
+
+def get_properties_missing_tours(supabase, console, df):
+    try:
+        response = (
+            supabase.table("property_tour_screening").select("address1").execute()
+        )
+        address_list = [row["address1"] for row in response.data]
+        filtered_df = df[~df["address1"].isin(address_list)].copy()
+        return filtered_df
+    except Exception as e:
+        console.print(f"Error getting property tour data: {e}", style="bold red")
+        return df.copy()  # Return full dataframe on error
