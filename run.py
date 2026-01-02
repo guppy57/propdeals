@@ -182,7 +182,6 @@ def safe_concat_columns(df, new_columns_dict):
     # Add all new columns at once (maintains fragmentation fix)
     return pd.concat([df, pd.DataFrame(new_columns_dict, index=df.index)], axis=1)
 
-
 def apply_closing_costs_calculations(df):
     totals = {}
     lender_costs = {}
@@ -305,8 +304,7 @@ def apply_closing_costs_calculations(df):
 
     return df
 
-
-def apply_calculations_on_dataframe(df):
+def apply_calculations_on_dataframe(df, loan, assumptions):
     cols = ["walk_score", "transit_score", "bike_score"]
     df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
     df[cols] = df[cols].fillna(0)
@@ -319,45 +317,45 @@ def apply_calculations_on_dataframe(df):
     upfront_mip = (
         0
         if LOAN["loan_type"] == "FHA"
-        else (df["purchase_price"] * LOAN["mip_upfront_rate"])
+        else (df["purchase_price"] * loan["mip_upfront_rate"])
     )  # upfront PMI only on FHA loans
     basic_columns["loan_amount"] = (
         df["purchase_price"] - basic_columns["down_payment"] + upfront_mip
     )
     basic_columns["monthly_mortgage"] = basic_columns["loan_amount"].apply(
-        lambda x: calculate_mortgage(x, LOAN["apr_rate"], LOAN["loan_length_years"])
+        lambda x: calculate_mortgage(x, loan["apr_rate"], loan["loan_length_years"])
     )
     basic_columns["monthly_mip"] = (
-        basic_columns["loan_amount"] * LOAN["mip_annual_rate"]
+        basic_columns["loan_amount"] * loan["mip_annual_rate"]
     ) / 12
     basic_columns["monthly_taxes"] = (
-        df["purchase_price"] * ASSUMPTIONS["property_tax_rate"]
+        df["purchase_price"] * assumptions["property_tax_rate"]
     ) / 12
     basic_columns["monthly_insurance"] = (
-        df["purchase_price"] * ASSUMPTIONS["home_insurance_rate"]
+        df["purchase_price"] * assumptions["home_insurance_rate"]
     ) / 12
     df = safe_concat_columns(df, basic_columns)
     df = apply_closing_costs_calculations(df)
 
     new_columns = {}
     new_columns["cash_needed"] = (
-        df["closing_costs"] + df["down_payment"] - LOAN["upfront_discounts"]
+        df["closing_costs"] + df["down_payment"] - loan["upfront_discounts"]
     )
     # Vectorized rent estimate calculation (replaces slow .apply() with lambda)
     factor = np.where(df["units"] == 0, 0.0075, 0.0105)
     new_columns["quick_monthly_rent_estimate"] = (
-        df["purchase_price"] * (1 + ASSUMPTIONS["closing_costs_rate"])
+        df["purchase_price"] * (1 + assumptions["closing_costs_rate"])
     ) * factor
     new_columns["ammoritization_estimate"] = df["monthly_mortgage"] - (
-        df["loan_amount"] * LOAN["apr_rate"] / 12
+        df["loan_amount"] * loan["apr_rate"] / 12
     )
     new_columns["total_rent"] = new_columns["quick_monthly_rent_estimate"]
     new_columns["annual_rent"] = new_columns["total_rent"] * 12
     new_columns["monthly_vacancy_costs"] = (
-        new_columns["total_rent"] * ASSUMPTIONS["vacancy_rate"]
+        new_columns["total_rent"] * assumptions["vacancy_rate"]
     )
     new_columns["monthly_repair_costs"] = (
-        new_columns["total_rent"] * ASSUMPTIONS["repair_savings_rate"]
+        new_columns["total_rent"] * assumptions["repair_savings_rate"]
     )
     new_columns["operating_expenses"] = (
         new_columns["monthly_vacancy_costs"]
@@ -369,27 +367,27 @@ def apply_calculations_on_dataframe(df):
     # For SFH: owner_unit_sqft = total sqft
     # For multi-family: owner_unit_sqft = actual unit sqft from rent_estimates
     sqft_scaling_owner_unit = (
-        df["owner_unit_sqft"] / ASSUMPTIONS["utility_baseline_sqft"]
+        df["owner_unit_sqft"] / assumptions["utility_baseline_sqft"]
     )
     units_for_calcs = df["units"].apply(
         lambda x: max(1, x if pd.notna(x) and x > 0 else 1)
     )
     new_columns["monthly_utility_electric"] = (
-        ASSUMPTIONS["utility_electric_base"] * sqft_scaling_owner_unit
+        assumptions["utility_electric_base"] * sqft_scaling_owner_unit
     )
     new_columns["monthly_utility_gas"] = (
-        ASSUMPTIONS["utility_gas_base"] * sqft_scaling_owner_unit
+        assumptions["utility_gas_base"] * sqft_scaling_owner_unit
     )
     # Water: Tenants pay their own water bills directly (owner pays $0)
     new_columns["monthly_utility_water"] = df.apply(
-        lambda row: 0 if row["units"] > 0 else ASSUMPTIONS["utility_water_base"], axis=1
+        lambda row: 0 if row["units"] > 0 else assumptions["utility_water_base"], axis=1
     )
     new_columns["monthly_utility_trash"] = (
-        ASSUMPTIONS["utility_trash_base"] * units_for_calcs
+        assumptions["utility_trash_base"] * units_for_calcs
     )
     # Internet: SFH pays for house-hacking connection; MF tenants pay their own
     new_columns["monthly_utility_internet"] = df.apply(
-        lambda row: ASSUMPTIONS["utility_internet_base"] if row["units"] == 0 else 0,
+        lambda row: assumptions["utility_internet_base"] if row["units"] == 0 else 0,
         axis=1,
     )
     new_columns["monthly_utility_total"] = (
@@ -430,9 +428,8 @@ def apply_calculations_on_dataframe(df):
     df = safe_concat_columns(df, new_columns)
     return df
 
-
-def apply_investment_calculations(df):
-    state_rate = get_state_tax_rate(ASSUMPTIONS["state_tax_code"])
+def apply_investment_calculations(df, loan, assumptions):
+    state_rate = get_state_tax_rate(assumptions["state_tax_code"])
     combined_tax_rate = FEDERAL_TAX_RATE + state_rate
 
     # Vectorized rent base calculations (replaces 3 redundant .apply() calls)
@@ -467,10 +464,10 @@ def apply_investment_calculations(df):
 
     new_columns_stage1 = {}
     new_columns_stage1["mr_monthly_vacancy_costs"] = (
-        df["y1_opex_rent_base"] * ASSUMPTIONS["vacancy_rate"]
+        df["y1_opex_rent_base"] * assumptions["vacancy_rate"]
     )
     new_columns_stage1["mr_monthly_repair_costs"] = (
-        df["y1_opex_rent_base"] * ASSUMPTIONS["repair_savings_rate"]
+        df["y1_opex_rent_base"] * assumptions["repair_savings_rate"]
     )
     new_columns_stage1["mr_operating_expenses"] = (
         new_columns_stage1["mr_monthly_vacancy_costs"]
@@ -588,8 +585,8 @@ def apply_investment_calculations(df):
         axis=1,
         args=(
             5,
-            ASSUMPTIONS,
-            LOAN,
+            assumptions,
+            loan,
         ),
     )
     new_columns_stage2["10y_forecast"] = df.apply(
@@ -597,8 +594,8 @@ def apply_investment_calculations(df):
         axis=1,
         args=(
             10,
-            ASSUMPTIONS,
-            LOAN,
+            assumptions,
+            loan,
         ),
     )
     new_columns_stage2["20y_forecast"] = df.apply(
@@ -606,8 +603,8 @@ def apply_investment_calculations(df):
         axis=1,
         args=(
             20,
-            ASSUMPTIONS,
-            LOAN,
+            assumptions,
+            loan,
         ),
     )
     new_columns_stage2["mobility_score"] = (
@@ -642,9 +639,9 @@ def apply_investment_calculations(df):
             (
                 1
                 + (
-                    ASSUMPTIONS["appreciation_rate"]
+                    assumptions["appreciation_rate"]
                     if row["units"] == 0
-                    else ASSUMPTIONS["mf_appreciation_rate"]
+                    else assumptions["mf_appreciation_rate"]
                 )
             )
             ** 5
@@ -657,9 +654,9 @@ def apply_investment_calculations(df):
             (
                 1
                 + (
-                    ASSUMPTIONS["appreciation_rate"]
+                    assumptions["appreciation_rate"]
                     if row["units"] == 0
-                    else ASSUMPTIONS["mf_appreciation_rate"]
+                    else assumptions["mf_appreciation_rate"]
                 )
             )
             ** 10
@@ -672,9 +669,9 @@ def apply_investment_calculations(df):
             (
                 1
                 + (
-                    ASSUMPTIONS["appreciation_rate"]
+                    assumptions["appreciation_rate"]
                     if row["units"] == 0
-                    else ASSUMPTIONS["mf_appreciation_rate"]
+                    else assumptions["mf_appreciation_rate"]
                 )
             )
             ** 20
@@ -684,17 +681,17 @@ def apply_investment_calculations(df):
     new_columns_stage2["net_proceeds_5yr"] = df.apply(
         calculate_net_proceeds,
         axis=1,
-        args=(5, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, ASSUMPTIONS, LOAN),
+        args=(5, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, assumptions, loan),
     )
     new_columns_stage2["net_proceeds_10yr"] = df.apply(
         calculate_net_proceeds,
         axis=1,
-        args=(10, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, ASSUMPTIONS, LOAN),
+        args=(10, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, assumptions, loan),
     )
     new_columns_stage2["net_proceeds_20yr"] = df.apply(
         calculate_net_proceeds,
         axis=1,
-        args=(20, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, ASSUMPTIONS, LOAN),
+        args=(20, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, assumptions, loan),
     )
     new_columns_stage2["equity_multiple_5yr"] = (
         new_columns_stage2["5y_forecast"] + df["cash_needed"]
@@ -718,32 +715,32 @@ def apply_investment_calculations(df):
         calculate_roe,
         axis=1,
         args=[
-            LOAN,
+            loan,
         ],
     )
     new_columns_stage2["leverage_benefit"] = new_columns_stage2["CoC_y2"] - (
         df["mr_annual_NOI_y2"] / df["purchase_price"]
     )
     new_columns_stage2["payback_period_years"] = df.apply(
-        lambda row: calculate_payback_period(row, ASSUMPTIONS, LOAN), axis=1
+        lambda row: calculate_payback_period(row, assumptions, loan), axis=1
     )
     new_columns_stage2["irr_5yr"] = df.apply(
-        calculate_irr, axis=1, args=(5, ASSUMPTIONS, LOAN)
+        calculate_irr, axis=1, args=(5, assumptions, loan)
     )
     new_columns_stage2["irr_10yr"] = df.apply(
-        calculate_irr, axis=1, args=(10, ASSUMPTIONS, LOAN)
+        calculate_irr, axis=1, args=(10, assumptions, loan)
     )
     new_columns_stage2["irr_20yr"] = df.apply(
-        calculate_irr, axis=1, args=(20, ASSUMPTIONS, LOAN)
+        calculate_irr, axis=1, args=(20, assumptions, loan)
     )
     new_columns_stage2["npv_5yr"] = df.apply(
-        calculate_npv, axis=1, args=(5, ASSUMPTIONS, LOAN)
+        calculate_npv, axis=1, args=(5, assumptions, loan)
     )
     new_columns_stage2["npv_10yr"] = df.apply(
-        calculate_npv, axis=1, args=(10, ASSUMPTIONS, LOAN)
+        calculate_npv, axis=1, args=(10, assumptions, loan)
     )
     new_columns_stage2["npv_20yr"] = df.apply(
-        calculate_npv, axis=1, args=(20, ASSUMPTIONS, LOAN)
+        calculate_npv, axis=1, args=(20, assumptions, loan)
     )
     new_columns_stage2["fair_value_5yr"] = (
         df["purchase_price"] + new_columns_stage2["npv_5yr"]
@@ -776,7 +773,6 @@ def apply_investment_calculations(df):
 
     df = safe_concat_columns(df, new_columns_stage2)
     return df
-
 
 def apply_homestyle_calculations(df):
     df["property_condition_score"] = df["property_condition_score"].fillna(
@@ -870,7 +866,6 @@ def apply_homestyle_calculations(df):
     df = safe_concat_columns(df, new_columns_stage2)
     return df
 
-
 def reload_dataframe():
     global df, rents
     console.print("[yellow]Reloading property data...[/yellow]")
@@ -920,8 +915,8 @@ def reload_dataframe():
 
     neighborhoods_df = neighborhoods.get_neighborhoods_dataframe(supabase)
     df = df.merge(neighborhoods_df, on="address1", how="left")
-    df = apply_calculations_on_dataframe(df=df)
-    df = apply_investment_calculations(df=df)
+    df = apply_calculations_on_dataframe(df=df, loan=LOAN, assumptions=ASSUMPTIONS)
+    df = apply_investment_calculations(df=df, loan=LOAN, assumptions=ASSUMPTIONS)
     df = apply_homestyle_calculations(df=df)
     console.print("[green]Property data reloaded successfully![/green]")
 
@@ -1076,8 +1071,8 @@ def get_reduced_pp_df(reduction_factor):
     dataframe["purchase_price"] = dataframe["purchase_price"] * (
         1 - reduction_factor
     )  # new purchase price
-    dataframe = apply_calculations_on_dataframe(df=dataframe)
-    dataframe = apply_investment_calculations(df=dataframe)
+    dataframe = apply_calculations_on_dataframe(df=dataframe, loan=LOAN, assumptions=ASSUMPTIONS)
+    dataframe = apply_investment_calculations(df=dataframe, loan=LOAN, assumptions=ASSUMPTIONS)
     return dataframe
 
 
@@ -1354,7 +1349,7 @@ def run_all_properties_options():
 
 def run_scripts_options():
     using_scripts = True
-    choices = ["Go back", "Add property valuations to all Phase 1.5 qualifiers"]
+    choices = ["Go back", "Add property valuations to all Phase 1.5 qualifiers", "Automate market research for Phase 0 properties"]
     scripts = ScriptsProvider(supabase_client=supabase, console=console)
 
     while using_scripts:
@@ -1365,6 +1360,22 @@ def run_scripts_options():
             qualified_df, _ = get_phase1_research_list()
             scripts.run_add_property_values_script(properties_df=qualified_df)
             reload_dataframe()
+        elif option == "Automate market research for Phase 0 properties":
+            phase0_lacking_df = get_phase0_qualifiers_lacking_research()
+
+            if len(phase0_lacking_df) == 0:
+                console.print("[yellow]No Phase 0 properties lacking research![/yellow]")
+            else:
+                console.print(f"[cyan]Found {len(phase0_lacking_df)} properties needing research[/cyan]")
+                confirm = questionary.confirm(
+                    f"Generate market research for all {len(phase0_lacking_df)} properties? This will take ~30-60 seconds per property."
+                ).ask()
+
+                if confirm:
+                    scripts.run_market_research_automation_script(
+                        properties_df=phase0_lacking_df
+                    )
+                    reload_dataframe()
 
 
 def run_loans_options():
