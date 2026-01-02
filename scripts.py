@@ -5,6 +5,8 @@ from supabase import Client
 from rich.console import Console
 from rich.panel import Panel
 from display import display_property_value_comparison
+from handlers import handle_rent_research_after_add
+from add_property import mark_property_as_researched
 
 # RentCast API headers
 RENTCAST_HEADERS = {
@@ -266,3 +268,85 @@ Comparables Saved: [green]{comps_saved}[/green]
             display_property_value_comparison(self.console, summary_data)
         else:
             self.console.print("[dim]No properties were updated, so no comparison table to display[/dim]")
+
+    def run_market_research_automation_script(self, properties_df):
+        """
+        Automate market research generation for Phase 0 properties lacking research.
+
+        For each property:
+        - Generates per-unit/per-room rent research
+        - Generates property-wide research (SFH only)
+        - Updates database with estimates
+        - Marks property as researched
+
+        Args:
+            properties_df: DataFrame of Phase 0 properties to process
+        """
+        # Filter to properties lacking market research
+        lacking_research_df = properties_df[properties_df['has_market_research'] == False].copy()
+
+        # Initialize tracking variables
+        total = len(lacking_research_df)
+        successfully_researched = 0
+        skipped = 0
+        errors = 0
+
+        self.console.print(f"\n[bold cyan]Starting market research automation for {total} properties...[/bold cyan]\n")
+
+        # Process each property
+        for i, (_, row) in enumerate(lacking_research_df.iterrows(), 1):
+            address1 = row.get('address1', 'Unknown')
+
+            # Print progress
+            self.console.print(f"[cyan]{i}/{total}[/cyan] Processing: {address1}")
+
+            # Skip check - verify still needs research (defensive programming)
+            if pd.notna(row.get('has_market_research')) and row.get('has_market_research') == True:
+                self.console.print(f"  [yellow]→ Skipped (already has research)[/yellow]")
+                skipped += 1
+                continue
+
+            try:
+                # Generate rent research (per-unit/per-room + property-wide for SFH)
+                # This handles everything: research generation, estimate extraction, DB updates
+                handle_rent_research_after_add(
+                    property_id=address1,
+                    supabase=self.supabase,
+                    console=self.console,
+                    ask_user=False  # Non-interactive mode
+                )
+
+                # Mark property as researched
+                mark_result = mark_property_as_researched(
+                    supabase=self.supabase,
+                    address1=address1
+                )
+
+                # Check if marking succeeded
+                if mark_result == False:
+                    self.console.print(f"  [yellow]⚠ Research completed but failed to mark property as researched[/yellow]")
+                    # Still count as success since research was generated
+
+                successfully_researched += 1
+                self.console.print(f"  [green]✓ Research completed and saved[/green]")
+
+            except Exception as e:
+                self.console.print(f"  [red]✗ Error: {type(e).__name__}: {str(e)}[/red]")
+                errors += 1
+                continue
+
+        # Display summary panel
+        self.console.print("\n")
+        success_rate = (successfully_researched / total * 100) if total > 0 else 0
+        self.console.print(Panel(
+            f"""[bold cyan]Market Research Automation Complete![/bold cyan]
+
+Total Properties: {total}
+Successfully Researched: [green]{successfully_researched}[/green]
+Skipped (already researched): [yellow]{skipped}[/yellow]
+Errors: [red]{errors}[/red]
+Success Rate: {success_rate:.1f}%
+""",
+            title="Summary",
+            border_style="cyan"
+        ))
