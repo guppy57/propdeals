@@ -1,5 +1,7 @@
+from itertools import zip_longest
 from rich.table import Table
 from rich.panel import Panel
+from rich.console import Group
 import pandas as pd
 from helpers import (
     calculate_additional_room_rent,
@@ -1700,14 +1702,226 @@ def display_current_context_panel(console, loan_name, assumptions_description):
         border_style="cyan"
     ))
 
-def display_start_screen_summary(console):
-    ## Metrics
-    # list all metrics
+def _format_overall_metrics(summary):
+    """Format overall metrics section."""
+    total = summary.get('properties_count', 0)
+    active = summary.get('active_properties_count', 0)
+    inactive = summary.get('inactive_properties_count', 0)
 
-    ## TASKS (these should be listed with an "open checkbox")
-    # list all properties in Phase 0 lacking market research
-    # list all properties in Phase 1 missing neighborhoods, letter grades, and niche.com grades
-    # list all properties in Phase 1.5 Touring lacking estimate price
-    # list all properties in Phase 1.5 Touring missing assessments
-    # list all properties in Phase 1.5 Touring missing tours    
-    pass
+    return (
+        f"[bold cyan]OVERALL[/bold cyan]\n"
+        f"Total Properties: {total}    Active: {active}    Inactive: {inactive}"
+    )
+
+
+def _format_phase0_metrics(summary):
+    """Format Phase 0 metrics section."""
+    count = summary.get('phase0_count', 0)
+    avg_cf_qe = summary.get('phase0_avg_cashflow_qe', 0)
+    avg_cf_y1 = summary.get('phase0_avg_cashflow_y1', 0)
+    avg_cf_y2 = summary.get('phase0_avg_cashflow_y2', 0)
+    avg_cash_needed = summary.get('phase0_avg_cash_needed', 0)
+    avg_price = summary.get('phase0_avg_price', 0)
+    missing_mr = summary.get('phase0_missing_mr_count', 0)
+
+    # Color code cash flows
+    cf_qe_color = "green" if avg_cf_qe >= 0 else "red"
+    cf_y1_color = "green" if avg_cf_y1 >= 0 else "red"
+    cf_y2_color = "green" if avg_cf_y2 >= 0 else "red"
+
+    result = (
+        f"[bold cyan]PHASE 0 - Initial Screening[/bold cyan]\n"
+        f"Qualifiers: {count}    "
+        f"Avg Cash Flow (QE): [{cf_qe_color}]{format_currency(avg_cf_qe)}[/{cf_qe_color}]\n"
+        f"Avg CF (Y1): [{cf_y1_color}]{format_currency(avg_cf_y1)}[/{cf_y1_color}]    "
+        f"Avg CF (Y2): [{cf_y2_color}]{format_currency(avg_cf_y2)}[/{cf_y2_color}]\n"
+        f"Avg Cash Needed: {format_currency(avg_cash_needed)}    "
+        f"Avg Price: {format_currency(avg_price)}"
+    )
+
+    if missing_mr > 0:
+        result += f"\n[yellow]Missing Market Research: {missing_mr} properties[/yellow]"
+
+    return result
+
+
+def _format_phase1_metrics(summary):
+    """Format Phase 1 metrics section."""
+    cur = summary.get('phase1_cur_count', 0)
+    con = summary.get('phase1_con_count', 0)
+    cre = summary.get('phase1_cre_count', 0)
+    avg_cf_qe = summary.get('phase1_avg_cashflow_qe', 0)
+    avg_cf_y1 = summary.get('phase1_avg_cashflow_y1', 0)
+    avg_cf_y2 = summary.get('phase1_avg_cashflow_y2', 0)
+    avg_cash_needed = summary.get('phase1_avg_cash_needed', 0)
+    avg_price = summary.get('phase1_avg_price', 0)
+    missing_est = summary.get('phase1_missing_est_price', 0)
+    missing_nbhd = summary.get('phase1_missing_neighborhood', 0)
+    missing_grade = summary.get('phase1_missing_neighborhood_grade', 0)
+    missing_niche = summary.get('phase1_missing_neighborhood_niche_grade', 0)
+
+    # Color code cash flows
+    cf_qe_color = "green" if avg_cf_qe >= 0 else "red"
+    cf_y1_color = "green" if avg_cf_y1 >= 0 else "red"
+    cf_y2_color = "green" if avg_cf_y2 >= 0 else "red"
+
+    result = (
+        f"[bold cyan]PHASE 1 - Financial Viability[/bold cyan]\n"
+        f"Current: {cur}    Contingent: {con}    Creative: {cre}\n"
+        f"Avg CF (QE): [{cf_qe_color}]{format_currency(avg_cf_qe)}[/{cf_qe_color}]    "
+        f"Avg CF (Y1): [{cf_y1_color}]{format_currency(avg_cf_y1)}[/{cf_y1_color}]    "
+        f"Avg CF (Y2): [{cf_y2_color}]{format_currency(avg_cf_y2)}[/{cf_y2_color}]\n"
+        f"Avg Cash Needed: {format_currency(avg_cash_needed)}    "
+        f"Avg Price: {format_currency(avg_price)}"
+    )
+
+    # Add missing data warnings
+    missing_items = []
+    if missing_est > 0:
+        missing_items.append(f"Est Price ({missing_est})")
+    if missing_nbhd > 0:
+        missing_items.append(f"Neighborhood ({missing_nbhd})")
+    if missing_grade > 0:
+        missing_items.append(f"Grade ({missing_grade})")
+    if missing_niche > 0:
+        missing_items.append(f"Niche Grade ({missing_niche})")
+
+    if missing_items:
+        result += f"\n[yellow]Missing: {' | '.join(missing_items)}[/yellow]"
+
+    return result
+
+
+def _format_phase15_metrics(summary):
+    """Format Phase 1.5 metrics section."""
+    touring = summary.get('touring_count', 0)
+    nontouring = summary.get('nontouring_count', 0)
+    avg_cf_qe = summary.get('touring_avg_cashflow_qe', 0)
+    avg_cf_y1 = summary.get('touring_avg_cashflow_y1', 0)
+    avg_cf_y2 = summary.get('touring_avg_cashflow_y2', 0)
+    avg_cash_needed = summary.get('touring_avg_cash_needed', 0)
+    avg_price = summary.get('touring_avg_price', 0)
+    missing_est_value = summary.get('touring_missing_est_value', 0)
+    missing_tours = summary.get('touring_missing_tours_count', 0)
+
+    # Color code cash flows
+    cf_qe_color = "green" if avg_cf_qe >= 0 else "red"
+    cf_y1_color = "green" if avg_cf_y1 >= 0 else "red"
+    cf_y2_color = "green" if avg_cf_y2 >= 0 else "red"
+
+    result = (
+        f"[bold cyan]PHASE 1.5 - Touring List[/bold cyan]\n"
+        f"Touring: {touring}    Non-touring: {nontouring}    "
+        f"Missing Tours: {missing_tours}\n"
+        f"Avg CF (QE): [{cf_qe_color}]{format_currency(avg_cf_qe)}[/{cf_qe_color}]    "
+        f"Avg CF (Y1): [{cf_y1_color}]{format_currency(avg_cf_y1)}[/{cf_y1_color}]    "
+        f"Avg CF (Y2): [{cf_y2_color}]{format_currency(avg_cf_y2)}[/{cf_y2_color}]\n"
+        f"Avg Cash Needed: {format_currency(avg_cash_needed)}    "
+        f"Avg Price: {format_currency(avg_price)}"
+    )
+
+    if missing_est_value > 0:
+        result += f"\n[yellow]Missing Est Value: {missing_est_value} properties[/yellow]"
+
+    return result
+
+
+def _format_phase2_metrics(summary):
+    """Format Phase 2 metrics section."""
+    count = summary.get('phase2_count', 0)
+
+    return (
+        f"[bold cyan]PHASE 2 - Final Qualification[/bold cyan]\n"
+        f"Qualified: {count} properties"
+    )
+
+
+def _format_tasks_section(summary):
+    """Format tasks section as a Rich Table with 3 columns for task categories."""
+
+    # Get task lists from summary
+    phase0_missing = summary.get('phase0_missing_mr_list', [])
+    touring_missing_assessments = summary.get('touring_missing_assessments_list', [])
+    touring_missing_tours = summary.get('touring_missing_tours_list', [])
+
+    # Create table with title and headers
+    table = Table(
+        title="TASKS",
+        show_header=True,
+        header_style="bold yellow",
+        padding=(0, 1)  # Minimal padding for compact display
+    )
+
+    # Add columns with counts in headers
+    col1_header = f"Phase 0 - Missing MR ([red]{len(phase0_missing)}[/red])"
+    col2_header = f"Phase 1.5 - Missing Assessments ([red]{len(touring_missing_assessments)}[/red])"
+    col3_header = f"Phase 1.5 - Missing Tours ([red]{len(touring_missing_tours)}[/red])"
+
+    table.add_column(col1_header, style="cyan", no_wrap=False)
+    table.add_column(col2_header, style="cyan", no_wrap=False)
+    table.add_column(col3_header, style="cyan", no_wrap=False)
+
+    # Handle case when all lists are empty
+    if not any([phase0_missing, touring_missing_assessments, touring_missing_tours]):
+        table.add_row(
+            "[green]✓ All completed[/green]",
+            "[green]✓ All completed[/green]",
+            "[green]✓ All completed[/green]"
+        )
+        return table
+
+    # Add rows using zip_longest to handle variable-length lists
+    for item0, item_assess, item_tour in zip_longest(
+        phase0_missing,
+        touring_missing_assessments,
+        touring_missing_tours,
+        fillvalue=None
+    ):
+        row_cells = [
+            f"☐ {item0}" if item0 else "",
+            f"☐ {item_assess}" if item_assess else "",
+            f"☐ {item_tour}" if item_tour else ""
+        ]
+        table.add_row(*row_cells)
+
+    return table
+
+
+def display_start_screen_summary(console, summary):
+    """Display start screen dashboard with metrics and tasks."""
+    # Build metrics sections (all return strings)
+    overall_section = _format_overall_metrics(summary)
+    phase0_section = _format_phase0_metrics(summary)
+    phase1_section = _format_phase1_metrics(summary)
+    phase15_section = _format_phase15_metrics(summary)
+    phase2_section = _format_phase2_metrics(summary)
+
+    # Build tasks table (returns Table object)
+    tasks_table = _format_tasks_section(summary)
+
+    # Create metrics content as formatted string (Group handles Rich markup in strings)
+    metrics_content = f"""
+{overall_section}
+
+{phase0_section}
+
+{phase1_section}
+
+{phase15_section}
+
+{phase2_section}
+
+{'─' * 70}
+
+"""
+
+    # Combine metrics string and tasks table using Group
+    panel_content = Group(metrics_content, tasks_table)
+
+    # Display in panel
+    console.print(Panel(
+        panel_content,
+        title="Investment Pipeline Dashboard",
+        border_style="cyan",
+        padding=(1, 2)
+    ))

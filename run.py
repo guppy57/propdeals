@@ -43,6 +43,7 @@ from display import (
     display_investment_requirements_panel,
     display_loans,
     display_current_context_panel,
+    display_start_screen_summary,
 )
 from helpers import (
     calculate_monthly_take_home,
@@ -929,7 +930,7 @@ load_assumptions()
 load_loan(LAST_USED_LOAN)
 reload_dataframe()
 
-PHASE0_CRITERIA = "square_ft >= 1000 & cash_needed <= 25000 & monthly_cash_flow >= -600"
+PHASE0_CRITERIA = "square_ft >= 1000 & cash_needed <= 25000 & monthly_cash_flow >= -500"
 PHASE1_CRITERIA = (
     "MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & beats_market "
     "& mr_monthly_cash_flow_y1 >= -400 "
@@ -1418,6 +1419,7 @@ def run_loans_options():
 
 if __name__ == "__main__":
     summary = get_start_screen_summary(df)
+    display_start_screen_summary(console, summary)
     while using_application:
         choices = [
             "All properties",
