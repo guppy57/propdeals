@@ -148,13 +148,17 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
     return c * r
 
-def make_places_request_with_retry(url, params, max_retries=3):
+def make_places_request_with_retry(url, params=None, headers=None, json_body=None, method='GET', max_retries=3):
     """
     Make Places API request with exponential backoff retry logic
+    Supports both legacy (GET with params) and new (POST with JSON body) Places API
 
     Args:
         url: API endpoint URL
-        params: Request parameters
+        params: Request parameters for GET requests (optional)
+        headers: Request headers for POST requests (optional)
+        json_body: JSON body for POST requests (optional)
+        method: HTTP method - 'GET' or 'POST' (default: 'GET')
         max_retries: Maximum number of retry attempts
 
     Returns:
@@ -162,37 +166,70 @@ def make_places_request_with_retry(url, params, max_retries=3):
     """
     for attempt in range(max_retries):
         try:
-            response = requests.get(url, params=params)
+            # Make request based on method
+            if method.upper() == 'POST':
+                response = requests.post(url, headers=headers, json=json_body)
+            else:
+                response = requests.get(url, params=params)
+
             data = response.json()
-            status = data.get('status')
 
-            # Success cases - return immediately
-            if status in ['OK', 'ZERO_RESULTS']:
+            # New API (POST) doesn't use 'status' field in the same way
+            # Check for successful response
+            if method.upper() == 'POST':
+                # New API returns 'places' array on success, or error object
+                if 'places' in data or 'error' not in data:
+                    return data
+                # Handle errors in new API format
+                error = data.get('error', {})
+                error_code = error.get('code', 'UNKNOWN')
+                error_message = error.get('message', 'No error message provided')
+
+                # Don't retry on authentication/permission errors
+                if error_code in [403, 401, 400]:
+                    console.print(f"  API Error ({error_code}): {error_message}", style="bold red")
+                    return data
+
+                # Retry on transient errors
+                if attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) * 0.1
+                    console.print(f"    Retrying in {wait_time*1000:.0f}ms... (attempt {attempt + 1}/{max_retries})", style="green")
+                    time.sleep(wait_time)
+                    continue
+
+                console.print(f"  API Error ({error_code}): {error_message}", style="yellow")
                 return data
+            else:
+                # Legacy API (GET) uses 'status' field
+                status = data.get('status')
 
-            # REQUEST_DENIED - don't retry, it's a configuration issue
-            if status == 'REQUEST_DENIED':
-                error_message = data.get('error_message', 'No error message provided')
-                console.print(f"  REQUEST_DENIED: {error_message}", style="bold red")
-                console.print("  [yellow]Troubleshooting tips:[/yellow]")
-                console.print("    • Check API key restrictions (Android/iOS keys not supported)", style="dim")
-                console.print("    • Verify 'Places API Web Service' is enabled in Google Cloud Console", style="dim")
-                console.print("    • Ensure API key has no IP restrictions or correct IP is whitelisted", style="dim")
-                return data  # Return without retry
+                # Success cases - return immediately
+                if status in ['OK', 'ZERO_RESULTS']:
+                    return data
 
-            # Transient errors - retry with exponential backoff
-            if status in ['UNKNOWN_ERROR', 'INVALID_REQUEST'] and attempt < max_retries - 1:
-                wait_time = (2 ** attempt) * 0.1  # 100ms, 200ms, 400ms
-                console.print(f"    Retrying in {wait_time*1000:.0f}ms... (attempt {attempt + 1}/{max_retries})", style="green")
-                time.sleep(wait_time)
-                continue
+                # REQUEST_DENIED - don't retry, it's a configuration issue
+                if status == 'REQUEST_DENIED':
+                    error_message = data.get('error_message', 'No error message provided')
+                    console.print(f"  REQUEST_DENIED: {error_message}", style="bold red")
+                    console.print("  [yellow]Troubleshooting tips:[/yellow]")
+                    console.print("    • Check API key restrictions (Android/iOS keys not supported)", style="dim")
+                    console.print("    • Verify 'Places API Web Service' is enabled in Google Cloud Console", style="dim")
+                    console.print("    • Ensure API key has no IP restrictions or correct IP is whitelisted", style="dim")
+                    return data  # Return without retry
 
-            # Other errors or final attempt - return data
-            if status and status != 'OK':
-                error_message = data.get('error_message', 'No error message provided')
-                console.print(f"  API Error ({status}): {error_message}", style="yellow")
+                # Transient errors - retry with exponential backoff
+                if status in ['UNKNOWN_ERROR', 'INVALID_REQUEST'] and attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) * 0.1  # 100ms, 200ms, 400ms
+                    console.print(f"    Retrying in {wait_time*1000:.0f}ms... (attempt {attempt + 1}/{max_retries})", style="green")
+                    time.sleep(wait_time)
+                    continue
 
-            return data
+                # Other errors or final attempt - return data
+                if status and status != 'OK':
+                    error_message = data.get('error_message', 'No error message provided')
+                    console.print(f"  API Error ({status}): {error_message}", style="yellow")
+
+                return data
 
         except Exception as e:
             if attempt < max_retries - 1:
@@ -265,8 +302,9 @@ def get_walkscore_data(lng, lat, address):
 
 def get_poi_proximity_data(lat, lon, radius_miles=5):
     """
-    Get proximity to important points of interest using Google Places API
+    Get proximity to important points of interest using Google Places API (New)
     Returns distances in miles to the nearest POI of each type within the radius
+    Uses field mask to minimize billing costs (only requests location data)
 
     Args:
         lat: Latitude coordinate
@@ -282,7 +320,7 @@ def get_poi_proximity_data(lat, lon, radius_miles=5):
         ('gas_station', 'gas station'),
         ('school', 'school'),
         ('university', 'university'),
-        ('grocery_or_supermarket', 'grocery store'),
+        ('grocery_store', 'grocery store'),
         ('hospital', 'hospital'),
         ('park', 'park'),
         ('transit_station', 'transit station')
@@ -292,38 +330,58 @@ def get_poi_proximity_data(lat, lon, radius_miles=5):
 
     for poi_type, poi_name in poi_types:
         try:
-            # Use retry helper for robust API calls
-            data = make_places_request_with_retry(
-                "https://maps.googleapis.com/maps/api/place/nearbysearch/json",
-                params={
-                    "location": f"{lat},{lon}",
-                    "radius": radius_meters,
-                    "type": poi_type,
-                    "key": os.getenv("GOOGLE_KEY"),
+            # Prepare request for new Places API
+            headers = {
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": os.getenv("GOOGLE_KEY"),
+                "X-Goog-FieldMask": "places.location"  # Only request location field to minimize cost
+            }
+
+            json_body = {
+                "includedTypes": [poi_type],
+                "locationRestriction": {
+                    "circle": {
+                        "center": {
+                            "latitude": lat,
+                            "longitude": lon
+                        },
+                        "radius": radius_meters
+                    }
                 }
+            }
+
+            # Use retry helper for robust API calls with new API endpoint
+            data = make_places_request_with_retry(
+                "https://places.googleapis.com/v1/places:searchNearby",
+                headers=headers,
+                json_body=json_body,
+                method='POST'
             )
 
-            status = data.get('status')
+            # New API returns 'places' array instead of 'results'
+            places = data.get('places', [])
 
-            # Handle ZERO_RESULTS separately (not an error)
-            if status == 'ZERO_RESULTS':
+            # Handle no results (not an error in new API)
+            if not places:
                 console.print(f"  No {poi_name} found within {radius_miles} miles", style="green")
                 results[f'{poi_type}_distance_miles'] = None
                 continue
 
-            if status == 'OK' and data.get('results'):
-                # Find closest result by calculating distances
-                closest_distance = float('inf')
-                closest_poi = None
+            # Find closest result by calculating distances
+            closest_distance = float('inf')
 
-                for result in data['results']:
-                    poi_lat = result['geometry']['location']['lat']
-                    poi_lon = result['geometry']['location']['lng']
+            for place in places:
+                # New API structure: place['location']['latitude'] instead of place['geometry']['location']['lat']
+                place_location = place.get('location', {})
+                poi_lat = place_location.get('latitude')
+                poi_lon = place_location.get('longitude')
+
+                if poi_lat is not None and poi_lon is not None:
                     distance = haversine_distance(lat, lon, poi_lat, poi_lon)
                     if distance < closest_distance:
                         closest_distance = distance
-                        closest_poi = result
 
+            if closest_distance != float('inf'):
                 results[f'{poi_type}_distance_miles'] = round(closest_distance, 2)
                 console.print(f"  Found nearest {poi_name}: {closest_distance:.2f} miles", style="green")
             else:
@@ -337,9 +395,10 @@ def get_poi_proximity_data(lat, lon, radius_miles=5):
 
 def get_poi_count_data(lat, lon, radius_miles=5):
     """
-    Count number of POIs within a radius using Google Places API
+    Count number of POIs within a radius using Google Places API (New)
     Returns counts of each POI type within the specified radius
     Filters by review count to focus on established/major locations
+    Uses field mask to minimize billing costs (only requests userRatingCount)
 
     Args:
         lat: Latitude coordinate
@@ -355,7 +414,7 @@ def get_poi_count_data(lat, lon, radius_miles=5):
         ('gas_station', 'gas station'),
         ('school', 'school'),
         ('university', 'university'),
-        ('grocery_or_supermarket', 'grocery store'),
+        ('grocery_store', 'grocery store'),
         ('hospital', 'hospital'),
         ('park', 'park'),
         ('transit_station', 'transit station')
@@ -366,7 +425,7 @@ def get_poi_count_data(lat, lon, radius_miles=5):
         'gas_station': 20,
         'school': 25,
         'university': 75,
-        'grocery_or_supermarket': 65,
+        'grocery_store': 65,
         'hospital': 100,
         'park': 5,
         'transit_station': 1
@@ -376,28 +435,46 @@ def get_poi_count_data(lat, lon, radius_miles=5):
 
     for poi_type, poi_name in poi_types:
         try:
-            # Use retry helper for robust API calls
-            data = make_places_request_with_retry(
-                "https://maps.googleapis.com/maps/api/place/nearbysearch/json",
-                params={
-                    "location": f"{lat},{lon}",
-                    "radius": radius_meters,
-                    "type": poi_type,
-                    "key": os.getenv("GOOGLE_KEY"),
+            # Prepare request for new Places API
+            headers = {
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": os.getenv("GOOGLE_KEY"),
+                "X-Goog-FieldMask": "places.userRatingCount"  # Only request rating count to minimize cost
+            }
+
+            json_body = {
+                "includedTypes": [poi_type],
+                "locationRestriction": {
+                    "circle": {
+                        "center": {
+                            "latitude": lat,
+                            "longitude": lon
+                        },
+                        "radius": radius_meters
+                    }
                 }
+            }
+
+            # Use retry helper for robust API calls with new API endpoint
+            data = make_places_request_with_retry(
+                "https://places.googleapis.com/v1/places:searchNearby",
+                headers=headers,
+                json_body=json_body,
+                method='POST'
             )
 
-            status = data.get('status')
+            # New API returns 'places' array instead of 'results'
+            places = data.get('places', [])
             count = 0
 
-            if status == 'OK' and data.get('results'):
-                total_results = len(data['results'])
+            if places:
+                total_results = len(places)
                 min_reviews = review_thresholds.get(poi_type, 0)
 
-                # Filter by review count
+                # Filter by review count (new API uses 'userRatingCount' instead of 'user_ratings_total')
                 filtered_results = [
-                    place for place in data['results']
-                    if place.get('user_ratings_total', 0) >= min_reviews
+                    place for place in places
+                    if place.get('userRatingCount', 0) >= min_reviews
                 ]
                 count = len(filtered_results)
 
@@ -409,7 +486,7 @@ def get_poi_count_data(lat, lon, radius_miles=5):
                         console.print(f"  Found {count} {poi_name}(s)", style="green")
                 else:
                     console.print(f"  Found {count} {poi_name}(s)", style="green")
-            elif status == 'ZERO_RESULTS':
+            else:
                 console.print(f"  Found 0 {poi_name}s within {radius_miles} miles", style="green")
             # Error messages already handled by retry helper
 
