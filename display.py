@@ -1413,7 +1413,7 @@ def display_investment_requirements_panel(console, row, assumptions, loan, ia_fi
         f"IA FirstHome Grant: {grant}\n"
         f"[bold]Total Cash Needed: {format_currency(row['cash_needed'])}[/bold]\n"
         f"Loan Amount: {format_currency(row['loan_amount'])}\n"
-        f"[bold blue]Purchase Price: {format_currency(row['purchase_price'])}[/bold blue]"
+        f"[bold green]Purchase Price: {format_currency(row['purchase_price'])}[/bold green]"
     )
 
     if assumptions['using_ia_fhb_prog'] and assumptions['ia_fhb_prog_upfront_option'] == "LOAN" and row["units"] == 0:
