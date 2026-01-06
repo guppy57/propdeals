@@ -638,9 +638,7 @@ def analyze_property(property_id):
     display_property_overview_panel(console, row)
     display_property_rent_estimates_table(console, property_rents, is_single_family)
     display_property_investment_metrics_table(console, row, is_single_family)
-    display_investment_requirements_panel(
-        console, row, ASSUMPTIONS, LOAN, IA_FIRSTHOME_GRANT_AMT
-    )
+    display_investment_requirements_panel(console, row, ASSUMPTIONS, LOAN)
 
     research_menu_choices = [
         "Edit property assessment",

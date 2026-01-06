@@ -1392,7 +1392,7 @@ def display_property_investment_metrics_table(console, row, is_single_family):
     console.print(table)
 
 
-def display_investment_requirements_panel(console, row, assumptions, loan, ia_firsthome_grant_amt):
+def display_investment_requirements_panel(console, row, assumptions, loan):
     """
     Display investment requirements panel showing upfront cash needed.
 
@@ -1401,16 +1401,12 @@ def display_investment_requirements_panel(console, row, assumptions, loan, ia_fi
         row: DataFrame row containing property financial data
         assumptions: ASSUMPTIONS dict with ia_fhb_prog settings
         loan: LOAN dict with upfront_discounts
-        ia_firsthome_grant_amt: IA_FIRSTHOME_GRANT_AMT constant value
     """
-    grant = format_currency(ia_firsthome_grant_amt) if assumptions['ia_fhb_prog_upfront_option'] == "GRANT" and assumptions['using_ia_fhb_prog'] else "[dim]Not using grant option for Iowa First Home[/dim]"
-
     investment_summary = (
         f"[bold green]Investment Summary[/bold green]\n"
         f"Down Payment: {format_currency(row['down_payment'])}\n"
         f"Closing Costs: {format_currency(row['closing_costs'])}\n"
         f"Lender Discounts: {format_currency(loan['upfront_discounts'])}\n"
-        f"IA FirstHome Grant: {grant}\n"
         f"[bold]Total Cash Needed: {format_currency(row['cash_needed'])}[/bold]\n"
         f"Loan Amount: {format_currency(row['loan_amount'])}\n"
         f"[bold green]Purchase Price: {format_currency(row['purchase_price'])}[/bold green]"
