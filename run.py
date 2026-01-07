@@ -1,6 +1,7 @@
 import os
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 import questionary
 from dotenv import load_dotenv
 from InquirerPy import inquirer
@@ -9,63 +10,63 @@ from rich.panel import Panel
 from supabase import Client, create_client
 
 from add_property import run_add_property
-from exporter import export_property_analysis
-from handlers import (
-    handle_property_wide_research_generation,
-    handle_neighborhood_analysis,
-    handle_changing_loan,
-    handle_extract_neighborhood_grade,
-    handle_rent_research_generation,
-    handle_status_change,
-    handle_price_change,
-    handle_view_research_reports,
-    handle_risk_assessment,
-    handle_property_summary,
-    handle_generate_rent_estimates,
-    handle_rent_research_after_add,
-    handle_scrape_neighborhood_from_findneighborhoods,
-)
 from display import (
     display_all_phase1_qualifying_properties,
     display_all_phase2_qualifying_properties,
     display_all_properties,
-    display_all_properties_info,
     display_all_properties_homestyle_analysis,
+    display_all_properties_info,
+    display_current_context_panel,
     display_homestyle_overview_panel,
+    display_investment_requirements_panel,
+    display_loans,
     display_new_property_qualification,
     display_phase1_research_list,
     display_phase1_total_rent_differences,
+    display_property_investment_metrics_table,
     display_property_metrics,
-    display_y2_calculations,
     display_property_overview_panel,
     display_property_rent_estimates_table,
-    display_property_investment_metrics_table,
-    display_investment_requirements_panel,
-    display_loans,
-    display_current_context_panel,
     display_start_screen_summary,
+    display_y2_calculations,
+)
+from exporter import export_property_analysis
+from handlers import (
+    handle_changing_loan,
+    handle_extract_neighborhood_grade,
+    handle_generate_rent_estimates,
+    handle_neighborhood_analysis,
+    handle_price_change,
+    handle_property_summary,
+    handle_property_wide_research_generation,
+    handle_rent_research_after_add,
+    handle_rent_research_generation,
+    handle_risk_assessment,
+    handle_scrape_neighborhood_from_findneighborhoods,
+    handle_status_change,
+    handle_view_research_reports,
 )
 from helpers import (
+    calculate_additional_room_rent,
+    calculate_irr,
     calculate_monthly_take_home,
     calculate_mortgage,
-    get_expected_gains,
-    calculate_payback_period,
-    get_state_tax_rate,
     calculate_net_proceeds,
-    calculate_irr,
-    calculate_additional_room_rent,
     calculate_npv,
+    calculate_payback_period,
     calculate_roe,
-    estimate_renovation_cost,
     estimate_arv,
+    estimate_renovation_cost,
+    get_expected_gains,
+    get_properties_missing_tours,
+    get_state_tax_rate,
     is_property_assessment_done_vectorized,
-    get_properties_missing_tours
 )
 from inspections import InspectionsClient
 from loans import LoansProvider
 from neighborhood_assessment import edit_neighborhood_assessment
-from neighborhoods import NeighborhoodsClient
 from neighborhood_scraper import NeighborhoodScraper
+from neighborhoods import NeighborhoodsClient
 from property_assessment import edit_property_assessment
 from scripts import ScriptsProvider
 
@@ -78,14 +79,6 @@ neighborhoods = NeighborhoodsClient(supabase_client=supabase, console=console)
 scraper = NeighborhoodScraper(supabase_client=supabase, console=console)
 
 LAST_USED_LOAN = 2
-LAND_VALUE_PCT = 0.20  # 20% of purchase price is land (non-depreciable)
-FEDERAL_TAX_RATE = 0.22  # 22% federal tax bracket
-SELLING_COSTS_RATE = 0.07  # 7% selling costs (6% agent commission + 1% closing)
-CAPITAL_GAINS_RATE = 0.15  # 15% long-term capital gains tax
-DEPRECIATION_YEARS = 27.5  # Residential property depreciation period
-IA_FIRSTHOME_GRANT_AMT = 2500
-DEFAULT_PROPERTY_CONDITION_SCORE = 3  # Default to moderate condition (1-5 scale)
-
 
 def load_assumptions():
     global ASSUMPTIONS
@@ -100,46 +93,32 @@ def load_assumptions():
     )
     ASSUMPTIONS = {
         "appreciation_rate": float(assumptions_get_response.data["appreciation_rate"]),
-        "mf_appreciation_rate": (
-            float(assumptions_get_response.data["appreciation_rate"]) - 0.01
-        ),
-        "rent_appreciation_rate": float(
-            assumptions_get_response.data["rent_appreciation_rate"]
-        ),
+        "mf_appreciation_rate": (float(assumptions_get_response.data["appreciation_rate"]) - 0.01),
+        "rent_appreciation_rate": float(assumptions_get_response.data["rent_appreciation_rate"]),
         "property_tax_rate": float(assumptions_get_response.data["property_tax_rate"]),
-        "home_insurance_rate": float(
-            assumptions_get_response.data["home_insurance_rate"]
-        ),
+        "home_insurance_rate": float(assumptions_get_response.data["home_insurance_rate"]),
         "vacancy_rate": float(assumptions_get_response.data["vacancy_rate"]),
-        "repair_savings_rate": float(
-            assumptions_get_response.data["repair_savings_rate"]
-        ),
-        "closing_costs_rate": float(
-            assumptions_get_response.data["closing_costs_rate"]
-        ),
+        "repair_savings_rate": float(assumptions_get_response.data["repair_savings_rate"]),
+        "closing_costs_rate": float(assumptions_get_response.data["closing_costs_rate"]),
         "live_in_unit_setting": assumptions_get_response.data["live_in_unit_setting"],
         "gross_annual_income": assumptions_get_response.data["gross_annual_income"],
         "state_tax_code": assumptions_get_response.data["state_tax_code"],
-        "after_tax_monthly_income": calculate_monthly_take_home(
-            assumptions_get_response.data["gross_annual_income"],
-            assumptions_get_response.data["state_tax_code"],
-        ),
+        "after_tax_monthly_income": calculate_monthly_take_home(assumptions_get_response.data["gross_annual_income"], assumptions_get_response.data["state_tax_code"]),
         "discount_rate": assumptions_get_response.data["discount_rate"],
         "using_ia_fhb_prog": assumptions_get_response.data["using_ia_fhb_prog"],
-        "ia_fhb_prog_upfront_option": assumptions_get_response.data[
-            "ia_fhb_prog_upfront_option"
-        ],
-        # Des Moines, IA utility costs (2025)
-        # Sources: EnergySage (electric), RealEstates.network (gas/water),
-        #          City of Des Moines (trash), RSINC (internet)
-        # Last updated: 2025-12-25
-        # Valid through: 2025-04 (4-month purchasing timeline)
-        "utility_electric_base": 136.00,  # per month (~$137 avg, 13¢/kWh, 1060 kWh/mo)
-        "utility_gas_base": 106.40,  # per month annual avg ($155.84 winter, $56.95 summer)
-        "utility_water_base": 49.00,  # per month (Iowa average)
-        "utility_trash_base": 18.00,  # per month (Des Moines: $17.91 for 96-gal cart)
-        "utility_internet_base": 60.00,  # per month (Iowa avg: $59.75) - SFH only
-        "utility_baseline_sqft": 1500,  # baseline square footage for scaling electric/gas
+        "ia_fhb_prog_upfront_option": assumptions_get_response.data["ia_fhb_prog_upfront_option"],
+        "utility_electric_base": float(assumptions_get_response.data["utility_electric_base"]),  # per month (~$137 avg, 13¢/kWh, 1060 kWh/mo)
+        "utility_gas_base": float(assumptions_get_response.data["utility_gas_base"]),  # per month annual avg ($155.84 winter, $56.95 summer)
+        "utility_water_base": float(assumptions_get_response.data["utility_water_base"]),  # per month (Iowa average)
+        "utility_trash_base": float(assumptions_get_response.data["utility_trash_base"]),  # per month (Des Moines: $17.91 for 96-gal cart)
+        "utility_internet_base": float(assumptions_get_response.data["utility_internet_base"]),  # per month (Iowa avg: $59.75) - SFH only
+        "utility_baseline_sqft": int(assumptions_get_response.data["utility_baseline_sqft"]),  # baseline square footage for scaling electric/gas
+        "land_value_prcnt": float(assumptions_get_response.data["land_value_prcnt"]),
+        "federal_tax_rate": float(assumptions_get_response.data["federal_tax_rate"]),
+        "selling_costs_rate": float(assumptions_get_response.data["selling_costs_rate"]),
+        "longterm_capital_gains_tax_rate": float(assumptions_get_response.data["longterm_capital_gains_tax_rate"]),
+        "residential_depreciation_period_yrs": float(assumptions_get_response.data["residential_depreciation_period_yrs"]),
+        "default_property_condition_score": int(assumptions_get_response.data["default_property_condition_score"]),
         "description": assumptions_get_response.data["description"],
     }
     console.print(
@@ -282,7 +261,7 @@ def apply_calculations_on_dataframe(df, loan, assumptions):
 
 def apply_investment_calculations(df, loan, assumptions):
     state_rate = get_state_tax_rate(assumptions["state_tax_code"])
-    combined_tax_rate = FEDERAL_TAX_RATE + state_rate
+    combined_tax_rate = ASSUMPTIONS["federal_tax_rate"] + state_rate
     is_sfh_with_estimate = (df["units"] == 0) & df["rent_estimate"].notna() & (df["rent_estimate"] > 0)
     rent_base_columns = {}
     rent_base_columns["y1_opex_rent_base"] = np.where(is_sfh_with_estimate, df["rent_estimate"], df["market_total_rent_estimate"])
@@ -344,16 +323,16 @@ def apply_investment_calculations(df, loan, assumptions):
     new_columns_stage2["mobility_score"] = (df["walk_score"] * 0.6) + (df["transit_score"] * 0.30) + (df["bike_score"] * 0.10)
     new_columns_stage2["piti"] = df["monthly_mortgage"] + df["monthly_mip"] + df["monthly_taxes"] + df["monthly_insurance"]
     new_columns_stage2["costs_to_income"] = new_columns_stage2["piti"] / ASSUMPTIONS["after_tax_monthly_income"]
-    new_columns_stage2["monthly_depreciation"] = (df["purchase_price"] * (1 - LAND_VALUE_PCT)) / DEPRECIATION_YEARS / 12
+    new_columns_stage2["monthly_depreciation"] = (df["purchase_price"] * (1 - ASSUMPTIONS["land_value_prcnt"])) / ASSUMPTIONS["residential_depreciation_period_yrs"] / 12
     new_columns_stage2["tax_savings_monthly"] = new_columns_stage2["monthly_depreciation"] * combined_tax_rate
     new_columns_stage2["after_tax_cash_flow_y1"] = df["mr_monthly_cash_flow_y1"] + new_columns_stage2["tax_savings_monthly"]
     new_columns_stage2["after_tax_cash_flow_y2"] = df["mr_monthly_cash_flow_y2"] + new_columns_stage2["tax_savings_monthly"]
     new_columns_stage2["future_value_5yr"] = df.apply(lambda row: row["purchase_price"] * ((1 + (assumptions["appreciation_rate"] if row["units"] == 0 else assumptions["mf_appreciation_rate"])) ** 5), axis=1)
     new_columns_stage2["future_value_10yr"] = df.apply(lambda row: row["purchase_price"] * ((1 + (assumptions["appreciation_rate"] if row["units"] == 0 else assumptions["mf_appreciation_rate"])) ** 10), axis=1)
     new_columns_stage2["future_value_20yr"] = df.apply(lambda row: row["purchase_price"] * ((1 + (assumptions["appreciation_rate"] if row["units"] == 0 else assumptions["mf_appreciation_rate"])) ** 20), axis=1)
-    new_columns_stage2["net_proceeds_5yr"] = df.apply(calculate_net_proceeds, axis=1, args=(5, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, assumptions, loan))
-    new_columns_stage2["net_proceeds_10yr"] = df.apply(calculate_net_proceeds, axis=1, args=(10, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, assumptions, loan))
-    new_columns_stage2["net_proceeds_20yr"] = df.apply(calculate_net_proceeds, axis=1, args=(20, SELLING_COSTS_RATE, CAPITAL_GAINS_RATE, assumptions, loan))
+    new_columns_stage2["net_proceeds_5yr"] = df.apply(calculate_net_proceeds, axis=1, args=(5, ASSUMPTIONS["selling_costs_rate"], ASSUMPTIONS["longterm_capital_gains_tax_rate"], assumptions, loan))
+    new_columns_stage2["net_proceeds_10yr"] = df.apply(calculate_net_proceeds, axis=1, args=(10, ASSUMPTIONS["selling_costs_rate"], ASSUMPTIONS["longterm_capital_gains_tax_rate"], assumptions, loan))
+    new_columns_stage2["net_proceeds_20yr"] = df.apply(calculate_net_proceeds, axis=1, args=(20, ASSUMPTIONS["selling_costs_rate"], ASSUMPTIONS["longterm_capital_gains_tax_rate"], assumptions, loan))
     new_columns_stage2["equity_multiple_5yr"] = (new_columns_stage2["5y_forecast"] + df["cash_needed"]) / df["cash_needed"]
     new_columns_stage2["equity_multiple_10yr"] = (new_columns_stage2["10y_forecast"] + df["cash_needed"]) / df["cash_needed"]
     new_columns_stage2["equity_multiple_20yr"] = (new_columns_stage2["20y_forecast"] + df["cash_needed"]) / df["cash_needed"]
@@ -383,7 +362,7 @@ def apply_investment_calculations(df, loan, assumptions):
     return df
 
 def apply_homestyle_calculations(df):
-    df["property_condition_score"] = df["property_condition_score"].fillna(DEFAULT_PROPERTY_CONDITION_SCORE)
+    df["property_condition_score"] = df["property_condition_score"].fillna(ASSUMPTIONS["default_property_condition_score"])
     new_columns_stage1 = {}
     new_columns_stage1["hs_renovation_cost"] = df.apply(estimate_renovation_cost, axis=1)
     new_columns_stage1["hs_arv"] = df.apply(lambda row: estimate_arv(row, new_columns_stage1["hs_renovation_cost"].loc[row.name]), axis=1)
