@@ -99,6 +99,7 @@ def load_assumptions():
         "home_insurance_rate": float(assumptions_get_response.data["home_insurance_rate"]),
         "vacancy_rate": float(assumptions_get_response.data["vacancy_rate"]),
         "repair_savings_rate": float(assumptions_get_response.data["repair_savings_rate"]),
+        "capex_reserve_rate": float(assumptions_get_response.data["capex_reserve_rate"]),
         "closing_costs_rate": float(assumptions_get_response.data["closing_costs_rate"]),
         "live_in_unit_setting": assumptions_get_response.data["live_in_unit_setting"],
         "gross_annual_income": assumptions_get_response.data["gross_annual_income"],
@@ -239,7 +240,8 @@ def apply_calculations_on_dataframe(df, loan, assumptions):
     new_columns["annual_rent"] = new_columns["total_rent"] * 12
     new_columns["monthly_vacancy_costs"] = new_columns["total_rent"] * assumptions["vacancy_rate"]
     new_columns["monthly_repair_costs"] = new_columns["total_rent"] * assumptions["repair_savings_rate"]
-    new_columns["operating_expenses"] = new_columns["monthly_vacancy_costs"] + new_columns["monthly_repair_costs"] + df["monthly_taxes"] + df["monthly_insurance"]
+    new_columns["monthly_capex_costs"] = new_columns["total_rent"] * assumptions["capex_reserve_rate"]
+    new_columns["operating_expenses"] = new_columns["monthly_vacancy_costs"] + new_columns["monthly_repair_costs"] + new_columns["monthly_capex_costs"] + df["monthly_taxes"] + df["monthly_insurance"]
     sqft_scaling_owner_unit = df["owner_unit_sqft"] / assumptions["utility_baseline_sqft"]
     units_for_calcs = df["units"].apply(lambda x: max(1, x if pd.notna(x) and x > 0 else 1))
     new_columns["monthly_utility_electric"] = assumptions["utility_electric_base"] * sqft_scaling_owner_unit
@@ -278,7 +280,8 @@ def apply_investment_calculations(df, loan, assumptions):
     new_columns_stage1 = {}
     new_columns_stage1["mr_monthly_vacancy_costs"] = df["y1_opex_rent_base"] * assumptions["vacancy_rate"]
     new_columns_stage1["mr_monthly_repair_costs"] = df["y1_opex_rent_base"] * assumptions["repair_savings_rate"]
-    new_columns_stage1["mr_operating_expenses"] = new_columns_stage1["mr_monthly_vacancy_costs"] + new_columns_stage1["mr_monthly_repair_costs"] + df["monthly_taxes"] + df["monthly_insurance"]
+    new_columns_stage1["mr_monthly_capex_costs"] = df["y1_opex_rent_base"] * assumptions["capex_reserve_rate"]
+    new_columns_stage1["mr_operating_expenses"] = new_columns_stage1["mr_monthly_vacancy_costs"] + new_columns_stage1["mr_monthly_repair_costs"] + new_columns_stage1["mr_monthly_capex_costs"] + df["monthly_taxes"] + df["monthly_insurance"]
     new_columns_stage1["mr_total_monthly_cost"] = df["monthly_mortgage"] + df["monthly_mip"] + new_columns_stage1["mr_operating_expenses"] + df["monthly_utility_total"]
     trash_adjustment_y1 = df.apply(lambda row: (row["units"] - 1) * 18 if row["units"] > 0 else 0, axis=1)
     trash_adjustment_y2 = df.apply(lambda row: row["units"] * 18 if row["units"] > 0 else 0, axis=1)
@@ -717,6 +720,7 @@ def analyze_property(property_id):
             "home_insurance_rate": ASSUMPTIONS["home_insurance_rate"],
             "vacancy_rate": ASSUMPTIONS["vacancy_rate"],
             "repair_savings_rate": ASSUMPTIONS["repair_savings_rate"],
+            "capex_reserve_rate": ASSUMPTIONS["capex_reserve_rate"],
             "closing_costs_rate": ASSUMPTIONS["closing_costs_rate"],
             "discount_rate": ASSUMPTIONS["discount_rate"],
         }

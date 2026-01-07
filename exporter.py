@@ -115,6 +115,8 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, loan_info=
                 pdf.info_line('Vacancy Rate', format_percentage(assumptions['vacancy_rate']))
             if 'repair_savings_rate' in assumptions:
                 pdf.info_line('Repair Reserve', format_percentage(assumptions['repair_savings_rate']))
+            if 'capex_reserve_rate' in assumptions:
+                pdf.info_line('CapEx Reserve', format_percentage(assumptions['capex_reserve_rate']))
             if 'closing_costs_rate' in assumptions:
                 pdf.info_line('Closing Costs Rate', format_percentage(assumptions['closing_costs_rate']))
             if 'discount_rate' in assumptions:

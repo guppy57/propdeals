@@ -191,6 +191,7 @@ def display_y2_calculations(console, df, properties_df=None):
     table.add_column("Monthly Insurance", justify="right", style="red")
     table.add_column("Repair Cost", justify="right", style="yellow")
     table.add_column("Vacancy Reserve", justify="right", style="yellow")
+    table.add_column("CapEx Reserve", justify="right", style="yellow")
     table.add_column("Monthly CF", justify="right")
 
     # Iterate and add rows
@@ -211,6 +212,7 @@ def display_y2_calculations(console, df, properties_df=None):
             format_currency(row["monthly_insurance"]),
             format_currency(row["monthly_repair_costs"]),
             format_currency(row["monthly_vacancy_costs"]),
+            format_currency(row["monthly_capex_costs"]),
             f"[{cf_style}]{format_currency(row['monthly_cash_flow'])}[/{cf_style}]"
         ]
 
@@ -1192,6 +1194,14 @@ def display_property_investment_metrics_table(console, row, is_single_family):
                   format_percentage(row['irr_5yr']),
                   format_percentage(row['irr_10yr']),
                   format_percentage(row['irr_20yr']))
+    table.add_row("CapEx Reserve",
+                  format_currency(row['monthly_capex_costs']),
+                  format_currency(row['mr_monthly_capex_costs']),
+                  format_currency(row['mr_monthly_capex_costs']),
+                  "",
+                  "",
+                  "",
+                  "")
     table.add_row("[bold]Total Monthly Cost[/bold]",
                   f"[bold red]{format_currency(row['total_monthly_cost'])}[/bold red]",
                   f"[bold red]{format_currency(row['mr_total_monthly_cost'])}[/bold red]",
