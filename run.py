@@ -78,7 +78,7 @@ inspections = InspectionsClient(supabase_client=supabase)
 neighborhoods = NeighborhoodsClient(supabase_client=supabase, console=console)
 scraper = NeighborhoodScraper(supabase_client=supabase, console=console)
 
-LAST_USED_LOAN = 2
+LAST_USED_LOAN = 9
 
 def load_assumptions():
     global ASSUMPTIONS
@@ -453,13 +453,13 @@ load_assumptions()
 load_loan(LAST_USED_LOAN)
 reload_dataframe()
 
-PHASE0_CRITERIA = "square_ft >= 1000 & cash_needed <= 35000 & monthly_cash_flow >= -500"
+PHASE0_CRITERIA = "square_ft >= 1000 & monthly_cash_flow >= -500"
 PHASE1_CRITERIA = (
     "MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & beats_market "
     "& mr_monthly_cash_flow_y1 >= -400 "
     "& ((units == 0 & mr_monthly_cash_flow_y2 >= 0) | (units > 0 & mr_monthly_cash_flow_y2 >= 200))"
 )
-PHASE1_TOUR_CRITERIA = "((neighborhood_letter_grade in ['A','B','C']) | is_fsbo) & status == 'active'"
+PHASE1_TOUR_CRITERIA = "neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current' & status == 'active'"
 
 
 def get_all_phase0_qualifying_properties():

@@ -104,14 +104,10 @@ class LoansProvider:
         ).ask()
 
         preapproval_link = questionary.text("Preapproval link (URL) - optional").ask()
-
-        preapproved_amount = questionary.text(
-            "Preapproved amount ($)", validate=lambda x: x.replace(",", "").isdigit()
-        ).ask()
-
+        preapproved_amount = questionary.text("Preapproved amount ($)", validate=lambda x: x.replace(",", "").isdigit()).ask()
         issued_date = questionary.text("Issued date (YYYY-MM-DD)").ask()
-
         expiration_date = questionary.text("Expiration date (YYYY-MM-DD)").ask()
+        loan_type = questionary.select("Type of loan", choices=["CONVENTIONAL", "FHA"]).ask()
 
         return Loan(
             id=0,  # Will be set by database
@@ -126,8 +122,9 @@ class LoansProvider:
             upfront_discounts=float(upfront_discounts),
             preapproval_link=preapproval_link.strip(),
             preapproved_amount=int(preapproved_amount.replace(",", "")),
-            issued_date=issued_date.strip(),
-            expiration_date=expiration_date.strip(),
+            issued_date=issued_date.strip() if issued_date != "" else None,
+            expiration_date=expiration_date.strip() if expiration_date != "" else None,
+            loan_type=loan_type,
         )
 
     def add_loan(self, loan_data: Loan) -> bool:
