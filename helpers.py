@@ -822,3 +822,49 @@ def get_properties_missing_tours(supabase, console, df):
     except Exception as e:
         console.print(f"Error getting property tour data: {e}", style="bold red")
         return df.copy()  # Return full dataframe on error
+
+
+def validate_decimal(text: str) -> bool:
+    """Validate decimal input (allows empty for optional fields)"""
+    if text == "":
+        return True
+    try:
+        float(text.replace(",", ""))
+        return True
+    except ValueError:
+        return False
+
+
+def validate_positive_decimal(text: str) -> bool:
+    """Validate positive decimal (required field)"""
+    if text == "":
+        return False
+    try:
+        return float(text.replace(",", "")) >= 0
+    except ValueError:
+        return False
+
+
+def validate_percentage(text: str) -> bool:
+    """Validate percentage (0-100)"""
+    if text == "":
+        return True
+    try:
+        val = float(text)
+        return 0 <= val <= 100
+    except ValueError:
+        return False
+
+
+def validate_date(text: str) -> bool:
+    """Validate YYYY-MM-DD format"""
+    if text == "":
+        return True
+    parts = text.split('-')
+    if len(parts) != 3:
+        return False
+    try:
+        year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+        return 1900 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31
+    except ValueError:
+        return False
