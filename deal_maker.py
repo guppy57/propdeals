@@ -15,6 +15,12 @@ from InquirerPy import inquirer
 from rich.panel import Panel
 
 from assumptions import Assumption
+from display import (
+    display_property_overview_panel,
+    display_property_rent_estimates_table,
+    display_property_investment_metrics_table,
+    display_investment_requirements_panel
+)
 from helpers import validate_decimal, validate_positive_decimal, validate_percentage, validate_date
 from loans import Loan
 
@@ -314,10 +320,27 @@ class DealMakerProvider:
 
         return scenario_name
 
-    def collect_deal_details(self) -> Optional[Deal]:
+    def collect_deal_details(
+        self,
+        df: pd.DataFrame,
+        rents: pd.DataFrame,
+        loan: dict,
+        assumptions: dict
+    ) -> Optional[Deal]:
         """
         Collect all deal details from user input through interactive prompts.
-        Returns Deal object if successful, None if user cancels or error occurs.
+
+        Displays comprehensive property analysis after property selection to help
+        user make informed decisions about deal parameters.
+
+        Args:
+            df: DataFrame with all properties and calculated metrics
+            rents: DataFrame with rent estimates per unit/room
+            loan: Dict with current session loan parameters
+            assumptions: Dict with investment assumptions
+
+        Returns:
+            Deal object if successful, None if user cancels or error occurs.
         """
         try:
             from loans import LoansProvider
@@ -352,6 +375,54 @@ class DealMakerProvider:
             # Get property info for later use
             selected_property = next(p for p in properties_response.data if p["address1"] == property_address)
             num_units = selected_property.get("units", 0)
+
+            # Display comprehensive property analysis
+            try:
+                # Lookup full property row in DataFrame
+                row = df[df["address1"] == property_address].iloc[0]
+
+                # Get rent estimates for this property
+                property_rents = rents[rents["address1"] == property_address]
+
+                # Determine property type
+                is_single_family = int(row["units"]) == 0
+
+                # Check if rent data exists
+                if property_rents.empty:
+                    self.console.print(
+                        "\n[yellow]⚠ Warning: No rent estimates found for this property.[/yellow]"
+                    )
+                    self.console.print(
+                        "[dim]Some analysis panels may be incomplete.[/dim]\n"
+                    )
+
+                # Display property analysis panels
+                self.console.print("\n[bold cyan]═══ Property Analysis ═══[/bold cyan]\n")
+
+                display_property_overview_panel(self.console, row)
+
+                if not property_rents.empty:
+                    display_property_rent_estimates_table(self.console, property_rents, is_single_family)
+
+                display_property_investment_metrics_table(self.console, row, is_single_family)
+                display_investment_requirements_panel(self.console, row, assumptions, loan)
+
+                self.console.print("\n[bold cyan]═══════════════════════[/bold cyan]\n")
+
+            except IndexError:
+                self.console.print(
+                    f"\n[red]Error: Property '{property_address}' not found in DataFrame.[/red]"
+                )
+                self.console.print(
+                    "[yellow]Continuing without property analysis display...[/yellow]\n"
+                )
+            except Exception as e:
+                self.console.print(
+                    f"\n[red]Error displaying property analysis: {str(e)}[/red]"
+                )
+                self.console.print(
+                    "[yellow]Continuing without property analysis display...[/yellow]\n"
+                )
 
             # 2. LOAN SELECTION (inquirer.fuzzy)
             loans = loans_provider.get_loans()

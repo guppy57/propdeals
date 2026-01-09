@@ -456,7 +456,7 @@ load_assumptions()
 load_loan(LAST_USED_LOAN)
 reload_dataframe()
 
-PHASE0_CRITERIA = "square_ft >= 1000 & monthly_cash_flow >= -500"
+PHASE0_CRITERIA = "square_ft >= 1000 & monthly_cash_flow >= -500 & cash_needed <= 55000"
 PHASE1_CRITERIA = (
     "MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & beats_market "
     "& mr_monthly_cash_flow_y1 >= -400 "
@@ -962,9 +962,14 @@ def run_deal_maker_workflow():
     """Main workflow for creating new deals"""
     deal_maker_provider = DealMakerProvider(supabase, console)
 
-    # Collect deal details
+    # Collect deal details (now with property display)
     console.print("[cyan]Creating new deal scenario...[/cyan]\n")
-    deal = deal_maker_provider.collect_deal_details()
+    deal = deal_maker_provider.collect_deal_details(
+        df=df,          # Pass global DataFrame
+        rents=rents,    # Pass global rents DataFrame
+        loan=LOAN,      # Pass global LOAN dict
+        assumptions=ASSUMPTIONS  # Pass global ASSUMPTIONS dict
+    )
 
     if deal is None:
         console.print("[yellow]Deal creation cancelled or failed[/yellow]")
