@@ -246,21 +246,14 @@ def apply_calculations_on_dataframe(df, loan, assumptions):
         (ASSUMPTIONS["ia_fhb_prog_upfront_option"] == "LOAN")
     )
     basic_columns["down_payment"] = pd.Series(
-        np.where(
-            reduce_downpayment_condition,
-            basic_columns["down_payment"] - basic_columns["5_pct_loan"],
-            basic_columns["down_payment"]
-        ),
+        np.where(reduce_downpayment_condition, basic_columns["down_payment"] - basic_columns["5_pct_loan"], basic_columns["down_payment"]),
         index=df.index
     )
     basic_columns["loan_amount"] = pd.Series(
-        np.where(
-            reduce_downpayment_condition,
-            basic_columns["loan_amount"],
-            basic_columns["loan_amount"] - basic_columns["5_pct_loan"]
-        ),
+        np.where(reduce_downpayment_condition, basic_columns["loan_amount"], basic_columns["loan_amount"] - basic_columns["5_pct_loan"]),
         index=df.index
     )
+    basic_columns["2nd_loan_type"] = pd.Series(np.where(reduce_downpayment_condition, "reduced_dp", "reduced_loan"), index=df.index)
     basic_columns["monthly_mortgage"] = basic_columns["loan_amount"].apply(lambda x: calculate_mortgage(x, loan["apr_rate"], loan["loan_length_years"]))
     basic_columns["monthly_mip"] = (basic_columns["loan_amount"] * loan["mip_annual_rate"]) / 12
     basic_columns["monthly_taxes"] = (df["purchase_price"] * assumptions["property_tax_rate"]) / 12

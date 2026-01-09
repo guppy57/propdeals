@@ -1412,9 +1412,27 @@ def display_investment_requirements_panel(console, row, assumptions, loan):
         assumptions: ASSUMPTIONS dict with ia_fhb_prog settings
         loan: LOAN dict with upfront_discounts
     """
+    # Build down payment line with breakdown if using Iowa FHB program
+    using_ia_fhb = assumptions['using_ia_fhb_prog'] and assumptions['ia_fhb_prog_upfront_option'] == "LOAN" and row["units"] == 0
+
+    if using_ia_fhb:
+        second_loan = row['5_pct_loan']
+        down_payment_from_pocket = row['down_payment']
+
+        if row['2nd_loan_type'] == 'reduced_dp':
+            # Down payment is composed of pocket money + 2nd loan
+            original_dp_amount = row['purchase_price'] * loan['down_payment_rate']
+            down_payment_line = f"Down Payment: {format_currency(original_dp_amount)} ({format_currency(down_payment_from_pocket)} pocket + {format_currency(second_loan)} 2nd loan)"
+        else:
+            # Down payment is all from pocket (2nd loan applied to mortgage instead)
+            down_payment_line = f"Down Payment: {format_currency(down_payment_from_pocket)} (from pocket)"
+    else:
+        # Standard down payment display
+        down_payment_line = f"Down Payment: {format_currency(row['down_payment'])}"
+
     investment_summary = (
         f"[bold green]Investment Summary[/bold green]\n"
-        f"Down Payment: {format_currency(row['down_payment'])}\n"
+        f"{down_payment_line}\n"
         f"Closing Costs: {format_currency(row['closing_costs'])}\n"
         f"Lender Discounts: {format_currency(loan['upfront_discounts'])}\n"
         f"[bold]Total Cash Needed: {format_currency(row['cash_needed'])}[/bold]\n"
@@ -1422,14 +1440,48 @@ def display_investment_requirements_panel(console, row, assumptions, loan):
         f"[bold green]Purchase Price: {format_currency(row['purchase_price'])}[/bold green]"
     )
 
-    if assumptions['using_ia_fhb_prog'] and assumptions['ia_fhb_prog_upfront_option'] == "LOAN" and row["units"] == 0:
-        investment_summary += (
-            f"\n\n[bold yellow]Iowa First-Time Homebuyer Program:[/bold yellow]\n"
-            f"5% Forgivable Loan: {format_currency(row['5_pct_loan'])}\n"
-            f"Primary Mortgage: {format_currency(row['loan_amount'])}\n"
-            f"Total Financing: {format_currency(row['loan_amount'] + row['5_pct_loan'])}\n"
-            f"[dim](5% loan due at sale or refinance)[/dim]"
-        )
+    if using_ia_fhb:
+        # Calculate key values based on how the 2nd loan was applied (already calculated above)
+        primary_mortgage = row['loan_amount']
+        total_financing = primary_mortgage + second_loan
+        original_dp_rate = loan['down_payment_rate']
+
+        if row['2nd_loan_type'] == 'reduced_dp':
+            # 2nd loan reduced the down payment
+            application_type = "2nd Loan Applied to Down Payment"
+            original_dp_amount = row['purchase_price'] * original_dp_rate
+            total_dp = original_dp_amount
+            effective_dp_rate = original_dp_rate - 0.05
+
+            investment_summary += (
+                f"\n\n[bold yellow]Iowa First-Time Homebuyer Program:[/bold yellow]\n"
+                f"Application Type: {application_type}\n\n"
+                f"2nd Loan (5%):              {format_currency(second_loan)}\n"
+                f"[bold cyan]Down Payment from Pocket:   {format_currency(down_payment_from_pocket)}[/bold cyan]  ← What you pay\n"
+                f"Total Down Payment:         {format_currency(total_dp)}  ({format_percentage(original_dp_rate)} original)\n"
+                f"[bold]Effective Down Payment:     {format_percentage(effective_dp_rate)}[/bold] ({format_percentage(original_dp_rate)} - 5%)\n\n"
+                f"Primary Mortgage:           {format_currency(primary_mortgage)}\n"
+                f"[bold green]Total Financing:            {format_currency(total_financing)}[/bold green] ({format_currency(primary_mortgage)} + {format_currency(second_loan)})\n"
+                f"[dim](2nd loan due at sale or refinance)[/dim]"
+            )
+        else:
+            # 2nd loan reduced the mortgage amount
+            application_type = "2nd Loan Applied to Mortgage Reduction"
+            total_dp = down_payment_from_pocket
+            effective_dp_rate = original_dp_rate
+            gross_loan = primary_mortgage + second_loan
+
+            investment_summary += (
+                f"\n\n[bold yellow]Iowa First-Time Homebuyer Program:[/bold yellow]\n"
+                f"Application Type: {application_type}\n\n"
+                f"2nd Loan (5%):              {format_currency(second_loan)}\n"
+                f"[bold cyan]Down Payment from Pocket:   {format_currency(down_payment_from_pocket)}[/bold cyan]  ← What you pay\n"
+                f"Total Down Payment:         {format_currency(total_dp)}  ({format_percentage(original_dp_rate)})\n"
+                f"[bold]Effective Down Payment:     {format_percentage(effective_dp_rate)}[/bold] (unchanged)\n\n"
+                f"Primary Mortgage:           {format_currency(primary_mortgage)} ({format_currency(gross_loan)} - {format_currency(second_loan)})\n"
+                f"[bold green]Total Financing:            {format_currency(total_financing)}[/bold green] ({format_currency(primary_mortgage)} + {format_currency(second_loan)})\n"
+                f"[dim](2nd loan due at sale or refinance)[/dim]"
+            )
 
     console.print(Panel(investment_summary, title="Investment Requirements"))
 
