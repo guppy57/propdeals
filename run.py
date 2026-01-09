@@ -84,6 +84,15 @@ scraper = NeighborhoodScraper(supabase_client=supabase, console=console)
 assumptions_provider = AssumptionsProvider(supabase_client=supabase, console=console)
 
 LAST_USED_LOAN = 9
+CASH_NEEDED_AMT = 35000
+
+PHASE0_CRITERIA = f"square_ft >= 1000 & cash_needed <= {CASH_NEEDED_AMT} & monthly_cash_flow >= -500"
+PHASE1_CRITERIA = (
+    "MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & beats_market "
+    "& mr_monthly_cash_flow_y1 >= -400 "
+    "& ((units == 0 & mr_monthly_cash_flow_y2 >= 0) | (units > 0 & mr_monthly_cash_flow_y2 >= 200))"
+)
+PHASE1_TOUR_CRITERIA = "((neighborhood_letter_grade in ['A','B','C']) | is_fsbo) & status == 'active'"
 
 def load_assumptions():
     global ASSUMPTIONS
@@ -228,6 +237,23 @@ def apply_calculations_on_dataframe(df, loan, assumptions):
     basic_columns["5_pct_loan"] = df["purchase_price"] * 0.05
     upfront_mip = 0 if LOAN["loan_type"] == "FHA" else (df["purchase_price"] * loan["mip_upfront_rate"])
     basic_columns["loan_amount"] = df["purchase_price"] - basic_columns["down_payment"] + upfront_mip
+    # If the down payment exceeds the cash needed amount for a SFH, then we use the Iowa 2nd Loan to reduce the downpayment amount, else we use it to reduce the loan amount
+    # Ex: if downpayment is 20% and the down payment amount is under cash needed amt, then the effective downpayment is 25%, if it exceeds, then the effective down payment is 15%
+    reduce_downpayment_condition = (
+        (df["units"] == 0) &
+        (basic_columns["down_payment"] > CASH_NEEDED_AMT) &
+        ASSUMPTIONS["using_ia_fhb_prog"] &
+        (ASSUMPTIONS["ia_fhb_prog_upfront_option"] == "LOAN")
+    )
+    basic_columns["down_payment"] = pd.Series(
+        np.where(reduce_downpayment_condition, basic_columns["down_payment"] - basic_columns["5_pct_loan"], basic_columns["down_payment"]),
+        index=df.index
+    )
+    basic_columns["loan_amount"] = pd.Series(
+        np.where(reduce_downpayment_condition, basic_columns["loan_amount"], basic_columns["loan_amount"] - basic_columns["5_pct_loan"]),
+        index=df.index
+    )
+    basic_columns["2nd_loan_type"] = pd.Series(np.where(reduce_downpayment_condition, "reduced_dp", "reduced_loan"), index=df.index)
     basic_columns["monthly_mortgage"] = basic_columns["loan_amount"].apply(lambda x: calculate_mortgage(x, loan["apr_rate"], loan["loan_length_years"]))
     basic_columns["monthly_mip"] = (basic_columns["loan_amount"] * loan["mip_annual_rate"]) / 12
     basic_columns["monthly_taxes"] = (df["purchase_price"] * assumptions["property_tax_rate"]) / 12
@@ -455,15 +481,6 @@ def reload_dataframe():
 load_assumptions()
 load_loan(LAST_USED_LOAN)
 reload_dataframe()
-
-PHASE0_CRITERIA = "square_ft >= 1000 & monthly_cash_flow >= -500 & cash_needed <= 55000"
-PHASE1_CRITERIA = (
-    "MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & beats_market "
-    "& mr_monthly_cash_flow_y1 >= -400 "
-    "& ((units == 0 & mr_monthly_cash_flow_y2 >= 0) | (units > 0 & mr_monthly_cash_flow_y2 >= 200))"
-)
-PHASE1_TOUR_CRITERIA = "neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current' & status == 'active'"
-
 
 def get_all_phase0_qualifying_properties():
     """
