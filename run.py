@@ -10,6 +10,8 @@ from rich.panel import Panel
 from supabase import Client, create_client
 
 from add_property import run_add_property
+from assumptions import AssumptionsProvider
+from deal_maker import DealMakerProvider
 from display import (
     display_all_phase1_qualifying_properties,
     display_all_phase2_qualifying_properties,
@@ -17,6 +19,7 @@ from display import (
     display_all_properties_homestyle_analysis,
     display_all_properties_info,
     display_current_context_panel,
+    display_deals_table,
     display_homestyle_overview_panel,
     display_investment_requirements_panel,
     display_loans,
@@ -27,6 +30,7 @@ from display import (
     display_property_metrics,
     display_property_overview_panel,
     display_property_rent_estimates_table,
+    display_single_deal,
     display_start_screen_summary,
     display_y2_calculations,
 )
@@ -77,8 +81,9 @@ supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_
 inspections = InspectionsClient(supabase_client=supabase)
 neighborhoods = NeighborhoodsClient(supabase_client=supabase, console=console)
 scraper = NeighborhoodScraper(supabase_client=supabase, console=console)
+assumptions_provider = AssumptionsProvider(supabase_client=supabase, console=console)
 
-LAST_USED_LOAN = 2
+LAST_USED_LOAN = 9
 CASH_NEEDED_AMT = 35000
 
 PHASE0_CRITERIA = f"square_ft >= 1000 & cash_needed <= {CASH_NEEDED_AMT} & monthly_cash_flow >= -500"
@@ -92,47 +97,45 @@ PHASE1_TOUR_CRITERIA = "((neighborhood_letter_grade in ['A','B','C']) | is_fsbo)
 def load_assumptions():
     global ASSUMPTIONS
     console.print("[yellow]Reloading assumptions...[/yellow]")
-    assumptions_get_response = (
-        supabase.table("assumptions")
-        .select("*")
-        .eq("id", 1)
-        .limit(1)
-        .single()
-        .execute()
-    )
+    assumption = assumptions_provider.get_assumption_by_id(1)
+    if not assumption:
+        console.print("[red]Failed to load assumptions![/red]")
+        return
+
+    # Convert Assumption dataclass to dictionary for backward compatibility
     ASSUMPTIONS = {
-        "appreciation_rate": float(assumptions_get_response.data["appreciation_rate"]),
-        "mf_appreciation_rate": (float(assumptions_get_response.data["appreciation_rate"]) - 0.01),
-        "rent_appreciation_rate": float(assumptions_get_response.data["rent_appreciation_rate"]),
-        "property_tax_rate": float(assumptions_get_response.data["property_tax_rate"]),
-        "home_insurance_rate": float(assumptions_get_response.data["home_insurance_rate"]),
-        "vacancy_rate": float(assumptions_get_response.data["vacancy_rate"]),
-        "repair_savings_rate": float(assumptions_get_response.data["repair_savings_rate"]),
-        "capex_reserve_rate": float(assumptions_get_response.data["capex_reserve_rate"]),
-        "closing_costs_rate": float(assumptions_get_response.data["closing_costs_rate"]),
-        "live_in_unit_setting": assumptions_get_response.data["live_in_unit_setting"],
-        "gross_annual_income": assumptions_get_response.data["gross_annual_income"],
-        "state_tax_code": assumptions_get_response.data["state_tax_code"],
-        "after_tax_monthly_income": calculate_monthly_take_home(assumptions_get_response.data["gross_annual_income"], assumptions_get_response.data["state_tax_code"]),
-        "discount_rate": assumptions_get_response.data["discount_rate"],
-        "using_ia_fhb_prog": assumptions_get_response.data["using_ia_fhb_prog"],
-        "ia_fhb_prog_upfront_option": assumptions_get_response.data["ia_fhb_prog_upfront_option"],
-        "utility_electric_base": float(assumptions_get_response.data["utility_electric_base"]),  # per month (~$137 avg, 13¢/kWh, 1060 kWh/mo)
-        "utility_gas_base": float(assumptions_get_response.data["utility_gas_base"]),  # per month annual avg ($155.84 winter, $56.95 summer)
-        "utility_water_base": float(assumptions_get_response.data["utility_water_base"]),  # per month (Iowa average)
-        "utility_trash_base": float(assumptions_get_response.data["utility_trash_base"]),  # per month (Des Moines: $17.91 for 96-gal cart)
-        "utility_internet_base": float(assumptions_get_response.data["utility_internet_base"]),  # per month (Iowa avg: $59.75) - SFH only
-        "utility_baseline_sqft": int(assumptions_get_response.data["utility_baseline_sqft"]),  # baseline square footage for scaling electric/gas
-        "land_value_prcnt": float(assumptions_get_response.data["land_value_prcnt"]),
-        "federal_tax_rate": float(assumptions_get_response.data["federal_tax_rate"]),
-        "selling_costs_rate": float(assumptions_get_response.data["selling_costs_rate"]),
-        "longterm_capital_gains_tax_rate": float(assumptions_get_response.data["longterm_capital_gains_tax_rate"]),
-        "residential_depreciation_period_yrs": float(assumptions_get_response.data["residential_depreciation_period_yrs"]),
-        "default_property_condition_score": int(assumptions_get_response.data["default_property_condition_score"]),
-        "description": assumptions_get_response.data["description"],
+        "appreciation_rate": float(assumption.appreciation_rate),
+        "mf_appreciation_rate": (float(assumption.appreciation_rate) - 0.01),
+        "rent_appreciation_rate": float(assumption.rent_appreciation_rate),
+        "property_tax_rate": float(assumption.property_tax_rate),
+        "home_insurance_rate": float(assumption.home_insurance_rate),
+        "vacancy_rate": float(assumption.vacancy_rate),
+        "repair_savings_rate": float(assumption.repair_savings_rate),
+        "capex_reserve_rate": float(assumption.capex_reserve_rate),
+        "closing_costs_rate": float(assumption.closing_costs_rate),
+        "live_in_unit_setting": assumption.live_in_unit_setting,
+        "gross_annual_income": assumption.gross_annual_income,
+        "state_tax_code": assumption.state_tax_code,
+        "after_tax_monthly_income": calculate_monthly_take_home(assumption.gross_annual_income, assumption.state_tax_code),
+        "discount_rate": assumption.discount_rate,
+        "using_ia_fhb_prog": assumption.using_ia_fhb_prog,
+        "ia_fhb_prog_upfront_option": assumption.ia_fhb_prog_upfront_option,
+        "utility_electric_base": float(assumption.utility_electric_base),
+        "utility_gas_base": float(assumption.utility_gas_base),
+        "utility_water_base": float(assumption.utility_water_base),
+        "utility_trash_base": float(assumption.utility_trash_base),
+        "utility_internet_base": float(assumption.utility_internet_base),
+        "utility_baseline_sqft": int(assumption.utility_baseline_sqft),
+        "land_value_prcnt": float(assumption.land_value_prcnt),
+        "federal_tax_rate": float(assumption.federal_tax_rate),
+        "selling_costs_rate": float(assumption.selling_costs_rate),
+        "longterm_capital_gains_tax_rate": float(assumption.longterm_capital_gains_tax_rate),
+        "residential_depreciation_period_yrs": float(assumption.residential_depreciation_period_yrs),
+        "default_property_condition_score": int(assumption.default_property_condition_score),
+        "description": assumption.description,
     }
     console.print(
-        f"[green]Assumption set '{assumptions_get_response.data['description']}' reloaded successfully![/green]"
+        f"[green]Assumption set '{assumption.description}' reloaded successfully![/green]"
     )
 
 
@@ -485,9 +488,6 @@ def reload_dataframe():
 load_assumptions()
 load_loan(LAST_USED_LOAN)
 reload_dataframe()
-
-
-
 
 def get_all_phase0_qualifying_properties():
     """
@@ -982,6 +982,92 @@ def run_loans_options():
             reload_dataframe()
 
 
+def run_deal_maker_workflow():
+    """Main workflow for creating new deals"""
+    deal_maker_provider = DealMakerProvider(supabase, console)
+
+    # Collect deal details
+    console.print("[cyan]Creating new deal scenario...[/cyan]\n")
+    deal = deal_maker_provider.collect_deal_details()
+
+    if deal is None:
+        console.print("[yellow]Deal creation cancelled or failed[/yellow]")
+        return
+
+    # Save deal
+    success = deal_maker_provider.add_deal(deal)
+
+    if success:
+        console.print(f"[green]Deal saved successfully![/green]")
+    else:
+        console.print("[red]Failed to save deal[/red]")
+
+
+def run_deal_maker_menu():
+    """Submenu for deal maker operations"""
+    using_deal_maker = True
+    choices = ["Go back", "View deals", "View single deal", "Create new deal"]
+
+    deal_maker_provider = DealMakerProvider(supabase, console)
+    loans_provider = LoansProvider(supabase, console)
+    assumptions_provider = AssumptionsProvider(supabase, console)
+
+    while using_deal_maker:
+        option = questionary.select(
+            "Deal Maker - Select an option",
+            choices=choices
+        ).ask()
+
+        if option == "Go back":
+            using_deal_maker = False
+
+        elif option == "View deals":
+            deals = deal_maker_provider.get_deals()
+            if deals:
+                display_deals_table(console, deals, loans_provider, assumptions_provider)
+            else:
+                console.print("[yellow]No deals found[/yellow]")
+
+        elif option == "View single deal":
+            deals = deal_maker_provider.get_deals()
+            if not deals or len(deals) == 0:
+                console.print("[yellow]No deals found[/yellow]")
+                continue
+
+            # Build fuzzy search choices
+            deal_choices = [f"{deal.scenario_name} - {deal.address1}" for deal in deals]
+
+            selected = inquirer.fuzzy(
+                message="Type to search deals",
+                choices=deal_choices,
+                default="",
+                multiselect=False,
+                validate=None,
+                invalid_message="Invalid input"
+            ).execute()
+
+            # Find the selected deal
+            selected_deal = None
+            for deal in deals:
+                choice_str = f"{deal.scenario_name} - {deal.address1}"
+                if choice_str == selected:
+                    selected_deal = deal
+                    break
+
+            if selected_deal:
+                # Fetch related loan and assumption
+                loan = loans_provider.get_loan_by_id(selected_deal.loan_id) if selected_deal.loan_id else None
+                assumption = assumptions_provider.get_assumption_by_id(selected_deal.assumption_set_id) if selected_deal.assumption_set_id else None
+
+                # Display single deal
+                display_single_deal(console, selected_deal, loan, assumption)
+            else:
+                console.print("[red]Could not find selected deal[/red]")
+
+        elif option == "Create new deal":
+            run_deal_maker_workflow()
+
+
 if __name__ == "__main__":
     summary = get_start_screen_summary(df)
     display_start_screen_summary(console, summary)
@@ -991,6 +1077,7 @@ if __name__ == "__main__":
             "One property",
             "One property - phase 1 research list",
             "Add new property",
+            "Run Deal Maker",
             "Scripts",
             "Loans",
             "Refresh data",
@@ -1071,6 +1158,8 @@ if __name__ == "__main__":
                         property_details["address1"],
                         get_all_phase1_qualifying_properties,
                     )
+        elif option == "Run Deal Maker":
+            run_deal_maker_menu()
         elif option == "Scripts":
             run_scripts_options()
         elif option == "Loans":

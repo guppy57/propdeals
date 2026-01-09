@@ -1931,3 +1931,141 @@ def display_start_screen_summary(console, summary):
         border_style="cyan",
         padding=(1, 2)
     ))
+
+def display_deals_table(console, deals, loans_provider, assumptions_provider):
+    """
+    Display a table of all deals with key information.
+
+    Args:
+        console: Rich console for output
+        deals: List of Deal objects from get_deals()
+        loans_provider: LoansProvider instance to fetch loan names
+        assumptions_provider: AssumptionsProvider instance to fetch assumption set names
+    """
+    if not deals or len(deals) == 0:
+        console.print("[yellow]No deals found[/yellow]")
+        return
+
+    table = Table(title="All Deals", show_header=True, header_style="bold magenta")
+
+    # Add columns
+    table.add_column("Deal Name", style="cyan", no_wrap=True)
+    table.add_column("Address", style="white", no_wrap=False)
+    table.add_column("Offer Price", justify="right", style="green", no_wrap=True)
+    table.add_column("Loan", style="yellow", no_wrap=True)
+    table.add_column("Assumptions", style="blue", no_wrap=True)
+    table.add_column("Created", justify="center", style="dim", no_wrap=True)
+
+    # Iterate and populate rows
+    for deal in deals:
+        # Get loan name
+        loan_name = "Unknown"
+        if deal.loan_id:
+            loan = loans_provider.get_loan_by_id(deal.loan_id)
+            if loan:
+                loan_name = loan.name
+
+        # Get assumption set name
+        assumption_name = "Unknown"
+        if deal.assumption_set_id:
+            assumption = assumptions_provider.get_assumption_by_id(deal.assumption_set_id)
+            if assumption:
+                assumption_name = assumption.description
+
+        # Format offer price
+        offer_price_str = format_currency(float(deal.offer_price)) if deal.offer_price else "N/A"
+
+        # Format created date
+        created_str = deal.created_at.strftime("%Y-%m-%d") if deal.created_at else "N/A"
+
+        # Add row
+        table.add_row(
+            deal.scenario_name or "Unnamed",
+            deal.address1 or "N/A",
+            offer_price_str,
+            loan_name,
+            assumption_name,
+            created_str
+        )
+
+    console.print(table)
+    console.print(f"\n[cyan]Total deals: {len(deals)}[/cyan]")
+
+
+def display_single_deal(console, deal, loan, assumption):
+    """
+    Display detailed information for a single deal.
+
+    Args:
+        console: Rich console for output
+        deal: Deal object
+        loan: Loan object (fetched via deal.loan_id)
+        assumption: Assumption object (fetched via deal.assumption_set_id)
+    """
+    # Overview Panel
+    overview = (
+        f"[bold cyan]Deal Overview[/bold cyan]\n"
+        f"Scenario Name: {deal.scenario_name or 'Unnamed'}\n"
+        f"Property Address: {deal.address1}\n"
+        f"Offer Price: {format_currency(float(deal.offer_price)) if deal.offer_price else 'N/A'}\n"
+        f"Loan: {loan.name if loan else 'Unknown'}\n"
+        f"Assumption Set: {assumption.description if assumption else 'Unknown'}\n"
+        f"Created: {deal.created_at.strftime('%Y-%m-%d %H:%M') if deal.created_at else 'N/A'}\n"
+        f"Updated: {deal.updated_at.strftime('%Y-%m-%d %H:%M') if deal.updated_at else 'N/A'}"
+    )
+    console.print(Panel(overview, title="Deal Overview", border_style="cyan"))
+
+    # Financial Details Panel
+    financial = (
+        f"[bold green]Financial Details[/bold green]\n"
+        f"Offer Price: {format_currency(float(deal.offer_price)) if deal.offer_price else 'N/A'}\n"
+        f"Seller Closing Cost %: {format_percentage(float(deal.seller_closing_cost_percent)) if deal.seller_closing_cost_percent else 'N/A'}\n"
+        f"Seller Repair Credits: {format_currency(float(deal.seller_repair_credits)) if deal.seller_repair_credits else '$0.00'}\n"
+        f"Other Closing Costs: {format_currency(float(deal.other_closing_costs)) if deal.other_closing_costs else '$0.00'}\n"
+        f"Initial Repairs Budget: {format_currency(float(deal.initial_repairs_budget)) if deal.initial_repairs_budget else '$0.00'}\n"
+    )
+
+    if deal.renovation_budget_override:
+        financial += f"Renovation Budget Override: {format_currency(float(deal.renovation_budget_override))}\n"
+
+    console.print(Panel(financial, title="Financial Details", border_style="green"))
+
+    # Deal Configuration Panel
+    config = (
+        f"[bold yellow]Deal Configuration[/bold yellow]\n"
+        f"Using Homestyle Loan: {'Yes' if deal.using_homestyle_loan else 'No'}\n"
+        f"Using Iowa 2nd Home Loan: {'Yes' if deal.using_iowa_second_home_loan else 'No'}\n"
+        f"Tack Seller Costs to Price: {'Yes' if deal.tack_seller_costs_to_price else 'No'}\n"
+        f"Override Assumptions: {'Yes' if deal.override_assumptions else 'No'}\n"
+        f"Has Actual Rent Data: {'Yes' if deal.has_actual_rent_data else 'No'}\n"
+        f"Appeal Property Tax: {'Yes' if deal.appeal_property_tax else 'No'}\n"
+    )
+
+    if deal.buyer_closing_costs_paid_by:
+        config += f"Buyer Closing Costs Paid By: {deal.buyer_closing_costs_paid_by.value}\n"
+
+    if deal.utilities_paid_by:
+        config += f"Utilities Paid By: {deal.utilities_paid_by.value}\n"
+
+    if deal.property_management_type:
+        config += f"Property Management: {deal.property_management_type.value}\n"
+
+    console.print(Panel(config, title="Configuration", border_style="yellow"))
+
+    # Timeline Panel (if dates exist)
+    if deal.offer_date or deal.closing_date:
+        timeline = f"[bold blue]Timeline[/bold blue]\n"
+        if deal.offer_date:
+            timeline += f"Offer Date: {deal.offer_date.strftime('%Y-%m-%d')}\n"
+        if deal.closing_date:
+            timeline += f"Closing Date: {deal.closing_date.strftime('%Y-%m-%d')}\n"
+        if deal.days_to_close:
+            timeline += f"Days to Close: {deal.days_to_close}\n"
+        if deal.rent_up_period_days:
+            timeline += f"Rent-Up Period: {deal.rent_up_period_days} days\n"
+
+        console.print(Panel(timeline, title="Timeline", border_style="blue"))
+
+    # Notes Panel (if present)
+    if deal.notes:
+        console.print(Panel(deal.notes, title="Notes", border_style="dim"))
