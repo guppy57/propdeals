@@ -81,14 +81,46 @@ class DealMakerProvider:
     def __init__(self, supabase: Client, console: Console):
         self.supabase = supabase
         self.console = console
-    
+
+    def _parse_deal_from_db(self, deal_dict: Dict[str, Any]) -> Deal:
+        """
+        Parse a deal dictionary from database, converting string timestamps to datetime objects.
+
+        Supabase returns created_at/updated_at as ISO 8601 strings, but Deal dataclass
+        expects datetime objects.
+        """
+        # Parse created_at
+        if 'created_at' in deal_dict and deal_dict['created_at'] is not None:
+            if isinstance(deal_dict['created_at'], str):
+                try:
+                    # Handle ISO 8601 format with 'Z' or timezone info
+                    deal_dict['created_at'] = datetime.fromisoformat(
+                        deal_dict['created_at'].replace('Z', '+00:00')
+                    )
+                except (ValueError, AttributeError) as e:
+                    self.console.print(f"[yellow]Warning: Could not parse created_at: {e}[/yellow]")
+                    deal_dict['created_at'] = datetime.utcnow()
+
+        # Parse updated_at
+        if 'updated_at' in deal_dict and deal_dict['updated_at'] is not None:
+            if isinstance(deal_dict['updated_at'], str):
+                try:
+                    deal_dict['updated_at'] = datetime.fromisoformat(
+                        deal_dict['updated_at'].replace('Z', '+00:00')
+                    )
+                except (ValueError, AttributeError) as e:
+                    self.console.print(f"[yellow]Warning: Could not parse updated_at: {e}[/yellow]")
+                    deal_dict['updated_at'] = datetime.utcnow()
+
+        return Deal(**deal_dict)
+
     def get_deals(self) -> Optional[List[Deal]]:
         try:
             response = self.supabase.table("deals").select("*").limit(10000).execute()
             if not response:
                 self.console.print("[red]Deals not found[/red]")
                 return None
-            return [Deal(**loan_dict) for loan_dict in response.data]
+            return [self._parse_deal_from_db(loan_dict) for loan_dict in response.data]
         except Exception as e:
             self.console.print(f"[red]Error getting deals: {str(e)}[/red]")
             return None
@@ -99,7 +131,7 @@ class DealMakerProvider:
             if not response:
                 self.console.print(f"[red]Deal {id} not found[/red]")
                 return None
-            return Deal(**response.data)
+            return self._parse_deal_from_db(response.data)
         except Exception as e:
             self.console.print(f"[red]Error getting deal {id}: {str(e)}[/red]")
             return None
@@ -283,9 +315,9 @@ class DealMakerProvider:
                                 renovation_scope: Optional[Dict[str, bool]]) -> str:
         """
         Auto-generate scenario name from key inputs.
-        Format: "{Address_Short}_{LoanType}_{Price}k_{Special_Modifier}_{Timestamp}"
+        Format: "{Address_Short}-{LoanType}-{Price}k-{Special_Modifier}-{Timestamp}"
 
-        Example: "123MainSt_FHA_250k_Homestyle_0108"
+        Example: "123MainSt-FHA-250k-Homestyle-0108"
         """
         # Shorten address (first part before comma/space)
         address_short = property_address.split(',')[0].replace(' ', '')[:15]
@@ -312,11 +344,11 @@ class DealMakerProvider:
         if modifiers:
             parts.extend(modifiers)
 
-        scenario_name = "_".join(parts)
+        scenario_name = "-".join(parts)
 
         # Add timestamp to ensure uniqueness
         timestamp = datetime.now().strftime("%m%d")
-        scenario_name = f"{scenario_name}_{timestamp}"
+        scenario_name = f"{scenario_name}-{timestamp}"
 
         return scenario_name
 
@@ -510,11 +542,13 @@ class DealMakerProvider:
             ).ask()
             seller_repair_credits = Decimal(seller_repair_credits_str.replace(",", ""))
 
-            # 9. TACK SELLER COSTS TO PRICE?
-            tack_seller_costs_to_price = questionary.confirm(
-                "Tack seller's increased closing costs to price?",
-                default=False
-            ).ask()
+            # 9. TACK SELLER COSTS TO PRICE? (conditional)
+            tack_seller_costs_to_price = False  # Default when buyer pays
+            if buyer_closing_costs_paid_by_value == "seller":
+                tack_seller_costs_to_price = questionary.confirm(
+                    "Tack seller's increased closing costs to price?",
+                    default=False
+                ).ask()
 
             # 10. OTHER CLOSING COSTS
             other_closing_costs_str = questionary.text(
