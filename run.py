@@ -83,8 +83,8 @@ neighborhoods = NeighborhoodsClient(supabase_client=supabase, console=console)
 scraper = NeighborhoodScraper(supabase_client=supabase, console=console)
 assumptions_provider = AssumptionsProvider(supabase_client=supabase, console=console)
 
-LAST_USED_LOAN = 9
-CASH_NEEDED_AMT = 35000
+LAST_USED_LOAN = 2
+CASH_NEEDED_AMT = 25000
 
 PHASE0_CRITERIA = f"square_ft >= 1000 & cash_needed <= {CASH_NEEDED_AMT} & monthly_cash_flow >= -500"
 PHASE1_CRITERIA = (
@@ -92,7 +92,7 @@ PHASE1_CRITERIA = (
     "& mr_monthly_cash_flow_y1 >= -400 "
     "& ((units == 0 & mr_monthly_cash_flow_y2 >= 0) | (units > 0 & mr_monthly_cash_flow_y2 >= 200))"
 )
-PHASE1_TOUR_CRITERIA = "((neighborhood_letter_grade in ['A','B','C']) | is_fsbo) & status == 'active'"
+PHASE1_TOUR_CRITERIA = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & status == 'active'"
 
 def load_assumptions():
     global ASSUMPTIONS
@@ -903,7 +903,7 @@ def run_scripts_options():
         option = questionary.select("Select a script", choices=choices).ask()
         if option == "Go back":
             using_scripts = False
-        elif option == "Add property valuations to all Phase 1 properties":
+        elif option == "Add property valuations to all Phase 1.5 qualifiers":
             qualified_df, _ = get_phase1_research_list()
             scripts.run_add_property_values_script(properties_df=qualified_df)
             reload_dataframe()

@@ -1430,6 +1430,31 @@ def display_investment_requirements_panel(console, row, assumptions, loan):
         # Standard down payment display
         down_payment_line = f"Down Payment: {format_currency(row['down_payment'])}"
 
+    # Build estimated value comparison
+    est_value_lines = ""
+    if pd.notna(row.get('est_price')):
+        est_price = row['est_price']
+        purchase_price = row['purchase_price']
+        value_diff = est_price - purchase_price
+        value_diff_pct = (value_diff / purchase_price) * 100
+
+        # Determine color based on value difference
+        if value_diff > 0 and value_diff_pct > 5:
+            diff_color = "green"
+        elif abs(value_diff_pct) <= 5:
+            diff_color = "yellow"
+        else:
+            diff_color = "red"
+
+        # Format the difference with + or - sign
+        diff_sign = "+" if value_diff >= 0 else ""
+        est_value_lines = (
+            f"\nEstimated Value: {format_currency(est_price)}\n"
+            f"[{diff_color}]Value vs Price: {diff_sign}{format_currency(value_diff)} ({diff_sign}{value_diff_pct:.1f}%)[/{diff_color}]"
+        )
+    else:
+        est_value_lines = "\nEstimated Value: N/A"
+
     investment_summary = (
         f"[bold green]Investment Summary[/bold green]\n"
         f"{down_payment_line}\n"
@@ -1438,6 +1463,7 @@ def display_investment_requirements_panel(console, row, assumptions, loan):
         f"[bold]Total Cash Needed: {format_currency(row['cash_needed'])}[/bold]\n"
         f"Loan Amount: {format_currency(row['loan_amount'])}\n"
         f"[bold green]Purchase Price: {format_currency(row['purchase_price'])}[/bold green]"
+        f"{est_value_lines}"
     )
 
     if using_ia_fhb:
