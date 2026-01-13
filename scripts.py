@@ -1,12 +1,20 @@
 import os
+import time
 import requests
 import pandas as pd
 from supabase import Client
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 from display import display_property_value_comparison
 from handlers import handle_rent_research_after_add
 from add_property import mark_property_as_researched
+from iowa_realty_scraper import (
+    IowaRealtyScraper,
+    PropertyNotFoundError,
+    ScrapingTimeoutError,
+    ScrapingError
+)
 
 # RentCast API headers
 RENTCAST_HEADERS = {
@@ -350,3 +358,168 @@ Success Rate: {success_rate:.1f}%
             title="Summary",
             border_style="cyan"
         ))
+
+    def run_property_status_update_script(self, properties_df):
+        """
+        Update property statuses by scraping iowarealty.com.
+
+        For each property:
+        - Searches iowarealty.com via Google
+        - Scrapes current listing status
+        - Updates database if status has changed
+        - Tracks all changes for summary
+
+        Args:
+            properties_df: DataFrame of properties to update
+
+        Returns:
+            None (displays summary and results)
+        """
+        # Initialize scraper
+        scraper = IowaRealtyScraper(supabase_client=self.supabase, console=self.console)
+
+        # Initialize tracking variables
+        total = len(properties_df)
+        updated = 0
+        unchanged = 0
+        not_found = 0
+        errors = 0
+
+        # Track status changes and not found properties
+        status_changes = []
+        not_found_properties = []
+
+        self.console.print(f"\n[bold cyan]Starting property status updates for {total} properties...[/bold cyan]\n")
+        self.console.print("[dim]Note: 2-3 second delay between properties to avoid rate limiting[/dim]\n")
+
+        # Iterate through each property
+        for i, (_, row) in enumerate(properties_df.iterrows(), 1):
+            address1 = row.get('address1', 'Unknown')
+            full_address = row.get('full_address', address1)
+            current_status = row.get('status', 'unknown')
+
+            # Print progress
+            self.console.print(f"[cyan]{i}/{total}[/cyan] Processing: {address1}")
+            self.console.print(f"  [dim]Current status: {current_status}[/dim]")
+
+            try:
+                # Scrape status from iowarealty.com
+                scraped_status = scraper.get_property_status_by_address(full_address)
+
+                # Normalize status to lowercase for comparison
+                scraped_status_normalized = scraped_status.lower()
+
+                # Check if status has changed
+                if scraped_status_normalized != current_status.lower():
+                    # Status has changed - update database
+                    update_data = {"status": scraped_status_normalized}
+
+                    query = self.supabase.table("properties").update(update_data).eq("address1", address1)
+                    result = query.execute()
+
+                    if hasattr(result, "data") and result.data:
+                        updated += 1
+                        self.console.print(f"  [green]✓ Updated: {current_status} → {scraped_status_normalized}[/green]")
+
+                        # Track the change
+                        status_changes.append({
+                            'address': address1,
+                            'old_status': current_status,
+                            'new_status': scraped_status_normalized
+                        })
+                    else:
+                        self.console.print(f"  [red]✗ Database update failed[/red]")
+                        errors += 1
+                else:
+                    # Status unchanged
+                    unchanged += 1
+                    self.console.print(f"  [dim]→ Unchanged ({current_status})[/dim]")
+
+            except PropertyNotFoundError as e:
+                not_found += 1
+                self.console.print(f"  [yellow]⚠ Not found on iowarealty.com[/yellow]")
+                not_found_properties.append({
+                    'address': address1,
+                    'current_status': current_status,
+                    'reason': 'Property not found via Google search'
+                })
+
+            except ScrapingTimeoutError as e:
+                errors += 1
+                self.console.print(f"  [red]✗ Timeout: {str(e)[:50]}...[/red]")
+
+            except ScrapingError as e:
+                errors += 1
+                self.console.print(f"  [red]✗ Scraping error: {str(e)[:50]}...[/red]")
+
+            except Exception as e:
+                errors += 1
+                self.console.print(f"  [red]✗ Unexpected error: {type(e).__name__}: {str(e)[:50]}...[/red]")
+
+            # Add delay between properties (2-3 seconds) to avoid rate limiting
+            if i < total:  # Don't delay after last property
+                time.sleep(2.5)
+
+        # Display summary panel
+        self.console.print("\n")
+        success_rate = (updated / total * 100) if total > 0 else 0
+        self.console.print(Panel(
+            f"""[bold cyan]Property Status Update Script Complete![/bold cyan]
+
+Total Properties: {total}
+Status Updated: [green]{updated}[/green]
+Unchanged: [dim]{unchanged}[/dim]
+Not Found: [yellow]{not_found}[/yellow]
+Errors: [red]{errors}[/red]
+Success Rate: {success_rate:.1f}%
+""",
+            title="Summary",
+            border_style="cyan"
+        ))
+
+        # Display status changes table
+        if status_changes:
+            self.console.print("\n")
+            changes_table = Table(
+                title="Status Changes",
+                show_header=True,
+                header_style="bold cyan"
+            )
+            changes_table.add_column("Address", style="white", width=50)
+            changes_table.add_column("Old Status", style="yellow", width=15)
+            changes_table.add_column("New Status", style="green", width=15)
+
+            for change in status_changes:
+                changes_table.add_row(
+                    change['address'],
+                    change['old_status'],
+                    change['new_status']
+                )
+
+            self.console.print(changes_table)
+        else:
+            self.console.print("\n[dim]No status changes detected[/dim]")
+
+        # Display not found properties table
+        if not_found_properties:
+            self.console.print("\n")
+            not_found_table = Table(
+                title="Properties Not Found on IowaRealty.com",
+                show_header=True,
+                header_style="bold yellow"
+            )
+            not_found_table.add_column("Address", style="white", width=50)
+            not_found_table.add_column("Current Status", style="yellow", width=15)
+            not_found_table.add_column("Reason", style="dim", width=40)
+
+            for prop in not_found_properties:
+                not_found_table.add_row(
+                    prop['address'],
+                    prop['current_status'],
+                    prop['reason']
+                )
+
+            self.console.print(not_found_table)
+            self.console.print("\n[yellow]Note: These properties may have been delisted or sold.[/yellow]")
+        else:
+            self.console.print("\n[green]All properties were found on iowarealty.com[/green]")

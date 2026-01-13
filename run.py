@@ -896,7 +896,12 @@ def run_all_properties_options():
 
 def run_scripts_options():
     using_scripts = True
-    choices = ["Go back", "Add property valuations to all Phase 1.5 qualifiers", "Automate market research for Phase 0 properties"]
+    choices = [
+        "Go back",
+        "Add property valuations to all Phase 1.5 qualifiers",
+        "Automate market research for Phase 0 properties",
+        "Update property statuses from iowarealty.com"
+    ]
     scripts = ScriptsProvider(supabase_client=supabase, console=console)
 
     while using_scripts:
@@ -921,6 +926,25 @@ def run_scripts_options():
                 if confirm:
                     scripts.run_market_research_automation_script(
                         properties_df=phase0_lacking_df
+                    )
+                    reload_dataframe()
+        elif option == "Update property statuses from iowarealty.com":
+            # Get active properties to update
+            active_properties_df = df.query("status == 'active'")
+
+            if len(active_properties_df) == 0:
+                console.print("[yellow]No active properties to update![/yellow]")
+            else:
+                console.print(f"[cyan]Found {len(active_properties_df)} active properties[/cyan]")
+                console.print("[dim]Note: This will scrape iowarealty.com and may take 2-3 seconds per property[/dim]")
+                confirm = questionary.confirm(
+                    f"Update status for all {len(active_properties_df)} active properties? "
+                    f"Estimated time: {len(active_properties_df) * 3 // 60} minutes."
+                ).ask()
+
+                if confirm:
+                    scripts.run_property_status_update_script(
+                        properties_df=active_properties_df
                     )
                     reload_dataframe()
 
