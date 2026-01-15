@@ -92,7 +92,8 @@ PHASE1_CRITERIA = (
     "& mr_monthly_cash_flow_y1 >= -400 "
     "& ((units == 0 & mr_monthly_cash_flow_y2 >= 0) | (units > 0 & mr_monthly_cash_flow_y2 >= 200))"
 )
-PHASE1_TOUR_CRITERIA = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & status == 'active'"
+# PHASE1_TOUR_CRITERIA = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & status == 'active'"
+PHASE1_TOUR_CRITERIA = "(qualification_type == 'current' | is_fsbo) & status == 'active'"
 
 def load_assumptions():
     global ASSUMPTIONS
@@ -1108,7 +1109,7 @@ if __name__ == "__main__":
             ).execute()
             analyze_property(property_id)
         elif option == "One property - phase 1 research list":
-            tour_list = get_phase1_research_list()
+            tour_list, _ = get_phase1_research_list()
             property_ids = sorted(tour_list["address1"].tolist())  # Sort alphabetically
 
             if len(property_ids) == 0:
