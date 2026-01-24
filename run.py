@@ -84,9 +84,9 @@ scraper = NeighborhoodScraper(supabase_client=supabase, console=console)
 assumptions_provider = AssumptionsProvider(supabase_client=supabase, console=console)
 
 LAST_USED_LOAN = 2
-CASH_NEEDED_AMT = 25000
+CASH_NEEDED_AMT = 20000
 
-PHASE0_CRITERIA = f"square_ft >= 1000 & cash_needed <= {CASH_NEEDED_AMT} & monthly_cash_flow >= -500"
+PHASE0_CRITERIA = f"square_ft >= 1000 & cash_needed <= {CASH_NEEDED_AMT} & monthly_cash_flow >= -400"
 PHASE1_CRITERIA = (
     "MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & beats_market "
     "& mr_monthly_cash_flow_y1 >= -400 "
