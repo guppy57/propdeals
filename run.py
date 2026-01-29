@@ -90,7 +90,7 @@ PHASE0_CRITERIA = f"square_ft >= 1000 & cash_needed <= {CASH_NEEDED_AMT} & month
 PHASE1_CRITERIA = (
     "MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & beats_market "
     "& mr_monthly_cash_flow_y1 >= -400 "
-    "& ((units == 0 & mr_monthly_cash_flow_y2 >= 0) | (units > 0 & mr_monthly_cash_flow_y2 >= 200))"
+    "& ((units == 0 & mr_monthly_cash_flow_y2 >= -100) | (units > 0 & mr_monthly_cash_flow_y2 >= 200))"
 )
 # PHASE1_TOUR_CRITERIA = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & status == 'active'"
 PHASE1_TOUR_CRITERIA = "status == 'active'"
