@@ -896,8 +896,8 @@ def run_all_properties_options():
 
 def run_scripts_options():
     using_scripts = True
-    choices = ["Go back", "Add property valuations to all Phase 1.5 qualifiers", "Automate market research for Phase 0 properties"]
-    scripts = ScriptsProvider(supabase_client=supabase, console=console)
+    choices = ["Go back", "Add property valuations to all Phase 1.5 qualifiers", "Automate market research for Phase 0 properties", "Add missing neighborhoods"]
+    scripts = ScriptsProvider(supabase_client=supabase, console=console, neighborhood_scraper=scraper, neighborhood_client=neighborhoods)
 
     while using_scripts:
         option = questionary.select("Select a script", choices=choices).ask()
@@ -906,6 +906,9 @@ def run_scripts_options():
         elif option == "Add property valuations to all Phase 1.5 qualifiers":
             qualified_df, _ = get_phase1_research_list()
             scripts.run_add_property_values_script(properties_df=qualified_df)
+            reload_dataframe()
+        elif option == "Add missing neighborhoods":
+            scripts.run_add_missing_neighborhoods(properties_df=df)
             reload_dataframe()
         elif option == "Automate market research for Phase 0 properties":
             phase0_lacking_df = get_phase0_qualifiers_lacking_research()

@@ -7,6 +7,8 @@ from rich.panel import Panel
 from display import display_property_value_comparison
 from handlers import handle_rent_research_after_add
 from add_property import mark_property_as_researched
+from neighborhood_scraper import NeighborhoodScraper
+from neighborhoods import NeighborhoodsClient
 
 # RentCast API headers
 RENTCAST_HEADERS = {
@@ -15,9 +17,11 @@ RENTCAST_HEADERS = {
 }
 
 class ScriptsProvider:
-    def __init__(self, supabase_client: Client, console: Console):
+    def __init__(self, supabase_client: Client, console: Console, neighborhood_scraper: NeighborhoodScraper, neighborhood_client: NeighborhoodsClient):
         self.supabase = supabase_client
         self.console = console
+        self.neighborhood_scraper = neighborhood_scraper
+        self.neighborhood_client = neighborhood_client
 
     def save_sale_comps_to_db(self, comps, address1):
         """
@@ -350,3 +354,63 @@ Success Rate: {success_rate:.1f}%
             title="Summary",
             border_style="cyan"
         ))
+
+    def run_add_missing_neighborhoods(self, properties_df):
+        lacking_neighborhoods_df = properties_df[properties_df["neighborhood"].isna()].copy()
+
+        total = len(lacking_neighborhoods_df)
+        successfully_found = 0
+        skipped = 0
+        errors = 0
+
+        self.console.print(
+            f"\n[bold cyan]Starting finding neighborhood automation for {total} properties...[/bold cyan]\n"
+        )
+
+        for i, (_, row) in enumerate(lacking_neighborhoods_df.iterrows(), i):
+            self.console.print(f"[cyan]{i}/{total}[/cyan] Processing: {row.get("address1")}")
+
+            if pd.notna(row.get("neighborhood")):
+                self.console.print(f"  [yellow]→ Skipped (already has research)[/yellow]")
+                skipped += 1
+                continue
+            
+            try:
+                neighborhood = self.neighborhood_scraper.get_neighborhood_by_address(row.get("full_address"))
+            except Exception as e:
+                self.console.print(f"  [red]✗ Error: {type(e).__name__}: {str(e)}[/red]")
+                errors += 1
+                continue
+
+            try:
+                neighborhood_id, was_created = self.neighborhood_client.get_or_create_neighborhood(neighborhood_name=neighborhood, supabase=self.supabase)
+                self.neighborhood_client.assign_neighborhood_to_property(property_id=row.get("address1"), neighborhood_id=neighborhood_id)
+
+                if was_created:
+                    self.console.print(f"[green]✅ Neighborhood '{neighborhood}' was newly added to database[/green]")
+
+                self.console.print(f"[green]✅ Neighborhood updated to '{neighborhood}' in database[/green]")
+            except Exception as e:
+                self.console.print(f"  [red]✗ Error: {type(e).__name__}: {str(e)}[/red]")
+                errors += 1
+                continue
+            
+            successfully_found += 1
+        
+        self.console.print("\n")
+        success_rate = (successfully_found / total * 100) if total > 0 else 0
+        self.console.print(
+            Panel(
+                f"""[bold cyan]Neighborhood Automation Complete![/bold cyan]
+
+Total Properties: {total}
+Successfully Researched: [green]{successfully_found}[/green]
+Skipped (already researched): [yellow]{skipped}[/yellow]
+Errors: [red]{errors}[/red]
+Success Rate: {success_rate:.1f}%
+""",
+                title="Summary",
+                border_style="cyan",
+            )
+        )
+
