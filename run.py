@@ -92,8 +92,7 @@ PHASE1_CRITERIA = (
     "& mr_monthly_cash_flow_y1 >= -400 "
     "& ((units == 0 & mr_monthly_cash_flow_y2 >= -100) | (units > 0 & mr_monthly_cash_flow_y2 >= 200))"
 )
-# PHASE1_TOUR_CRITERIA = "((neighborhood_letter_grade in ['A','B','C'] & qualification_type == 'current') | is_fsbo) & status == 'active'"
-PHASE1_TOUR_CRITERIA = "status == 'active'"
+PHASE1_TOUR_CRITERIA = "status == 'active' & purchase_price >= 100000 & baths >= 2 & neighborhood_letter_grade in ['A', 'B', 'C']"
 
 def load_assumptions():
     global ASSUMPTIONS
