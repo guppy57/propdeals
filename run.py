@@ -65,6 +65,7 @@ from helpers import (
     get_properties_missing_tours,
     get_state_tax_rate,
     is_property_assessment_done_vectorized,
+    calculate_emergency_fund,
 )
 from inspections import InspectionsClient
 from loans import LoansProvider
@@ -261,6 +262,7 @@ def apply_calculations_on_dataframe(df, loan, assumptions):
     df = safe_concat_columns(df, basic_columns)
     df = apply_closing_costs_calculations(df)
     new_columns = {}
+    new_columns["piti"] = df["monthly_mortgage"] + df["monthly_mip"] + df["monthly_taxes"] + df["monthly_insurance"]
     new_columns["cash_needed"] = df["closing_costs"] + df["down_payment"] - loan["upfront_discounts"]
     factor = np.where(df["units"] == 0, 0.0075, 0.0105)
     new_columns["quick_monthly_rent_estimate"] = (df["purchase_price"] * (1 + assumptions["closing_costs_rate"])) * factor
@@ -288,6 +290,9 @@ def apply_calculations_on_dataframe(df, loan, assumptions):
     new_columns["monthly_cash_flow"] = new_columns["total_rent"] - new_columns["total_monthly_cost"] + new_columns["ammoritization_estimate"] + new_columns["roommate_utilities"]
     new_columns["annual_cash_flow"] = new_columns["monthly_cash_flow"] * 12
     df = safe_concat_columns(df, new_columns)
+    misc_columns = {}
+    misc_columns["3m_emergency_fund"] = df.apply(lambda x: calculate_emergency_fund(3, x["piti"], x["monthly_utility_total"]), axis=1)
+    df = safe_concat_columns(df, misc_columns)
     return df
 
 def apply_investment_calculations(df, loan, assumptions):

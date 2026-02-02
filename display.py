@@ -521,6 +521,7 @@ def create_phase1_research_list_table(df, title):
     table.add_column("SqFt", justify="right")
     table.add_column("Config", justify="center")
     table.add_column("Cost/Inc", justify="right")
+    table.add_column("EmFund", justify="right")
 
     # Calculate percentiles for price and cash_needed (for styling)
     price_25 = df['purchase_price'].quantile(0.25)
@@ -643,7 +644,8 @@ def create_phase1_research_list_table(df, title):
             status_display,
             f"{row['square_ft']}",
             config,
-            cost_inc_display
+            cost_inc_display,
+            format_currency(row["3m_emergency_fund"])
         )
 
     return table

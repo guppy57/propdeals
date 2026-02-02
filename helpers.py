@@ -868,3 +868,15 @@ def validate_date(text: str) -> bool:
         return 1900 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31
     except ValueError:
         return False
+
+
+def calculate_emergency_fund(months: int, piti: int, utilities: int):
+    groceries = 300
+    car_maintenance = 10
+    car_insurance = 130
+    subscriptions = 50
+    gas = 150
+    charity = 200
+    buffer_prcnt = 0.1
+
+    return (months * (groceries + piti + utilities + car_insurance + car_maintenance + subscriptions + gas + charity)) * (1 + buffer_prcnt)
