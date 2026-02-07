@@ -367,7 +367,7 @@ Success Rate: {success_rate:.1f}%
             f"\n[bold cyan]Starting finding neighborhood automation for {total} properties...[/bold cyan]\n"
         )
 
-        for i, (_, row) in enumerate(lacking_neighborhoods_df.iterrows(), i):
+        for i, (_, row) in enumerate(lacking_neighborhoods_df.iterrows(), 1):
             self.console.print(f"[cyan]{i}/{total}[/cyan] Processing: {row.get("address1")}")
 
             if pd.notna(row.get("neighborhood")):

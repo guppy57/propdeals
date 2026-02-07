@@ -1156,7 +1156,7 @@ if __name__ == "__main__":
 
                 if passes_phase0:
                     handle_rent_research_after_add(
-                        property_details["address1"], supabase, console, ask_user=True
+                        property_details["address1"], supabase, console, ask_user=False
                     )
                     reload_dataframe()
                     display_new_property_qualification(
