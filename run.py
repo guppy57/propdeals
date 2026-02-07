@@ -32,7 +32,7 @@ from display import (
     display_property_rent_estimates_table,
     display_single_deal,
     display_start_screen_summary,
-    display_y2_calculations,
+    display_y2_calculations, display_closing_costs_table,
 )
 from exporter import export_property_analysis
 from handlers import (
@@ -647,118 +647,121 @@ def analyze_property(property_id):
     display_property_investment_metrics_table(console, row, is_single_family)
     display_investment_requirements_panel(console, row, ASSUMPTIONS, LOAN)
 
-    research_menu_choices = [
-        "Edit property assessment",
-        "View risk assessment report",
-        "View property summary",
-        "Edit neighborhood assessment",
-        "Record price change",
-        "Change status",
-        "Generate new rent research",
-        "View existing research reports",
-        "Generate rent estimates from report",
-    ]
-
-    if is_single_family:
-        research_menu_choices.append("Generate property-wide rent research")
-
-    research_menu_choices.extend(
-        [
+    while True:
+        research_menu_choices = [
+            "<- Go back",
+            "Edit property assessment",
+            "View risk assessment report",
+            "View property summary",
+            "View closing costs breakdown",
+            "Edit neighborhood assessment",
+            "Record price change",
+            "Change status",
+            "Generate new rent research",
+            "View existing research reports",
+            "Generate rent estimates from report",
             "Scrape neighborhood from FindNeighborhoods.dsm.city",
             "Run neighborhood analysis",
             "Extract neighborhood letter grade",
             "View HomeStyle renovation analysis",
             "Export property analysis to PDF",
-            "Skip - return to main menu",
         ]
-    )
 
-    research_choice = questionary.select(
-        "Would you like to generate or view rental market research for this property?",
-        choices=research_menu_choices,
-    ).ask()
+        if is_single_family:
+            research_menu_choices.append("Generate property-wide rent research")
 
-    if research_choice == "Edit property assessment":
-        edit_property_assessment(property_id, supabase, console)
-    elif research_choice == "View risk assessment report":
-        handle_risk_assessment(property_id, supabase, console)
-    elif research_choice == "View property summary":
-        handle_property_summary(property_id, supabase, console, df)
-    elif research_choice == "Edit neighborhood assessment":
-        edit_neighborhood_assessment(property_id, supabase, console)
-    elif research_choice == "Generate new rent research":
-        handle_rent_research_generation(
-            property_id, supabase, console, handle_generate_rent_estimates
-        )
-    elif research_choice == "View existing research reports":
-        handle_view_research_reports(property_id, supabase, console)
-    elif research_choice == "Generate rent estimates from report":
-        handle_generate_rent_estimates(property_id, supabase, console)
-        reload_dataframe()
-    elif research_choice == "Generate property-wide rent research":
-        handle_property_wide_research_generation(property_id, supabase, console)
-        reload_dataframe()
-        console.print(
-            "\n[bold green]✅ Property-wide rent estimates successfully extracted and saved![/bold green]"
-        )
-    elif research_choice == "Scrape neighborhood from FindNeighborhoods.dsm.city":
-        handle_scrape_neighborhood_from_findneighborhoods(
-            property_id, supabase, console, scraper, ask_user=True
-        )
-        reload_dataframe()
-    elif research_choice == "Run neighborhood analysis":
-        handle_neighborhood_analysis(property_id, console, neighborhoods)
-        reload_dataframe()
-    elif research_choice == "Extract neighborhood letter grade":
-        handle_extract_neighborhood_grade(property_id, supabase, console, neighborhoods)
-        reload_dataframe()
-    elif research_choice == "View HomeStyle renovation analysis":
-        display_homestyle_overview_panel(console, row)
-    elif research_choice == "Record price change":
-        handle_price_change(property_id, row["purchase_price"], supabase)
-        reload_dataframe()
-        display_new_property_qualification(
-            console, property_id, get_all_phase1_qualifying_properties
-        )
-    elif research_choice == "Change status":
-        handle_status_change(property_id, supabase)
-        reload_dataframe()
-    elif research_choice == "Export property analysis to PDF":
-        downloads_folder = os.getenv("DOWNLOADS_FOLDER", ".")
-        safe_address = property_id.replace(" ", "_").replace(",", "").replace(".", "")
-        output_path = os.path.join(downloads_folder, f"{safe_address}_analysis.pdf")
-        row = df[df["address1"] == property_id].iloc[0]
+        research_menu_choices.append("Skip - return to main menu")
 
-        loan_info = {
-            "interest_rate": LOAN["interest_rate"],
-            "apr_rate": LOAN["apr_rate"],
-            "down_payment_rate": LOAN["down_payment_rate"],
-            "years": LOAN["loan_length_years"],
-            "mip_upfront_rate": LOAN["mip_upfront_rate"],
-            "mip_annual_rate": LOAN["mip_annual_rate"],
-        }
+        research_choice = questionary.select(
+            "Would you like to generate or view rental market research for this property?",
+            choices=research_menu_choices,
+        ).ask()
 
-        assumptions_info = {
-            "appreciation_rate": ASSUMPTIONS["appreciation_rate"],
-            "rent_appreciation_rate": ASSUMPTIONS["rent_appreciation_rate"],
-            "property_tax_rate": ASSUMPTIONS["property_tax_rate"],
-            "home_insurance_rate": ASSUMPTIONS["home_insurance_rate"],
-            "vacancy_rate": ASSUMPTIONS["vacancy_rate"],
-            "repair_savings_rate": ASSUMPTIONS["repair_savings_rate"],
-            "capex_reserve_rate": ASSUMPTIONS["capex_reserve_rate"],
-            "closing_costs_rate": ASSUMPTIONS["closing_costs_rate"],
-            "discount_rate": ASSUMPTIONS["discount_rate"],
-        }
+        if research_choice == "<- Go back":
+            break
+        elif research_choice == "Edit property assessment":
+            edit_property_assessment(property_id, supabase, console)
+        elif research_choice == "View risk assessment report":
+            handle_risk_assessment(property_id, supabase, console)
+        elif research_choice == "View property summary":
+            handle_property_summary(property_id, supabase, console, df)
+        elif research_choice == "View closing costs breakdown":
+            display_closing_costs_table(console, row)
+        elif research_choice == "Edit neighborhood assessment":
+            edit_neighborhood_assessment(property_id, supabase, console)
+        elif research_choice == "Generate new rent research":
+            handle_rent_research_generation(
+                property_id, supabase, console, handle_generate_rent_estimates
+            )
+        elif research_choice == "View existing research reports":
+            handle_view_research_reports(property_id, supabase, console)
+        elif research_choice == "Generate rent estimates from report":
+            handle_generate_rent_estimates(property_id, supabase, console)
+            reload_dataframe()
+        elif research_choice == "Generate property-wide rent research":
+            handle_property_wide_research_generation(property_id, supabase, console)
+            reload_dataframe()
+            console.print(
+                "\n[bold green]✅ Property-wide rent estimates successfully extracted and saved![/bold green]"
+            )
+        elif research_choice == "Scrape neighborhood from FindNeighborhoods.dsm.city":
+            handle_scrape_neighborhood_from_findneighborhoods(
+                property_id, supabase, console, scraper, ask_user=True
+            )
+            reload_dataframe()
+        elif research_choice == "Run neighborhood analysis":
+            handle_neighborhood_analysis(property_id, console, neighborhoods)
+            reload_dataframe()
+        elif research_choice == "Extract neighborhood letter grade":
+            handle_extract_neighborhood_grade(property_id, supabase, console, neighborhoods)
+            reload_dataframe()
+        elif research_choice == "View HomeStyle renovation analysis":
+            display_homestyle_overview_panel(console, row)
+        elif research_choice == "Record price change":
+            handle_price_change(property_id, row["purchase_price"], supabase)
+            reload_dataframe()
+            display_new_property_qualification(
+                console, property_id, get_all_phase1_qualifying_properties
+            )
+        elif research_choice == "Change status":
+            handle_status_change(property_id, supabase)
+            reload_dataframe()
+        elif research_choice == "Export property analysis to PDF":
+            downloads_folder = os.getenv("DOWNLOADS_FOLDER", ".")
+            safe_address = property_id.replace(" ", "_").replace(",", "").replace(".", "")
+            output_path = os.path.join(downloads_folder, f"{safe_address}_analysis.pdf")
+            row = df[df["address1"] == property_id].iloc[0]
 
-        result_path = export_property_analysis(
-            row,
-            rents,
-            ASSUMPTIONS["after_tax_monthly_income"],
-            loan_info,
-            assumptions_info,
-            output_path,
-        )
-        console.print(f"[green]PDF exported successfully to: {result_path}[/green]")
+            loan_info = {
+                "interest_rate": LOAN["interest_rate"],
+                "apr_rate": LOAN["apr_rate"],
+                "down_payment_rate": LOAN["down_payment_rate"],
+                "years": LOAN["loan_length_years"],
+                "mip_upfront_rate": LOAN["mip_upfront_rate"],
+                "mip_annual_rate": LOAN["mip_annual_rate"],
+            }
+
+            assumptions_info = {
+                "appreciation_rate": ASSUMPTIONS["appreciation_rate"],
+                "rent_appreciation_rate": ASSUMPTIONS["rent_appreciation_rate"],
+                "property_tax_rate": ASSUMPTIONS["property_tax_rate"],
+                "home_insurance_rate": ASSUMPTIONS["home_insurance_rate"],
+                "vacancy_rate": ASSUMPTIONS["vacancy_rate"],
+                "repair_savings_rate": ASSUMPTIONS["repair_savings_rate"],
+                "capex_reserve_rate": ASSUMPTIONS["capex_reserve_rate"],
+                "closing_costs_rate": ASSUMPTIONS["closing_costs_rate"],
+                "discount_rate": ASSUMPTIONS["discount_rate"],
+            }
+
+            result_path = export_property_analysis(
+                row,
+                rents,
+                ASSUMPTIONS["after_tax_monthly_income"],
+                loan_info,
+                assumptions_info,
+                output_path,
+            )
+            console.print(f"[green]PDF exported successfully to: {result_path}[/green]")
 
 
 def get_start_screen_summary(df):

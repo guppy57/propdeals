@@ -2150,3 +2150,21 @@ def display_single_deal(console, deal, loan, assumption):
     # Notes Panel (if present)
     if deal.notes:
         console.print(Panel(deal.notes, title="Notes", border_style="dim"))
+
+
+def display_closing_costs_table(console, row):
+    table = Table(title="Closing costs", show_header=True, header_style="bold magenta")
+    table.add_column("Type")
+    table.add_column("Cost")
+
+    cost_types = ["lender", "title", "government", "prepaid", "escrow", "optional"]
+
+    for cost_type in cost_types:
+        table.add_row(
+            cost_type.capitalize(),
+            format_currency(row[f"total_{cost_type}_costs"])
+        )
+
+    console.print(table)
+    console.print(f"\n[green]Total closing costs: {format_currency(row["closing_costs"])}[/green]")
+    console.print(f"\n[cyan]As a percent of purchase price: {format_percentage(row["closing_costs_prcnt"])}[/cyan]")
