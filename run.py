@@ -85,7 +85,7 @@ scraper = NeighborhoodScraper(supabase_client=supabase, console=console)
 assumptions_provider = AssumptionsProvider(supabase_client=supabase, console=console)
 
 LAST_USED_LOAN = 2
-CASH_NEEDED_AMT = 30000
+CASH_NEEDED_AMT = 25000
 
 PHASE0_CRITERIA = f"square_ft >= 1000 & cash_needed <= {CASH_NEEDED_AMT} & monthly_cash_flow >= -600 & ((beds > 2 & baths >= 2) | (beds == 2 & baths == 1)) & purchase_price >= 100000"
 PHASE1_CRITERIA = (
@@ -237,21 +237,16 @@ def apply_calculations_on_dataframe(df, loan, assumptions):
     basic_columns["down_payment"] = df["purchase_price"] * LOAN["down_payment_rate"]
     basic_columns["5_pct_loan"] = df["purchase_price"] * 0.05
     upfront_mip = 0 if LOAN["loan_type"] == "FHA" else (df["purchase_price"] * loan["mip_upfront_rate"])
-    basic_columns["loan_amount"] = df["purchase_price"] - basic_columns["down_payment"] + upfront_mip
-    # If the down payment exceeds the cash needed amount for a SFH, then we use the Iowa 2nd Loan to reduce the downpayment amount, else we use it to reduce the loan amount
-    # Ex: if downpayment is 20% and the down payment amount is under cash needed amt, then the effective downpayment is 25%, if it exceeds, then the effective down payment is 15%
     reduce_downpayment_condition = (
-        (df["units"] == 0) &
-        (basic_columns["down_payment"] > CASH_NEEDED_AMT) &
-        ASSUMPTIONS["using_ia_fhb_prog"] &
-        (ASSUMPTIONS["ia_fhb_prog_upfront_option"] == "LOAN")
-    )
-    basic_columns["down_payment"] = pd.Series(
-        np.where(reduce_downpayment_condition, basic_columns["down_payment"] - basic_columns["5_pct_loan"], basic_columns["down_payment"]),
-        index=df.index
+            (df["units"] == 0) &
+            ASSUMPTIONS["using_ia_fhb_prog"] &
+            (ASSUMPTIONS["ia_fhb_prog_upfront_option"] == "LOAN")
     )
     basic_columns["loan_amount"] = pd.Series(
-        np.where(reduce_downpayment_condition, basic_columns["loan_amount"], basic_columns["loan_amount"] - basic_columns["5_pct_loan"]),
+        np.where(reduce_downpayment_condition,
+            df["purchase_price"] - basic_columns["down_payment"] + upfront_mip - basic_columns["5_pct_loan"],
+            df["purchase_price"] - basic_columns["down_payment"] + upfront_mip
+        ),
         index=df.index
     )
     basic_columns["2nd_loan_type"] = pd.Series(np.where(reduce_downpayment_condition, "reduced_dp", "reduced_loan"), index=df.index)
