@@ -652,8 +652,8 @@ def create_phase1_research_list_table(df, title):
 
 
 def display_phase1_research_list(console, qualified_df, unqualified_df):
-    tour_list = qualified_df.sort_values(by='neighborhood')
-    not_on_tour = unqualified_df.sort_values(by='neighborhood')
+    tour_list = qualified_df.sort_values(by=['neighborhood_letter_grade', 'mr_monthly_cash_flow_y2'], ascending=[True,False])
+    not_on_tour = unqualified_df.sort_values(by='mr_monthly_cash_flow_y1', ascending=False)
 
     if len(tour_list) == 0:
         console.print("[dim]No properties on the tour list yet[/dim]\n")

@@ -48,7 +48,7 @@ from handlers import (
     handle_risk_assessment,
     handle_scrape_neighborhood_from_findneighborhoods,
     handle_status_change,
-    handle_view_research_reports,
+    handle_view_research_reports, handle_delete_property,
 )
 from helpers import (
     calculate_additional_room_rent,
@@ -87,12 +87,13 @@ assumptions_provider = AssumptionsProvider(supabase_client=supabase, console=con
 LAST_USED_LOAN = 2
 CASH_NEEDED_AMT = 25000
 
-PHASE0_CRITERIA = f"square_ft >= 1000 & cash_needed <= {CASH_NEEDED_AMT} & monthly_cash_flow >= -600 & ((beds > 2 & baths >= 2) | (beds == 2 & baths == 1)) & purchase_price >= 100000"
+PHASE0_CRITERIA = f"square_ft >= 1000 & cash_needed <= {CASH_NEEDED_AMT} & monthly_cash_flow >= -600 & (baths/beds) >= 0.32 & purchase_price >= 100000"
 PHASE1_CRITERIA = (
     "MGR_PP > 0.01 & OpEx_Rent < 0.5 & DSCR > 1.25 & beats_market "
     "& mr_monthly_cash_flow_y1 >= -600 "
     "& ((units == 0 & mr_monthly_cash_flow_y2 >= -100) | (units > 0 & mr_monthly_cash_flow_y2 >= 200))"
 )
+# PHASE1_TOUR_CRITERIA = "status == 'active' & neighborhood_letter_grade in ['A', 'B', 'C']"
 PHASE1_TOUR_CRITERIA = "status == 'active'"
 
 def load_assumptions():
@@ -659,6 +660,7 @@ def analyze_property(property_id):
             "Run neighborhood analysis",
             "Extract neighborhood letter grade",
             "View HomeStyle renovation analysis",
+            "[DANGER] - Delete property",
             "Export property analysis to PDF",
         ]
 
@@ -721,6 +723,13 @@ def analyze_property(property_id):
         elif research_choice == "Change status":
             handle_status_change(property_id, supabase)
             reload_dataframe()
+        elif research_choice == "[DANGER] - Delete property":
+            confirm = questionary.confirm("Actually delete this property?").ask()
+
+            if confirm:
+                handle_delete_property(property_id, supabase, console)
+            else:
+                console.print("Phew, glad we caught that", style="yellow")
         elif research_choice == "Export property analysis to PDF":
             downloads_folder = os.getenv("DOWNLOADS_FOLDER", ".")
             safe_address = property_id.replace(" ", "_").replace(",", "").replace(".", "")

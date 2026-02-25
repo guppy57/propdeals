@@ -753,3 +753,42 @@ def handle_scrape_neighborhood_from_findneighborhoods(property_id: str, supabase
 
     except Exception as e:
         console.print(f"[red]❌ Error during neighborhood scraping: {str(e)}[/red]")
+
+def handle_delete_property(property_id: str, supabase, console):
+    # sale_comp_to_property
+    console.print("Deleting sale comps to property")
+    res = supabase.table("sale_comp_to_property").delete().eq("address1", property_id).execute()
+    console.print(res)
+    # get all the rent_estimates for the property
+    rents_res = supabase.table("rent_estimates").select().eq("address1", property_id).execute()
+    rent_dicts = rents_res.data
+    rent_estimate_ids = [rent["id"] for rent in rent_dicts]
+    # rent_comp_to_rent_estimate
+    console.print("Deleting rent comp to rent estimates")
+    res = supabase.table("rent_comp_to_rent_estimate").delete().in_("estimate_id", rent_estimate_ids).execute()
+    console.print(res)
+    # rent_estimates
+    console.print("Deleting rent estimates")
+    res = supabase.table("rent_estimates").delete().eq("address1", property_id).execute()
+    console.print(res)
+    # rent_comp_to_property
+    console.print("Deleting rent comps to the property")
+    res = supabase.table("rent_comp_to_property").delete().eq("address1", property_id).execute()
+    console.print(res)
+    # property_neighborhood
+    console.print("Deleting property to neighborhood")
+    res = supabase.table("property_neighborhood").delete().eq("address1", property_id).execute()
+    console.print(res)
+    # neighborhood_assessment
+    console.print("Deleting neighborhood assessment")
+    res = supabase.table("neighborhood_assessment").delete().eq("address1", property_id).execute()
+    console.print(res)
+    # deals
+    console.print("Deleting any deals")
+    res = supabase.table("deals").delete().eq("address1", property_id).execute()
+    console.print(res)
+    # properties
+    console.print("Finally... deleting the property")
+    res = supabase.table("properties").delete().eq("address1", property_id).execute()
+    console.print(res)
+    console.print("Everything was deleted!", style="bold green")
