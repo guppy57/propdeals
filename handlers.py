@@ -223,11 +223,16 @@ def handle_rent_research_generation(property_id: str, supabase, console, handle_
 
 def handle_status_change(property_id, supabase):
     options = ["pending sale", "active", "passed", "sold", "off market"]
-    new_status = questionary.select("Price cut amount", choices=options).ask()
+    new_status = questionary.select("New status", choices=options).ask()
+    reason = None
+
+    if new_status == "passed":
+        reason = questionary.text("What is your reason for passing?").ask()
+
     try:
         query = (
             supabase.table("properties")
-            .update({"status": new_status})
+            .update({"status": new_status, "reason_for_passing": reason})
             .eq("address1", property_id)
         )
         response = query.execute()

@@ -20,8 +20,6 @@ class Assumption:
     gross_annual_income: int
     state_tax_code: str
     discount_rate: float
-    using_ia_fhb_prog: bool
-    ia_fhb_prog_upfront_option: str
     utility_electric_base: float
     utility_gas_base: float
     utility_water_base: float

@@ -22,6 +22,7 @@ class Loan:
   expiration_date: str
   lender_fees: float
   loan_type: str
+  using_ifa_loan: bool
 
 class LoansProvider:
     def __init__(self, supabase_client: Client, console: Console):
@@ -103,6 +104,8 @@ class LoansProvider:
             validate=lambda x: x.replace(".", "").isdigit(),
         ).ask()
 
+        using_ifa_loan = questionary.confirm("Does this loan use IFA's 2nd Loan program?").ask()
+
         preapproval_link = questionary.text("Preapproval link (URL) - optional").ask()
         preapproved_amount = questionary.text("Preapproved amount ($)", validate=lambda x: x.replace(",", "").isdigit()).ask()
         issued_date = questionary.text("Issued date (YYYY-MM-DD)").ask()
@@ -125,6 +128,7 @@ class LoansProvider:
             issued_date=issued_date.strip() if issued_date != "" else None,
             expiration_date=expiration_date.strip() if expiration_date != "" else None,
             loan_type=loan_type,
+            using_ifa_loan=using_ifa_loan,
         )
 
     def add_loan(self, loan_data: Loan) -> bool:
@@ -143,6 +147,7 @@ class LoansProvider:
                 "preapproved_amount": loan_data.preapproved_amount,
                 "issued_date": loan_data.issued_date,
                 "expiration_date": loan_data.expiration_date,
+                "using_ifa_loan": loan_data.using_ifa_loan
             }
 
             response = self.supabase.table("loans").insert(loan_dict).execute()

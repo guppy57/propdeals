@@ -120,8 +120,6 @@ def load_assumptions():
         "state_tax_code": assumption.state_tax_code,
         "after_tax_monthly_income": calculate_monthly_take_home(assumption.gross_annual_income, assumption.state_tax_code),
         "discount_rate": assumption.discount_rate,
-        "using_ia_fhb_prog": assumption.using_ia_fhb_prog,
-        "ia_fhb_prog_upfront_option": assumption.ia_fhb_prog_upfront_option,
         "utility_electric_base": float(assumption.utility_electric_base),
         "utility_gas_base": float(assumption.utility_gas_base),
         "utility_water_base": float(assumption.utility_water_base),
@@ -156,6 +154,7 @@ def load_loan(loan_id):
         "mip_annual_rate": loan.mip_annual_rate,
         "upfront_discounts": loan.upfront_discounts,
         "loan_type": loan.loan_type,
+        "using_ifa_loan": loan.using_ifa_loan,
     }
     console.print(f"[green]Loan {loan.name} data reloaded successfully![/green]")
 
@@ -238,11 +237,7 @@ def apply_calculations_on_dataframe(df, loan, assumptions):
     basic_columns["down_payment"] = df["purchase_price"] * LOAN["down_payment_rate"]
     basic_columns["5_pct_loan"] = df["purchase_price"] * 0.05
     upfront_mip = 0 if LOAN["loan_type"] == "FHA" else (df["purchase_price"] * loan["mip_upfront_rate"])
-    reduce_downpayment_condition = (
-            (df["units"] == 0) &
-            ASSUMPTIONS["using_ia_fhb_prog"] &
-            (ASSUMPTIONS["ia_fhb_prog_upfront_option"] == "LOAN")
-    )
+    reduce_downpayment_condition = ((df["units"] == 0) & loan["using_ifa_loan"])
     basic_columns["loan_amount"] = pd.Series(
         np.where(reduce_downpayment_condition,
             df["purchase_price"] - basic_columns["down_payment"] + upfront_mip - basic_columns["5_pct_loan"],

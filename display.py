@@ -1065,7 +1065,7 @@ def display_property_overview_panel(console, row):
 
     console.print(Panel(f"[bold cyan]Property Overview[/bold cyan]\n"
                       f"Address: {row['full_address']}\n"
-                      f"Status: {row['status']}\n"
+                      f"Status: {row['status']} { " -> " + row['reason_for_passing'] if row['status'] == "passed" else ""}\n"
                       f"Purchase Price: {format_currency(row['purchase_price'])}\n"
                       f"Bedrooms: {int(row['beds'])} | Bathrooms: {int(row['baths'])} | Sq Ft: {format_number(row['square_ft'])}\n"
                       f"Built: {int(row['built_in']) if pd.notna(row['built_in']) else 'N/A'} (Age: {int(row['home_age']) if pd.notna(row['home_age']) else 'N/A'} years)\n"
@@ -1416,7 +1416,7 @@ def display_investment_requirements_panel(console, row, assumptions, loan):
         loan: LOAN dict with upfront_discounts
     """
     # Build down payment line with breakdown if using Iowa FHB program
-    using_ia_fhb = assumptions['using_ia_fhb_prog'] and assumptions['ia_fhb_prog_upfront_option'] == "LOAN" and row["units"] == 0
+    using_ia_fhb = loan["using_ifa_loan"] == "LOAN" and row["units"] == 0
 
     if using_ia_fhb:
         second_loan = row['5_pct_loan']

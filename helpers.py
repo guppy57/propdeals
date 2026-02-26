@@ -369,15 +369,7 @@ def calculate_net_proceeds(
     monthly_rate = loan["apr_rate"] / 12
     num_payments = loan["loan_length_years"] * 12
     total_payments_in_period = years * 12
-    additional_loan = (
-        row["5_pct_loan"]
-        if (
-            row["units"] == 0
-            and assumptions["using_ia_fhb_prog"]
-            and assumptions["ia_fhb_prog_upfront_option"] == "LOAN"
-        )
-        else 0
-    )
+    additional_loan = row["5_pct_loan"] if (row["units"] == 0 and loan["using_ifa_loan"]) else 0
     remaining_balance = (
         loan_amount
         * (
