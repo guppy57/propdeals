@@ -1010,6 +1010,35 @@ def run_deal_maker_workflow():
     else:
         console.print("[red]Failed to save deal[/red]")
 
+def run_scenario_builder_menu():
+    """Submenu for scenario builder operations"""
+    using_scenario_builder = True
+    choices = ["Go back", "View scenarios", "View single scenario", "Create new scenario"]
+
+    scenario_builder_provider = ScenarioBuilderProvider(supabase, console)
+
+    while using_scenario_builder:
+        option = questionary.select(
+            "Scenario Builder - Select an option",
+            choices=choices
+        ).ask()
+
+        if option == "Go back":
+            using_scenario_builder = False
+        elif option == "View scenarios":
+            scenarios = scenario_builder_provider.get_scenarios()
+            if scenarios:
+                display_scenarios_table(console, scenarios)
+            else:
+                console.print("[yellow]No scenarios found[/yellow]")
+
+        elif option == "View single scenario":
+            # TODO - implement this
+            console.print("[yellow]Feature coming soon![/yellow]")
+
+        elif option == "Create new scenario":
+            # TODO - implement this
+            console.print("[yellow]Feature coming soon![/yellow]")
 
 def run_deal_maker_menu():
     """Submenu for deal maker operations"""
@@ -1085,6 +1114,7 @@ if __name__ == "__main__":
             "One property",
             "One property - phase 1 research list",
             "Add new property",
+            "Run Scenario Builder",
             "Run Deal Maker",
             "Scripts",
             "Loans",
@@ -1168,6 +1198,8 @@ if __name__ == "__main__":
                     )
         elif option == "Run Deal Maker":
             run_deal_maker_menu()
+        elif option == "Run Scenario Builder":
+            run_scenario_builder_menu()
         elif option == "Scripts":
             run_scripts_options()
         elif option == "Loans":
