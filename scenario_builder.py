@@ -1,20 +1,23 @@
 from dataclasses import dataclass
-from typing import Optional
 from supabase import Client
 from rich.console import Console
 from InquirerPy import inquirer
 import questionary
 
 from helpers import validate_percentage
+from dataframe_helpers import (
+    apply_calculations_on_dataframe,
+    apply_investment_calculations
+)
 
 @dataclass
 class Scenario:
-    id: Optional[int] = None
+    id: str
     address1: str
     loan_id: int
     assumption_id: int
     percent_below_asking: float
-    seller_pays_cc: bool
+    seller_closing_credits: int
     seller_credits: int
     rennovation_budget: int
     initial_repair_budget: int
@@ -35,10 +38,12 @@ class ScenarioBuilderProvider:
         except Exception as e:
             self.console.print(f"Error getting scenarios: {str(e)}", style="red")
       
-    def collect_scenario_details(self, properties_df, loans, assumptions):
-        property_choices = [row["address1"] for row in properties_df]
+    def add_new_scenario(self, properties_df, loans, assumptions):
+        property_choices = list(properties_df["address1"])
         loan_choices = [loan.name for loan in loans]
-        assumption_choices = [assumption.name for assumption in assumptions]
+        assumption_choices = [assumption.description for assumption in assumptions]
+
+        name = questionary.text("Scenario Name").ask()
 
         address1 = inquirer.fuzzy(
             message="Select a property",
@@ -60,13 +65,13 @@ class ScenarioBuilderProvider:
             multiselect=False,
             validate=None,
             invalid_message="Invalid input"
-        )
+        ).execute()
 
         if loan_choice is None:
             self.console.print("Deal creation cancelled...", style="yellow")
             return None
         
-        loan_id = next(l for l in loans if l.name == loan_choice)
+        loan = next(l for l in loans if l.name == loan_choice)
 
         assumption_choice = inquirer.fuzzy(
             message="Select an assumption",
@@ -75,15 +80,48 @@ class ScenarioBuilderProvider:
             multiselect=False,
             validate=None,
             invalid_message="Invalid input"
-        )
+        ).execute()
 
         if assumption_choice is None:
             self.console.print("Deal creation cancelled...", style="yellow")
             return None
         
-        assumption_id = next(a for a in assumptions if a.name == assumption_choice)
+        assumption = next(a for a in assumptions if a.description == assumption_choice)
 
-        pba_raw = questionary.text("Percent below asking price", validate=validate_percentage)
+        pba_raw = questionary.text("Percent below asking price", validate=validate_percentage).ask()
         percent_below_asking = float(pba_raw) / 100
 
-      
+        scc_raw = questionary.text("Seller closing credits").ask()
+        sc_raw = questionary.text("Any other seller credits").ask()
+        rb_raw = questionary.text("Total rennovation budget").ask()
+        irb_raw = questionary.text("Initial repairs/rennovation budget for rent-readiness").ask()
+        owner_pays_utilities = questionary.confirm("Will the owner pay utilities?").ask()
+
+        new_scenario = {
+            "id": name,
+            "address1": address1,
+            "loan_id": loan.id,
+            "assumption_id": assumption.id,
+            "percent_below_asking": percent_below_asking,
+            "seller_closing_credits": int(scc_raw),
+            "seller_credits": int(sc_raw),
+            "rennovation_budget": int(rb_raw),
+            "initial_repair_budget": int(irb_raw),
+            "owner_pays_utilities": owner_pays_utilities
+        }
+
+        try:
+            response = self.supabase.table("scenarios").insert(new_scenario).execute()
+            if hasattr(response, "data"):
+                self.console.print(f"Response data: {response.data}", style="green")
+                return True
+            else:
+                self.console.print("Response has no 'data' attribute", style="green")
+        except Exception as e:
+            self.console.print(f"Exception: {e}", style="bold red")
+            self.console.print(f"Exception type: {type(e)}", style="bold red")
+
+        return False
+
+    def get_calculated_scenarios_df(self):
+        pass

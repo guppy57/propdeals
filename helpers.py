@@ -189,7 +189,7 @@ def is_property_assessment_done_vectorized(df: pd.DataFrame) -> pd.DataFrame:
     Checks for completeness across:
     - 9 boolean fields (obtained_county_records, has_short_ownership_pattern, etc.)
     - 3 numeric fields (previous_owner_count, last_purchase_price, last_purchase_date)
-    - 5 text fields (setbacks, easements, county_record_notes, permit_notes, whitepages_notes)
+    - 5 text fields (setbacks, easements, county_record_notes, property_notes, whitepages_notes)
 
     Args:
         df: DataFrame with properties
@@ -216,7 +216,7 @@ def is_property_assessment_done_vectorized(df: pd.DataFrame) -> pd.DataFrame:
         "setbacks",
         "easements",
         "county_record_notes",
-        "permit_notes",
+        "property_notes",
         "whitepages_notes",
     ]
 
@@ -864,11 +864,11 @@ def validate_date(text: str) -> bool:
 
 def calculate_emergency_fund(months: int, piti: int, utilities: int):
     groceries = 300
-    car_maintenance = 10
+    car_maintenance = 30
     car_insurance = 130
     subscriptions = 50
-    gas = 150
-    charity = 200
-    buffer_prcnt = 0.1
+    gas = 100
+    student_loan_minimums = 313
+    buffer_prcnt = 0.05
 
-    return (months * (groceries + piti + utilities + car_insurance + car_maintenance + subscriptions + gas + charity)) * (1 + buffer_prcnt)
+    return (months * (student_loan_minimums + groceries + piti + utilities + car_insurance + car_maintenance + subscriptions + gas)) * (1 + buffer_prcnt)
