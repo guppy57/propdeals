@@ -165,10 +165,10 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, loan_info=
 
     # 4. Income Breakdown
     pdf.section_title('Income Breakdown')
-    pdf.info_line('Total Monthly Rent (All Units)', format_currency(row['total_rent']))
+    pdf.info_line('Total Monthly Rent (All Units)', format_currency(row['mr_net_rent_y2']))
     pdf.info_line('Your Unit Rent (Not Collected)', format_currency(row['min_rent']))
-    pdf.info_line('Net Monthly Income (Year 1)', format_currency(row['net_rent_y1']))
-    pdf.info_line('Full Rental Income (Year 2)', format_currency(row['total_rent']))
+    pdf.info_line('Net Monthly Income (Year 1)', format_currency(row['mr_net_rent_y1']))
+    pdf.info_line('Full Rental Income (Year 2)', format_currency(row['mr_net_rent_y2']))
     pdf.ln(3)
 
     pdf.set_font('Helvetica', 'B', 10)
@@ -181,8 +181,8 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, loan_info=
     pdf.set_font('Helvetica', 'B', 10)
     pdf.cell(0, 6, 'Net Operating Income (NOI):', new_x='LMARGIN', new_y='NEXT')
     pdf.set_font('Helvetica', '', 10)
-    pdf.info_line('NOI Year 1 (Live-in)', f"{format_currency(row['net_rent_y1'] - monthly_opex)} ({format_currency(row['annual_NOI_y1'])} annually)")
-    pdf.info_line('NOI Year 2 (All Rent)', f"{format_currency(row['monthly_NOI'])} ({format_currency(row['annual_NOI_y2'])} annually)")
+    pdf.info_line('NOI Year 1 (Live-in)', f"{format_currency(row['mr_net_rent_y1'] - monthly_opex)} ({format_currency(row['mr_annual_NOI_y1'])} annually)")
+    pdf.info_line('NOI Year 2 (All Rent)', f"{format_currency(row['mr_monthly_NOI'])} ({format_currency(row['mr_annual_NOI_y2'])} annually)")
     pdf.ln(3)
 
     pdf.info_line('After-Tax Monthly Income', format_currency(after_tax_monthly_income))
@@ -203,9 +203,9 @@ def export_property_analysis(row, rents_df, after_tax_monthly_income, loan_info=
 
     # Metrics data
     metrics = [
-        ('Monthly Cash Flow', format_currency(row['monthly_cash_flow_y1']), format_currency(row['monthly_cash_flow_y2'])),
-        ('Annual Cash Flow', format_currency(row['annual_cash_flow_y1']), format_currency(row['annual_cash_flow_y2'])),
-        ('After-Tax Cash Flow', format_currency(row['after_tax_cash_flow_y1']), format_currency(row['after_tax_cash_flow_y2'])),
+        ('Monthly Cash Flow', format_currency(row['mr_monthly_cash_flow_y1']), format_currency(row['mr_monthly_cash_flow_y2'])),
+        ('Annual Cash Flow', format_currency(row['mr_annual_cash_flow_y1']), format_currency(row['mr_annual_cash_flow_y2'])),
+        ('After-Tax Cash Flow', format_currency(row['mr_after_tax_cash_flow_y1']), format_currency(row['mr_after_tax_cash_flow_y2'])),
         ('Cap Rate', format_percentage(row['cap_rate_y1']), format_percentage(row['cap_rate_y2'])),
         ('Cash on Cash Return', format_percentage(row['CoC_y1']), format_percentage(row['CoC_y2'])),
         ('Gross Rent Multiplier', format_number(row['GRM_y1']), format_number(row['GRM_y2'])),
