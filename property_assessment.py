@@ -39,7 +39,7 @@ FIELD_CONFIG = {
     # Permits
     "Has open/pulled permits": ("has_open_pulled_permits", "boolean"),
     "Has work done without permits": ("has_work_done_wo_permits", "boolean"),
-    "Permit notes": ("permit_notes", "editor"),
+    "Property and tour notes": ("property_notes", "editor"),
 
     # Purchase History
     "Last purchase price": ("last_purchase_price", "float"),
