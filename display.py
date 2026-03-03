@@ -1894,19 +1894,108 @@ def display_single_deal(console, deal, loan, assumption):
         console.print(Panel(deal.notes, title="Notes", border_style="dim"))
 
 
-def display_closing_costs_table(console, row):
-    table = Table(title="Closing costs", show_header=True, header_style="bold magenta")
-    table.add_column("Type")
-    table.add_column("Cost")
+def display_closing_costs_table(console, row, loan):
 
-    cost_types = ["lender", "title", "government", "prepaid", "escrow", "optional"]
+    # Maps each category to its line items and display labels
+    # Lender is conditional — if actual fees were passed in, we only have the total
+    categories = {
+        "lender": {
+            "label": "Lender Costs",
+            "items": [
+                ("loan_origination_fee", "Loan Origination Fee"),
+                ("processing_fee", "Processing Fee"),
+                ("underwriting_fee", "Underwriting Fee"),
+                ("credit_reporting_fee", "Credit Reporting Fee"),
+            ],
+        },
+        "title": {
+            "label": "Title & Third-Party Costs",
+            "items": [
+                ("appraisal_fee", "Appraisal Fee"),
+                ("abstract_update_fee", "Abstract Update Fee"),
+                ("title_examination_fee", "Title Examination Fee"),
+                ("title_guaranty_certificate", "IA Title Guaranty Certificate"),
+                ("owners_title_insurance", "Owner's Title Insurance"),
+                ("settlement_fee", "Settlement/Closing Fee"),
+                ("tax_service_fee", "Tax Service Fee"),
+                ("flood_certification_fee", "Flood Certification Fee"),
+            ],
+        },
+        "government": {
+            "label": "Government & Recording Fees",
+            "items": [
+                ("deed_recording_fee", "Deed Recording Fee"),
+                ("mortgage_recording_fee", "Mortgage Recording Fee"),
+            ],
+        },
+        "prepaid": {
+            "label": "Prepaids",
+            "items": [
+                ("prepaid_home_insurance", "Homeowner's Insurance Premium (12mo)"),
+                ("property_tax_proration", "Property Tax Proration (4mo)"),
+                ("prepaid_interest", "Prepaid Interest (20 days)"),
+            ],
+        },
+        "escrow": {
+            "label": "Initial Escrow Reserves",
+            "items": [
+                ("insurance_reserve", "Insurance Reserve (3mo)"),
+                ("tax_reserve", "Tax Reserve (3mo)"),
+                ("aggregate_adjustment", "Aggregate Adjustment"),
+            ],
+        },
+        "optional": {
+            "label": "Optional / Buyer-Elected Costs",
+            "items": [
+                ("home_inspection_fee", "Home Inspection"),
+                ("property_survey_fee", "Property Survey"),
+                ("pest_inspection_fee", "Pest Inspection"),
+                ("structural_engineer_fee", "Structural Engineer Inspection"),
+                ("sewer_inspection_fee", "Sewer Inspection"),
+                ("keller_williams_fee", "Keller Williams Transaction Fee"),
+                ("courier_fees", "Courier Fees"),
+                ("notary_fees", "Notary Fees"),
+            ],
+        },
+    }
 
-    for cost_type in cost_types:
+    table = Table(
+        title="Closing Cost Breakdown",
+        show_header=True,
+        header_style="bold magenta",
+        show_lines=False,
+    )
+    table.add_column("Line Item", style="dim", min_width=38)
+    table.add_column("Cost", justify="right", min_width=12)
+
+    for cost_type, config in categories.items():
+        # Section header row
+        table.add_row(f"[bold]{config['label']}[/bold]", "", style="on grey19")
+
+        # Lender costs: if actual fees were provided we only have the rolled-up total
+        if cost_type == "lender" and loan.get("lender_fees") != 0:
+            table.add_row(
+                "  Actual Lender Fees (from LE)",
+                format_currency(row["total_lender_costs"]),
+            )
+        else:
+            for col, label in config["items"]:
+                value = row.get(col, 0)
+                # Dim out zero-value line items rather than hiding them entirely
+                style = "dim" if value == 0 else ""
+                table.add_row(f"  {label}", format_currency(value), style=style)
+
+        # Category subtotal row
         table.add_row(
-            cost_type.capitalize(),
-            format_currency(row[f"total_{cost_type}_costs"])
+            f"[bold]  Total {config['label']}[/bold]",
+            f"[bold]{format_currency(row[f'total_{cost_type}_costs'])}[/bold]",
+            style="on grey23",
         )
 
     console.print(table)
-    console.print(f"\n[green]Total closing costs: {format_currency(row["closing_costs"])}[/green]")
-    console.print(f"\n[cyan]As a percent of purchase price: {format_percentage(row["closing_costs_prcnt"])}[/cyan]")
+    console.print(
+        f"\n[bold green]Total Closing Costs:         {format_currency(row['closing_costs'])}[/bold green]"
+    )
+    console.print(
+        f"[bold cyan]As % of Purchase Price:      {format_percentage(row['closing_costs_prcnt'])}[/bold cyan]"
+    )

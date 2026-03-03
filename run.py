@@ -143,6 +143,7 @@ def load_loan(loan_id):
         "upfront_discounts": loan.upfront_discounts,
         "loan_type": loan.loan_type,
         "using_ifa_loan": loan.using_ifa_loan,
+        "lender_fees": loan.lender_fees
     }
     console.print(f"[green]Loan {loan.name} data reloaded successfully![/green]")
 
@@ -352,7 +353,7 @@ def analyze_property(property_id):
         elif research_choice == "View property summary":
             handle_property_summary(property_id, supabase, console, df)
         elif research_choice == "View closing costs breakdown":
-            display_closing_costs_table(console, row)
+            display_closing_costs_table(console, row, LOAN)
         elif research_choice == "Edit neighborhood assessment":
             edit_neighborhood_assessment(property_id, supabase, console)
         elif research_choice == "Generate new rent research":
