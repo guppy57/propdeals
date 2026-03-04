@@ -1068,7 +1068,7 @@ def main():
         )
 
     aggressive = run_simulation(monthly_debt_allocation=1500, monthly_investment=0, yearly_bonus_towards_debt=10000, yearly_bonus_towards_investments=0, **config)
-    balanced = run_simulation(monthly_debt_allocation=377, monthly_investment=1123, yearly_bonus_towards_debt=5000, yearly_bonus_towards_investments=5000, **config)
+    balanced = run_simulation(monthly_debt_allocation=377, monthly_investment=1123, yearly_bonus_towards_debt=0, yearly_bonus_towards_investments=10000, **config)
 
     print_summary(aggressive, balanced, config, budget=1500, bonus_amount=10000, debt_paydown_method=config["debt_paydown_method"])
 
