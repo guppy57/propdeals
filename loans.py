@@ -23,6 +23,7 @@ class Loan:
   lender_fees: float
   loan_type: str
   using_ifa_loan: bool
+  pmi_amount: int
 
 class LoansProvider:
     def __init__(self, supabase_client: Client, console: Console):

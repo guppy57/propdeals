@@ -104,7 +104,10 @@ def apply_calculations_on_dataframe(df, loan, assumptions):
     )
     basic_columns["2nd_loan_type"] = pd.Series(np.where(reduce_downpayment_condition, "reduced_dp", "reduced_loan"), index=df.index)
     basic_columns["monthly_mortgage"] = basic_columns["loan_amount"].apply(lambda x: calculate_mortgage(x, loan["interest_rate"], loan["loan_length_years"]))
-    basic_columns["monthly_mip"] = (basic_columns["loan_amount"] * loan["mip_annual_rate"]) / 12
+    if loan["pmi_amount"] is not None:
+        basic_columns["monthly_mip"] = loan["pmi_amount"]
+    else:
+        basic_columns["monthly_mip"] = (basic_columns["loan_amount"] * loan["mip_annual_rate"]) / 12
     basic_columns["monthly_taxes"] = (df["purchase_price"] * assumptions["property_tax_rate"]) / 12
     basic_columns["monthly_insurance"] = (df["purchase_price"] * assumptions["home_insurance_rate"]) / 12
     df = safe_concat_columns(df, basic_columns)

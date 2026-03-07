@@ -73,7 +73,7 @@ assumptions_provider = AssumptionsProvider(supabase_client=supabase, console=con
 scenario_builder_provider = ScenarioBuilderProvider(supabase, console)
 loan_provider = LoansProvider(supabase_client=supabase, console=console)
 
-LAST_USED_LOAN = 2
+LAST_USED_LOAN = 12
 CASH_NEEDED_AMT = 40000
 
 PHASE0_CRITERIA = f"square_ft >= 1900 & cash_needed <= {CASH_NEEDED_AMT} & monthly_cash_flow >= -600 & (baths/beds) >= 0.4 & purchase_price >= 100000"
@@ -143,7 +143,8 @@ def load_loan(loan_id):
         "upfront_discounts": loan.upfront_discounts,
         "loan_type": loan.loan_type,
         "using_ifa_loan": loan.using_ifa_loan,
-        "lender_fees": loan.lender_fees
+        "lender_fees": loan.lender_fees,
+        "pmi_amount": loan.pmi_amount
     }
     console.print(f"[green]Loan {loan.name} data reloaded successfully![/green]")
 
