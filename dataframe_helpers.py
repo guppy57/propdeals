@@ -108,7 +108,8 @@ def apply_calculations_on_dataframe(df, loan, assumptions):
         basic_columns["monthly_mip"] = loan["pmi_amount"]
     else:
         basic_columns["monthly_mip"] = (basic_columns["loan_amount"] * loan["mip_annual_rate"]) / 12
-    basic_columns["monthly_taxes"] = (df["purchase_price"] * assumptions["property_tax_rate"]) / 12
+    fallback_monthly = (df["purchase_price"] * assumptions["property_tax_rate"]) / 12
+    basic_columns["monthly_taxes"] = (df["annual_tax_amount"].div(12).fillna(fallback_monthly))
     basic_columns["monthly_insurance"] = (df["purchase_price"] * assumptions["home_insurance_rate"]) / 12
     df = safe_concat_columns(df, basic_columns)
     df = apply_closing_costs_calculations(df, loan)
@@ -128,9 +129,9 @@ def apply_calculations_on_dataframe(df, loan, assumptions):
     units_for_calcs = df["units"].apply(lambda x: max(1, x if pd.notna(x) and x > 0 else 1))
     new_columns["monthly_utility_electric"] = assumptions["utility_electric_base"] * sqft_scaling_owner_unit
     new_columns["monthly_utility_gas"] = assumptions["utility_gas_base"] * sqft_scaling_owner_unit
-    new_columns["monthly_utility_water"] = df.apply(lambda row: 0 if row["units"] > 0 else assumptions["utility_water_base"], axis=1)
+    new_columns["monthly_utility_water"] = assumptions["utility_water_base"]
     new_columns["monthly_utility_trash"] = assumptions["utility_trash_base"] * units_for_calcs
-    new_columns["monthly_utility_internet"] = df.apply(lambda row: assumptions["utility_internet_base"] if row["units"] == 0 else 0, axis=1)
+    new_columns["monthly_utility_internet"] = assumptions["utility_internet_base"]
     new_columns["monthly_utility_total"] = new_columns["monthly_utility_electric"] + new_columns["monthly_utility_gas"] + new_columns["monthly_utility_water"] + new_columns["monthly_utility_trash"] + new_columns["monthly_utility_internet"]
     beds_safe = df["beds"].fillna(3).clip(lower=1)
     utility_total = new_columns["monthly_utility_total"]
