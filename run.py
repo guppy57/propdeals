@@ -60,7 +60,6 @@ from neighborhood_scraper import NeighborhoodScraper
 from neighborhoods import NeighborhoodsClient
 from property_assessment import edit_property_assessment
 from scripts import ScriptsProvider
-from scenario_builder import ScenarioBuilderProvider
 
 load_dotenv()
 
@@ -70,7 +69,6 @@ inspections = InspectionsClient(supabase_client=supabase)
 neighborhoods = NeighborhoodsClient(supabase_client=supabase, console=console)
 scraper = NeighborhoodScraper(supabase_client=supabase, console=console)
 assumptions_provider = AssumptionsProvider(supabase_client=supabase, console=console)
-scenario_builder_provider = ScenarioBuilderProvider(supabase, console)
 loan_provider = LoansProvider(supabase_client=supabase, console=console)
 
 LAST_USED_LOAN = 12
@@ -489,6 +487,16 @@ def get_start_screen_summary(df):
 
 using_application = True
 
+def run_portfolio_options():
+    dataframe = df.query("status == 'accepted'")
+    display_all_properties(
+        properties_df=dataframe,
+        df=df,
+        title="Properties in our portfolio",
+        show_prop_type=True,
+        console=console,
+    )
+
 def run_all_properties_options():
     using_all_properties = True
     choices = [
@@ -642,44 +650,16 @@ def run_loans_options():
             load_loan(LAST_USED_LOAN)
             reload_dataframe()
 
-def run_scenario_builder_menu():
-    """Submenu for scenario builder operations"""
-    using_scenario_builder = True
-    sb_choices = ["Go back", "View scenarios", "View single scenario", "Create new scenario"]
-
-    while using_scenario_builder:
-        option = questionary.select(
-            "Scenario Builder - Select an option",
-            choices=sb_choices
-        ).ask()
-
-        if option == "Go back":
-            using_scenario_builder = False
-        elif option == "View scenarios":
-            scenarios = scenario_builder_provider.get_scenarios()
-            if scenarios:
-                # display_scenarios_table(console, scenarios)
-                pass
-            else:
-                console.print("[yellow]No scenarios found[/yellow]")
-        elif option == "View single scenario":
-            # TODO - implement this
-            console.print("[yellow]Feature coming soon![/yellow]")
-        elif option == "Create new scenario":
-            loans = loan_provider.get_loans()
-            assumptions = assumptions_provider.get_assumptions()
-            scenario_builder_provider.add_new_scenario(properties_df=df, loans=loans, assumptions=assumptions)
-
 if __name__ == "__main__":
     summary = get_start_screen_summary(df)
     display_start_screen_summary(console, summary)
     while using_application:
         choices = [
+            "Portfolio",
             "All properties",
             "One property",
             "One property - phase 1 research list",
             "Add new property",
-            "Run Scenario Builder",
             "Scripts",
             "Loans",
             "Refresh data",
@@ -693,6 +673,8 @@ if __name__ == "__main__":
 
         if option == "Quit":
             using_application = False
+        elif option == "Portfolio":
+            run_portfolio_options()
         elif option == "All properties":
             run_all_properties_options()
         elif option == "One property":
@@ -760,8 +742,6 @@ if __name__ == "__main__":
                         property_details["address1"],
                         get_all_phase1_qualifying_properties,
                     )
-        elif option == "Run Scenario Builder":
-            run_scenario_builder_menu()
         elif option == "Scripts":
             run_scripts_options()
         elif option == "Loans":

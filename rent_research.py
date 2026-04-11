@@ -1618,12 +1618,14 @@ You must provide:
             for unit in result.data:
                 beds = int(unit.get("beds", 0))
                 baths = int(unit.get("baths", 0))
+                sqrft = int(unit.get("estimated_sqrft", 0))
                 config_key = f"{beds}bed_{baths}bath"
 
                 if config_key not in config_map:
                     config_map[config_key] = {
                         "beds": beds,
                         "baths": baths,
+                        "square_feet": sqrft,
                         "config_key": config_key,
                         "units": [],
                     }
